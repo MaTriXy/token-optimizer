@@ -6675,8 +6675,10 @@ def _generate_codex_auto_recommendations(components, trends=None, days=30):
 # audit tool you never explicitly "invoke" is not the same as an unused skill.
 _OWN_TOOL_SKILLS = frozenset({
     "token-optimizer", "token-coach", "token-dashboard", "fleet-auditor",
+    "resume-checkpoint",
     "token-optimizer:token-optimizer", "token-optimizer:token-coach",
     "token-optimizer:token-dashboard", "token-optimizer:fleet-auditor",
+    "token-optimizer:resume-checkpoint",
     "token-optimizer:health", "token-optimizer:quick",
 })
 
@@ -6694,6 +6696,44 @@ def _is_own_tool_skill(name) -> bool:
         or base.startswith("token-coach")
         or base.startswith("token-dashboard")
         or base.startswith("fleet-auditor")
+        or base.startswith("resume-checkpoint")
+    )
+
+
+def _skill_slim_clause(avg_tokens, runtime):
+    """Softer-than-archive options for an unused skill, inserted ABOVE the archive
+    step. Keeps the skill installed while dropping its per-turn description cost.
+
+    Returns a block that STARTS and ends with a newline so it drops cleanly
+    between the skill list and the archive step (each call site therefore does
+    NOT add its own leading newline). Claude gets the two REAL, distinct Claude
+    Code levers -- do not conflate them:
+      - skillOverrides "name-only": NAME stays visible to the model (still
+        invocable by name), description dropped -> stops auto-triggering, saves
+        the description tokens. The true "name-only" middle mode.
+      - disable-model-invocation: true (frontmatter): removes the skill from the
+        model's context ENTIRELY (name too); only the user invokes it via /name.
+    Foreign runtimes have no per-skill toggle, so they get an honest note.
+    """
+    if runtime == "claude":
+        return (
+            f"\n  Softer than archiving -- two Claude Code levers keep the skill installed and recover "
+            f"~{avg_tokens} tokens/skill per turn (Claude may already have dropped some descriptions past "
+            f"its listing budget, so treat this as an upper bound):"
+            f"\n    - Name-only (keep it discoverable): in the `/skills` menu press Space to cycle a skill to "
+            f"`name-only` (writes `skillOverrides` in .claude/settings.local.json). The model still sees the "
+            f"NAME so it can invoke it, but the description drops from context and it stops auto-triggering. "
+            f"Best for skills you still want suggested by name."
+            f"\n    - Fully hidden (user-only): set `disable-model-invocation: true` in the SKILL.md frontmatter "
+            f"(or the `off` / `user-invocable-only` `skillOverrides` state). The model sees nothing; only you "
+            f"invoke it via `/name`. Best for skills you alone ever trigger."
+            f"\n  Both are Claude-Code-specific and survive `/compact`. Keep skills whose value is proactive "
+            f"auto-triggering on the default.\n"
+        )
+    return (
+        f"\n  Softer than archiving: this runtime ({runtime}) has no per-skill 'hide description' toggle. "
+        f"The equivalent is converting a skill you only trigger yourself into a command/prompt primitive, or "
+        f"fully disabling it. Keep skills you want auto-suggested as normal skills.\n"
     )
 
 
@@ -6796,6 +6836,11 @@ def generate_auto_recommendations(components, trends=None, days=30):
     # Use actual measured avg if available, else fallback to constant
     _si = components.get("skills", {})
     _actual_avg = _si.get("tokens", 0) // max(_si.get("count", 1), 1) if _si.get("count", 0) > 0 else TOKENS_PER_SKILL_APPROX
+    # Harness-aware "slim it, don't delete it" clause inserted ABOVE the archive
+    # step (see _skill_slim_clause). Codex is dispatched to
+    # _generate_codex_auto_recommendations and never reaches here, so this only
+    # shapes Claude / other-foreign-runtime advice.
+    _runtime = detect_runtime()
     if trends:
         # Never recommend cutting our own measurement skills (issue #111).
         never_used = [
@@ -6814,8 +6859,9 @@ def generate_auto_recommendations(components, trends=None, days=30):
                 f"  Start with these: {skill_list}"
                 + (f"\n  ({remaining} more will surface after you archive these and re-run.)" if remaining > 0 else "") +
                 f"\n  For each skill, ask: do I use this? Is it seasonal? Does anything depend on it? "
-                f"(`grep -r \"[skill-name]\" ~/.claude/CLAUDE.md ~/.claude/rules/ ~/.claude/skills/`)\n"
-                f"  Archive by moving to ~/.claude/_backups/skills-archived-$(date +%Y%m%d)/ (NOT inside skills/). "
+                f"(`grep -r \"[skill-name]\" ~/.claude/CLAUDE.md ~/.claude/rules/ ~/.claude/skills/`)"
+                + _skill_slim_clause(_actual_avg, _runtime) +
+                f"  Archive (harder step, for truly-dead skills) by moving to ~/.claude/_backups/skills-archived-$(date +%Y%m%d)/ (NOT inside skills/). "
                 f"Restore any skill by moving it back. "
                 f"~{overhead:,} tokens recoverable across all {len(never_used)}."
             )
@@ -6824,8 +6870,10 @@ def generate_auto_recommendations(components, trends=None, days=30):
             skill_list = ", ".join(sorted(never_used))
             medium.append(
                 f"**Review {len(never_used)} skills not invoked in {days} days**: "
-                f"No Skill call or slash command for these in {days} days: {skill_list}. "
-                f"Consider archiving to ~/.claude/skills/_archived/. ~{overhead:,} tokens recoverable."
+                f"No Skill call or slash command for these in {days} days: {skill_list}."
+                + _skill_slim_clause(_actual_avg, _runtime) +
+                f"  Or archive truly-dead skills to ~/.claude/_backups/skills-archived-$(date +%Y%m%d)/ (NOT inside skills/). "
+                f"~{overhead:,} tokens recoverable."
             )
 
     # --- Rule 3a: Skills audit fallback (no trends data) ---
@@ -6841,8 +6889,9 @@ def generate_auto_recommendations(components, trends=None, days=30):
             f"You have {skill_count} skills but no session data to determine which are unused. "
             f"Each skill costs ~{avg_per_skill} tokens at startup whether you use it or not.\n"
             f"  Install the SessionEnd hook (`python3 measure.py setup-hook`) to enable usage-based "
-            f"recommendations. Meanwhile, manually review: do you use all {skill_count} regularly? "
-            f"Archiving {est_archive} would free ~{est_savings:,} tokens/session. "
+            f"recommendations. Meanwhile, manually review: do you use all {skill_count} regularly?"
+            + _skill_slim_clause(avg_per_skill, _runtime) +
+            f"  Archiving {est_archive} (harder step, truly-dead skills) would free ~{est_savings:,} tokens/session. "
             f"~{est_savings:,} tokens recoverable."
         )
 

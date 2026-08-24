@@ -1,6 +1,7 @@
 ---
 name: token-dashboard
 description: Open the Token Optimizer dashboard in your browser (context usage, quality, savings). Use to view the dashboard.
+disable-model-invocation: true
 ---
 
 # Token Optimizer Dashboard
