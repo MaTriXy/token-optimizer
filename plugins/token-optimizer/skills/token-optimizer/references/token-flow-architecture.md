@@ -533,7 +533,24 @@ CLAUDE.md supports `@path/to/file.md` imports that pull external file content in
 
 ### `disable-model-invocation: true` in Skill Frontmatter
 
-Skills can set `disable-model-invocation: true` to prevent being invoked by the model (only user can invoke). This doesn't change token cost but is useful context: skills without this flag can be auto-invoked, which triggers full skill content loading.
+Skills inject `name` + `description` into always-on context every turn (progressive disclosure: the body loads only on invoke). Dropping a skill's description from that always-on context recovers its per-turn description cost — quantify it with the per-skill token cost `measure.py report` already computes, not a flat constant. Descriptions are also dropped after `/compact` and never re-injected, so the savings persist across compaction. Claude Code gives **two distinct levers** to do this, and they are NOT the same thing:
+
+**1. `skillOverrides` in settings (the true "name-only" middle mode).** `.claude/settings.local.json` `skillOverrides` maps a skill name to one of four visibility states (the `/skills` menu writes it for you — highlight a skill, press `Space` to cycle, `Enter` to save). Per the official docs (code.claude.com/docs/en/skills.md, "Override skill visibility from settings"):
+
+| Value | Listed to Claude | In `/` menu |
+| :-- | :-- | :-- |
+| `"on"` (default) | Name **and** description | Yes |
+| `"name-only"` | **Name only** (description hidden) | Yes |
+| `"user-invocable-only"` | Hidden from Claude | Yes |
+| `"off"` | Hidden | Hidden |
+
+`"name-only"` is the real name-visible/description-hidden middle mode: the model still sees the skill's **name** (so it can still invoke it by name) but not its description, so it stops auto-triggering on description match while you keep the token savings. This is the right choice for a skill you want to stay discoverable-by-name without paying for its description or letting it fire automatically.
+
+**2. `disable-model-invocation: true` in SKILL.md frontmatter (fully hidden from the model).** This **removes the skill from the model's context entirely** — not even the name is visible; only the USER can invoke it via `/name`. Official docs, verbatim: *"Description not in context, full skill loads when you invoke"* and *"They stay completely out of context until you invoke them with /name"* (context-window.md). Use it for skills only the user ever triggers explicitly (e.g. one that launches a browser tab, where auto-triggering on a guess is intrusive). It is a **binary** frontmatter flag (advertised, or fully hidden) — the graded middle states live in `skillOverrides` above, not in the flag. Equivalent settings values are `"user-invocable-only"` / `"off"`.
+
+Do NOT relabel `disable-model-invocation` as "name-only" — that term is Claude Code's `skillOverrides` state (name kept), and `disable-model-invocation` hides the name too. Keep skills whose value is proactive auto-triggering on the default `"on"`.
+
+**Cross-harness caveat**: both levers are **Claude-Code-specific**. Codex / OpenCode / Copilot skills keep `name` + `description` resident regardless; there is no per-skill "hide description" toggle there (the equivalent is a different primitive — a command / prompt-file — or a full disable via `[[skills.config]] enabled = false` on Codex). Other harnesses ignore the unknown frontmatter key (harmless, not an error).
 
 ### Compact Instructions Section in CLAUDE.md
 
