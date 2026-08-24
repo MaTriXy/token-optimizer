@@ -66,15 +66,28 @@ cp "${REPO_ROOT}/.codex-plugin/plugin.json" "${STAGE}/.codex-plugin/plugin.json"
 find "${STAGE}" \( -name '__pycache__' -o -name '.DS_Store' -o -name '*.pyc' -o -name '*.pyo' \) \
   -exec rm -rf {} + 2>/dev/null || true
 
-# --- Codex compatibility (issue #83): Codex warns and SKIPS any hook with
-#     "async": true ("async hooks are not supported yet"), so those hooks never
-#     run for Codex marketplace users. Strip the async flag from the mirrored
-#     hooks.json so Codex runs them synchronously. The root hooks/hooks.json keeps
-#     "async": true for Claude's non-blocking path — the mirror equals the root
-#     modulo the async keys (the parity test normalizes this the same way).
+# --- Codex compatibility. Two transforms applied to the mirrored hooks.json;
+#     the root hooks/hooks.json keeps its Claude-tuned values (the parity test
+#     normalizes both the same way):
+#
+#     (issue #83) Codex warns and SKIPS any hook with "async": true ("async hooks
+#       are not supported yet"), so those hooks never run for Codex marketplace
+#       users. Strip the async flag so Codex runs them synchronously. Claude keeps
+#       "async": true for its non-blocking path.
+#
+#     (SessionEnd clamp) Codex hard-caps SessionEnd hook timeouts at 3s and prints
+#       "clamping SessionEnd hook timeout to 3s in .../hooks.json" as a load-time
+#       ISSUE whenever a SessionEnd hook declares more. Our SessionEnd hook runs
+#       `session-end-flush --defer`, which only spawns a detached worker and
+#       returns in well under a second, so the 60s Claude value is pure headroom
+#       Codex can never honor. Pre-clamp SessionEnd timeouts to 3 in the mirror so
+#       Codex loads it clean (no user-facing warning) with identical behavior.
 if [ -f "${STAGE}/hooks/hooks.json" ]; then
-  python3 - "${STAGE}/hooks/hooks.json" <<'PYSTRIP' || { echo "ERROR: failed to strip async from mirrored hooks.json" >&2; exit 4; }
+  python3 - "${STAGE}/hooks/hooks.json" <<'PYSTRIP' || { echo "ERROR: failed to apply Codex hooks.json transforms" >&2; exit 4; }
 import json, sys
+# Codex's hard cap for SessionEnd hook timeouts (seconds). Anything above this is
+# clamped by Codex and surfaced as a load-time issue, so we pre-clamp to match.
+CODEX_SESSION_END_TIMEOUT_CAP = 3
 p = sys.argv[1]
 with open(p, encoding="utf-8") as f:
     data = json.load(f)
@@ -87,6 +100,13 @@ def strip_async(o):
         for v in o:
             strip_async(v)
 strip_async(data)
+# Clamp SessionEnd timeouts only (the event Codex caps at 3s). Other events keep
+# their declared timeouts; Codex does not warn on those.
+for group in data.get("hooks", {}).get("SessionEnd", []):
+    for hook in group.get("hooks", []):
+        t = hook.get("timeout")
+        if isinstance(t, (int, float)) and t > CODEX_SESSION_END_TIMEOUT_CAP:
+            hook["timeout"] = CODEX_SESSION_END_TIMEOUT_CAP
 with open(p, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
