@@ -15213,10 +15213,40 @@ def _keepwarm_rate_limits_path():
 
     Written by statusline.js from Claude Code's own usage data: five_hour /
     seven_day used_percentage + resets_at. THE meter source for the subscription
-    quota model. Lives beside live-fill.json in QUALITY_CACHE_DIR (resolved at
-    call time so a test override of QUALITY_CACHE_DIR is honoured).
+    quota model.
+
+    Base is RUNTIME_DIR, NOT QUALITY_CACHE_DIR. The meter is ACCOUNT-global, not
+    per-session state, so it must not ride the is_cowork() -> plugin-data
+    _STATE_BASE divergence that QUALITY_CACHE_DIR uses for run-once markers and
+    the quality cache. RUNTIME_DIR resolves to <claude home>/token-optimizer on
+    desktop AND inside Cowork (is_cowork() only shifts _STATE_BASE, never
+    RUNTIME_DIR). Reading via QUALITY_CACHE_DIR pointed a Cowork or synced-plugin
+    session at <plugin-data>/token-optimizer/rate-limits.json -- a path the
+    statusline never writes -- so the meter read empty, runway_snapshot returned
+    zero windows, and the "your live 5h/7d view reappears next session" placeholder
+    got baked into the SHARED dashboard that every session (desktop included) then
+    displayed, even with a fresh live meter. Pinning to RUNTIME_DIR removes that
+    divergence: RUNTIME_DIR (= claude_home() for the Claude runtime) is stable
+    across Cowork, matching where the statusline writes in the common case.
+
+    KNOWN GAP (pre-existing, not introduced here, tracked separately): RUNTIME_DIR
+    resolves through claude_home(), which HONORS CLAUDE_CONFIG_DIR, but statusline.js
+    (and the VS Code extension) hardcode os.homedir()/.claude and IGNORE
+    CLAUDE_CONFIG_DIR. So a user who relocates their Claude config via
+    CLAUDE_CONFIG_DIR reads the meter from claude_home() while the statusline writes
+    it under os.homedir()/.claude -- they diverge and the runway card empties, the
+    same symptom by a different trigger. The old QUALITY_CACHE_DIR base had the
+    identical divergence on desktop, so this is unchanged by the fix. The complete
+    cure is to make the JS/TS writers honor CLAUDE_CONFIG_DIR too (hot-path change,
+    separate follow-up). With CLAUDE_CONFIG_DIR unset (the common case) all three
+    resolve to ~/.claude/token-optimizer and agree.
+
+    Foreign runtimes (codex/copilot/hermes) have no meter writer, so their
+    runtime-scoped RUNTIME_DIR path stays empty. runway_snapshot then returns a card
+    with no windows whenever the savings ledger alone has a story, and the template
+    shows the "live view refreshes while you work" note (NOT literally nothing).
     """
-    return QUALITY_CACHE_DIR / "rate-limits.json"
+    return RUNTIME_DIR / "token-optimizer" / "rate-limits.json"
 
 
 def _keepwarm_read_meters(rate_limits_path=None, now=None):

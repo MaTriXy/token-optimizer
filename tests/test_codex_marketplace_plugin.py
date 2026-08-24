@@ -162,11 +162,15 @@ def test_codex_mirror_hooks_byte_identical_to_root():
 
 
 def test_codex_mirror_hooks_json_is_async_stipped_root():
-    """hooks.json in the mirror must equal the root hooks.json with every
-    ``async`` key recursively removed (the sync script's Codex compatibility
-    transform, issue #83). Guards that the mirror's hooks.json did not drift
-    in any OTHER respect."""
+    """hooks.json in the mirror must equal the root hooks.json under the sync
+    script's two Codex compatibility transforms: every ``async`` key recursively
+    removed (issue #83) AND SessionEnd hook timeouts clamped to Codex's 3s cap.
+    Guards that the mirror's hooks.json did not drift in any OTHER respect."""
     import json
+
+    # Must match CODEX_SESSION_END_TIMEOUT_CAP in
+    # scripts/sync-codex-marketplace-plugin.sh.
+    CODEX_SESSION_END_TIMEOUT_CAP = 3
 
     root_hj = ROOT_HOOKS / "hooks.json"
     mirror_hj = MIRROR_HOOKS / "hooks.json"
@@ -179,10 +183,20 @@ def test_codex_mirror_hooks_json_is_async_stipped_root():
             return [_strip_async(v) for v in o]
         return o
 
-    expected = _strip_async(json.loads(root_hj.read_text(encoding="utf-8")))
+    def _clamp_session_end(doc):
+        for group in doc.get("hooks", {}).get("SessionEnd", []):
+            for hook in group.get("hooks", []):
+                t = hook.get("timeout")
+                if isinstance(t, (int, float)) and t > CODEX_SESSION_END_TIMEOUT_CAP:
+                    hook["timeout"] = CODEX_SESSION_END_TIMEOUT_CAP
+        return doc
+
+    expected = _clamp_session_end(
+        _strip_async(json.loads(root_hj.read_text(encoding="utf-8")))
+    )
     actual = json.loads(mirror_hj.read_text(encoding="utf-8"))
     assert actual == expected, (
         "plugins/token-optimizer/hooks/hooks.json drifted from the root "
-        "hooks.json modulo the async keys; rerun "
-        "scripts/sync-codex-marketplace-plugin.sh."
+        "hooks.json modulo the async keys and the SessionEnd timeout clamp; "
+        "rerun scripts/sync-codex-marketplace-plugin.sh."
     )
