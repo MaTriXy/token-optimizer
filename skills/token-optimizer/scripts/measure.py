@@ -389,6 +389,107 @@ def _dashboard_meta_path(html_path):
     return Path(html_path).with_suffix(".meta.json")
 
 
+def _parse_semver(v):
+    """(major, minor, patch) ints for a version string, or None if unparseable.
+    Tolerant: strips a leading 'v' and any -pre / +build suffix, pads missing
+    components with 0. Used only for precedence comparison, never display."""
+    try:
+        core = str(v).strip().lstrip("vV").split("+", 1)[0].split("-", 1)[0]
+        parts = (core.split(".") + ["0", "0", "0"])[:3]
+        return tuple(int(x) for x in parts)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+# A dashboard HTML smaller than this is treated as absent/corrupt, so the version
+# guard will not honor a "newer" sidecar sitting next to a broken file (a real
+# dashboard is 4-5MB; the bundled template alone is tens of KB). This is the
+# anti-wedge floor: without it, a sidecar that names an impossibly-high version
+# next to an empty/truncated HTML would block EVERY future writer, including the
+# newest build, and never self-heal.
+_DASHBOARD_MIN_VALID_BYTES = 4096
+
+
+def _write_dashboard_meta(html_path):
+    """Write the (version, shape) sidecar next to a dashboard HTML we just wrote,
+    so the sidecar always names the build that produced the on-disk HTML. Every
+    writer of a shared dashboard MUST call this after writing, or the downgrade
+    guard reads a stale version and can be bypassed. Fail-soft; never raises."""
+    try:
+        _dashboard_meta_path(html_path).write_text(
+            json.dumps({"version": TOKEN_OPTIMIZER_VERSION, "shape": _DASHBOARD_SHAPE_MARKER}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _dashboard_on_disk_is_newer(html_path):
+    """True iff a REAL dashboard already on disk was written by a STRICTLY NEWER
+    Token Optimizer version than this process.
+
+    An older build must never overwrite a newer dashboard. Without this guard a
+    stale long-lived daemon or a still-running pre-upgrade session regenerates
+    the shared dashboard with pre-fix code and clobbers a just-shipped fix -- the
+    "we fixed it but it's still broken" report, where the fix ships yet an old
+    in-memory process keeps overwriting the corrected file.
+
+    Fail-OPEN by design: a missing sidecar, an unparseable/dev version on either
+    side, or an absent/undersized (corrupt) HTML returns False (allow the write).
+    The HTML-integrity floor is the anti-wedge: the guard only protects a REAL
+    on-disk dashboard, so a lying/corrupt sidecar next to a broken HTML can never
+    permanently block regeneration -- the next writer repairs it and rewrites the
+    sidecar. Reads only the ~40-byte sidecar plus a cheap stat. Never raises.
+    Equal versions are NOT "newer", so same-version regen and legitimate upgrades
+    both proceed; only a strictly-older writer is blocked.
+
+    Residual (documented, not auto-recovered): a *valid* newer sidecar beside a
+    *valid* HTML always blocks older writers -- correct when a real newer build
+    wrote it; on the rare chance the version was corrupted upward next to intact
+    HTML, recovery is deleting the .meta.json sidecar."""
+    try:
+        mine = _parse_semver(TOKEN_OPTIMIZER_VERSION)
+        if mine is None:
+            return False
+        # Only guard a real, non-trivial dashboard. A missing/tiny HTML means
+        # there is nothing worth protecting -- allow the write so a broken file
+        # (even next to a lying sidecar) always self-heals.
+        try:
+            if Path(html_path).stat().st_size < _DASHBOARD_MIN_VALID_BYTES:
+                return False
+        except OSError:
+            return False
+        meta_path = _dashboard_meta_path(html_path)
+        if not meta_path.exists():
+            return False
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if not isinstance(meta, dict):
+            return False
+        existing = _parse_semver(meta.get("version"))
+        if existing is None:
+            return False
+        return existing > mine
+    except Exception:
+        return False
+
+
+def _dashboard_meta_is_fresh(meta):
+    """Freshness decision for the SessionStart staleness check, factored out so it
+    is directly testable. `meta` is the parsed sidecar dict. Fresh (no regen) iff:
+      - the on-disk build is STRICTLY NEWER than ours (an older session must not
+        regenerate/clobber a newer dashboard -- leave it to the newer build), OR
+      - version AND shape marker match ours exactly.
+    Anything else (older on disk, or a shape change) is stale -> regenerate."""
+    if not isinstance(meta, dict):
+        return False
+    existing = _parse_semver(meta.get("version"))
+    mine = _parse_semver(TOKEN_OPTIMIZER_VERSION)
+    if existing is not None and mine is not None and existing > mine:
+        return True
+    return (meta.get("version") == TOKEN_OPTIMIZER_VERSION
+            and meta.get("shape") == _DASHBOARD_SHAPE_MARKER)
+
+
 def _use_codex_session_adapter(filepath=None):
     """True when session JSONL should be parsed with the Codex adapter."""
     return detect_runtime() == "codex" or (filepath is not None and codex_session.is_codex_session_path(filepath))
@@ -4712,16 +4813,29 @@ def generate_dashboard(coord_path):
     # was configured to use. Same dual-path pattern as v5.4.7 daemon script.
     legacy_dashboard = RUNTIME_DIR / "_backups" / "token-optimizer" / "dashboard.html"
     wrote_mirror = False
+    skipped_all = True
     for mirror_path in {DASHBOARD_PATH, legacy_dashboard}:
+        # Version-downgrade guard: an older build's audit must not clobber a
+        # shared dashboard a newer build already wrote. The per-run audit artifact
+        # (out_path) is still written above; only the SHARED served copies are
+        # guarded. Fail-open (see _dashboard_on_disk_is_newer).
+        if _dashboard_on_disk_is_newer(mirror_path):
+            continue
+        skipped_all = False
         try:
             mirror_path.parent.mkdir(parents=True, exist_ok=True)
             mirror_fd = os.open(str(mirror_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(mirror_fd, "w", encoding="utf-8") as f:
                 f.write(injected)
+            # The sidecar must name the build that wrote THIS HTML, or the guard
+            # reads a stale version and a middle build could clobber a newer file.
+            _write_dashboard_meta(mirror_path)
             wrote_mirror = True
         except OSError:
             pass
-    if not wrote_mirror:
+    # Only a real write FAILURE warrants the warning; an intentional guard skip
+    # (all shared copies are already newer) is not a failure.
+    if not wrote_mirror and not skipped_all:
         print("  [Warning] Could not mirror dashboard to daemon paths.")
 
     # Prefer the bookmarkable URL when the daemon is live; fall back to
@@ -5811,6 +5925,18 @@ def generate_standalone_dashboard(days=30, quiet=False, force=False):
                 return str(DASHBOARD_PATH)
         except OSError:
             pass
+
+    # Version-downgrade guard: never let an OLDER build overwrite a dashboard a
+    # NEWER build already wrote (the "fixed but still broken" regression -- a
+    # stale daemon or pre-upgrade session clobbering a just-shipped fix). Checked
+    # BEFORE the expensive data build so an older writer skips cheaply. force does
+    # NOT bypass this: force governs the 60s throttle, not version precedence.
+    # Newer/equal writers proceed (equal is not strictly newer). Fail-open.
+    if _dashboard_on_disk_is_newer(DASHBOARD_PATH):
+        if not quiet:
+            print(f"  [Token Optimizer] Skipping dashboard write: the on-disk dashboard "
+                  f"was written by a newer version than this build (v{TOKEN_OPTIMIZER_VERSION}).")
+        return str(DASHBOARD_PATH)
 
     script_dir = Path(__file__).resolve().parent
     template_path = script_dir.parent / "assets" / "dashboard.html"
@@ -38974,9 +39100,10 @@ def run_ensure_health():
             if _meta_path.exists():
                 try:
                     _meta = json.loads(_meta_path.read_text(encoding="utf-8"))
-                    _fresh = (isinstance(_meta, dict)
-                              and _meta.get("version") == TOKEN_OPTIMIZER_VERSION
-                              and _meta.get("shape") == _DASHBOARD_SHAPE_MARKER)
+                    # An older session must NOT regenerate (and thus clobber with
+                    # pre-fix code) a dashboard a NEWER build wrote; a strictly-newer
+                    # on-disk build reads as fresh. See _dashboard_meta_is_fresh.
+                    _fresh = _dashboard_meta_is_fresh(_meta)
                 except (OSError, json.JSONDecodeError, ValueError):
                     _fresh = False
             else:
