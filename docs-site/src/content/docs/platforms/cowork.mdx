@@ -1,0 +1,92 @@
+---
+title: Cowork
+description: "Claude Cowork: the same Claude Code engine in a VM, reached through the org plugin console, with a hook subset that fires in Cowork and a probe-first rollout."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Experimental">
+The Cowork adapter is experimental and not yet verified on a live Cowork build. Which hooks fire in Cowork is confirmed by a diagnostic probe, not from code, so install `to-hook-probe` first and confirm the fire matrix before relying on any automatic feature. See the rollout steps below.
+</Aside>
+
+Claude Cowork runs the same Claude Code engine inside a cloud or local VM. It reads the same `~/.claude` conventions, uses the same Claude model ladder, and loads Token Optimizer as the same plugin. So Cowork is not a separate runtime: `detect_runtime()` still returns `claude` inside Cowork, and `is_cowork()` is a refinement signal layered on top of it. The work to run on Cowork is packaging and distribution plus the hook subset that fires there, not a rewrite of the engine.
+
+## How Token Optimizer reaches Cowork
+
+Cowork does not read local plugin files. Plugins arrive in a Cowork session, cloud and local alike, through the Anthropic org admin plugin console, which account-syncs a pushed plugin into every org user's sessions. So the Cowork "install" never edits local config. It builds a clean plugin payload for the admin to push.
+
+```bash
+bash install.sh --cowork
+```
+
+This builds the org-console payload under `dist/cowork/` (the main plugin plus the `to-hook-probe` diagnostic) and prints the console steps. It never touches `~/.claude`, and it refuses to write inside `~/.claude` if pointed there. A self-contained Cowork plugin is also committed at `cowork/token-optimizer/` under the distinct name `token-optimizer-cowork`, so a marketplace source lists it separately from the desktop `token-optimizer` entry.
+
+Two distribution paths work:
+
+- **Org admin console.** Register the payload as *available to install*, *installed by default*, or *required*. This is the org-wide path, and it is a licensing decision before a technical one (see the license note below).
+- **Personal upload.** Claude desktop accepts a custom plugin uploaded by an individual user, which account-syncs into that user's own sessions only. This runs the whole probe-and-verify flow today with no org-admin involvement, though availability tiers and the domain allowlist stay org-controlled.
+
+## Runtime detection
+
+Inside Cowork, `is_cowork()` returns true while `detect_runtime()` still resolves to `claude`, so the engine paths are unchanged and the human-facing label reads `Claude Code (Cowork)`. Any of these host markers is enough to detect Cowork:
+
+| Signal | Notes |
+|---|---|
+| `CLAUDE_CODE_REMOTE=true` | The only documented cloud-vs-desktop signal. Primary. |
+| `CLAUDE_CODE_CONTAINER_ID` | Observed in every Cowork VM, undocumented. Fallback. |
+| `AI_AGENT` carrying the harness marker | The VM sets the `..._harness` variant; the local CLI's `..._agent` variant is deliberately not a match. |
+| `CLAUDE_PLUGIN_ROOT` under `/plugins/synced/` | Where org-console account-synced plugins land. |
+
+Model-routing advice carries a `cowork` row that mirrors the Claude ladder exactly, with native thinking-budget effort, so a caller that has resolved `is_cowork()` gets a consistent table rather than a generic fallback.
+
+## The Cowork hook set
+
+Cowork fires a subset of the Claude Code hook events. The packaged `hooks.json` is trimmed to the events that provably fire in Cowork, and Keep-Warm is dropped because its keep-a-local-CLI-warm premise does not transfer.
+
+| Event | What rides it in Cowork |
+|---|---|
+| `UserPromptSubmit` | Per-turn: prompt-continuity hint, verbosity steer, quality-cache warn. Plus the run-once features that normally ride SessionStart: ensure-health, forced cache warm, compact-restore pointer. |
+| `PreToolUse` | `read_cache` on Read, `bash_hook` on Bash, checkpoint trigger on Agent and Task, refetch guard on MCP. |
+| `PostToolUse` | Large-result archiving and post-tool bookkeeping. |
+| `Stop` | compact-capture and session-end flush. |
+
+`SessionStart`, `PreCompact`, `PostCompact`, `SessionEnd`, `StopFailure`, and `CwdChanged` do not fire in Cowork and are trimmed from the payload. Hooks are additive and fail-open, so a dropped event degrades nothing.
+
+The design avoids a second plugin. The run-once SessionStart features are wired onto `UserPromptSubmit` in the master `hooks.json` behind a per-session run-once guard keyed on the session id. On native Claude Code, SessionStart runs them first and sets the marker, so the `UserPromptSubmit` copies no-op (one stat). In Cowork, where SessionStart is dead, the first `UserPromptSubmit` does the work. So the normal plugin is Cowork-native in place, and the Cowork packager is a pure trim to the firing events.
+
+## What works
+
+Because Cowork runs the full engine and the four firing events carry the feature set, these work the same as on Claude Code, subject to live probe confirmation:
+
+- Quality scoring and the per-prompt quality-cache warn
+- Prompt-continuity hint and lean-output verbosity steering
+- Read cache, delta read, and structure-map substitution (via `read_cache` on the Read `PreToolUse` hook)
+- Bash output compression (via `bash_hook` on the Bash `PreToolUse` hook)
+- Checkpoint capture on subagent dispatch and MCP refetch guarding
+- Large-result archiving on `PostToolUse`
+- Session-continuity capture on `Stop`
+
+## Degraded
+
+| Feature | Behavior in Cowork | Cause |
+|---|---|---|
+| In-place compaction restore | Capture-only. State is saved on `Stop` (compact-capture) and read back on the next session's first prompt (compact-restore, new-session-only). The in-place restore at the moment Cowork auto-compacts is lost. | `PreCompact` and `PostCompact` do not fire in Cowork. |
+
+## Not available or not measurable
+
+- **Keep-Warm** is dropped. Its premise, keeping a local CLI warm, does not transfer to a VM.
+- **Local context footprint is a floor, not the whole picture.** The platform overhead, the Cowork system prompt, the deferred MCP tool catalog, and the roughly 40 platform skills, is not measurable from inside a Cowork session, because there is no documented way to read a session's own token usage from within it. The `context` command labels its total `LOCAL FOOTPRINT (measurable)` and prints a Cowork caveat, so the reported figure covers only the slice Token Optimizer can see and control (`CLAUDE.md`, skills, memory), never a fabricated platform number.
+- **OTel to `trends.db` ingestion is not built yet.** The bundled collector captures and summarizes Cowork OTel and probe phone-home, but does not yet write the trends database or feed the dashboard.
+- **Cloud token accounting** has no local window. Cloud sessions leave no local transcript, the Compliance API carries no token fields, and OTel is org-gated, so per-session cloud token figures are only available through org telemetry.
+
+## Doctor command
+
+```bash
+python3 skills/token-optimizer/scripts/cowork_doctor.py
+```
+
+The doctor reports what is verifiable from the local machine: the desktop build, the live domain-allowlist state, the local VM session tree, whether the payload is built with the right hook events, the probe fire matrix, and OTel wiring. What it cannot see, the org admin console state and whether hooks fired in a cloud session, it reports as `NEEDS-LIVE` so the live-verification checklist is explicit rather than silently green. It exits non-zero only on a real `FAIL`.
+
+## License note
+
+Token Optimizer is licensed PolyForm-Noncommercial-1.0.0. An org-wide Cowork rollout at a company is commercial use, so an org-console push is a terms decision, a commercial license or a separate agreement, before it is a technical one. Personal-upload testing and evaluation are what the noncommercial license covers.

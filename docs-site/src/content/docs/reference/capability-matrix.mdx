@@ -70,6 +70,10 @@ The repeated **No** entries fall into a few clear groups.
 
 Where a platform exposes 7 signals, the score uses the full set: context-fill degradation, stale reads, bloated results, duplicate system reminders, compaction depth, decision density, and agent-dispatch efficiency. Hermes and Copilot fall back to a 3-signal subset because their session schemas do not persist the other signals reliably. The S/A/B/C/D/F grade scale is identical everywhere, so grades are comparable across platforms even when the underlying signal count differs.
 
+## Claude Cowork
+
+Cowork is not shown as a column above. It runs the same Claude Code engine in a VM rather than exposing its own hook API, so its feature coverage is that of Claude Code minus the events that do not fire in a Cowork session (`SessionStart`, `PreCompact`, `PostCompact`, `SessionEnd`, `StopFailure`). The adapter is experimental and its hook firing is not yet confirmed on a live build, so a per-cell grid would overstate what has been verified. The [Cowork page](/platforms/cowork/) lists the firing hook set, what works, what is degraded (in-place compaction restore), and what is not measurable from inside a Cowork session.
+
 ## Per-platform detail
 
-For install commands, doctor commands, hook profiles, and platform-specific caveats, see the platform pages: [Claude Code](/platforms/claude-code/), [Codex](/platforms/codex/), [OpenCode](/platforms/opencode/), [OpenClaw](/platforms/openclaw/), [Hermes](/platforms/hermes/), and [Copilot](/platforms/copilot/).
+For install commands, doctor commands, hook profiles, and platform-specific caveats, see the platform pages: [Claude Code](/platforms/claude-code/), [Codex](/platforms/codex/), [OpenCode](/platforms/opencode/), [OpenClaw](/platforms/openclaw/), [Hermes](/platforms/hermes/), [Copilot](/platforms/copilot/), and [Cowork](/platforms/cowork/).

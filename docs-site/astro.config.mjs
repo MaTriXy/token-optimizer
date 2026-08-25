@@ -147,6 +147,7 @@ export default defineConfig({
             { label: "OpenCode", slug: "platforms/opencode" },
             { label: "OpenClaw", slug: "platforms/openclaw" },
             { label: "Hermes", slug: "platforms/hermes" },
+            { label: "Cowork", slug: "platforms/cowork" },
           ],
         },
         {
