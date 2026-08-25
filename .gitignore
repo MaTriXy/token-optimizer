@@ -34,3 +34,6 @@ signatures/
 plugins/.token-optimizer.stage.*
 plugins/token-optimizer/skills/token-optimizer/references/roadmap.md
 .dev/
+
+# internal design journal, never ship
+decisions.md
