@@ -22103,6 +22103,15 @@ def setup_all_hooks(dry_run=False, verbose=False):
                     windows_command_stale = _windows_hook_command_is_stale(
                         existing_cmd, resolved_cmd
                     )
+                    # Retrofit the fail-open launcher guard onto a pre-guard baked
+                    # command even when the root is unchanged (a stable-dir script
+                    # install upgraded in place keeps the same root, so root_in_cmd
+                    # would otherwise skip it and it would never gain the guard).
+                    # Fires only when the new template carries the guard and the
+                    # existing command lacks it.
+                    guard_stale = (
+                        "[ -r " in resolved_cmd and "[ -r " not in existing_cmd
+                    )
                     # #118 follow-up: _resolve_hook_command now embeds a
                     # forward-slash root on Windows, but plugin_root_str keeps
                     # native backslashes, so a raw substring test never matches
@@ -22111,7 +22120,7 @@ def setup_all_hooks(dry_run=False, verbose=False):
                     root_in_cmd = (
                         plugin_root_str.replace("\\", "/") in existing_cmd.replace("\\", "/")
                     )
-                    if (not has_path or root_in_cmd) and not windows_command_stale:
+                    if (not has_path or root_in_cmd) and not windows_command_stale and not guard_stale:
                         skipped += 1
                         if verbose:
                             print(f"  [skip] {event}[{matcher}] {ident} (already present)")
@@ -32549,13 +32558,20 @@ def _read_settings_json_checked():
 
 
 def _smart_compact_hook_commands():
-    """Return the hook commands for smart compaction."""
+    """Return the hook commands for smart compaction.
+
+    Each command is fail-open guarded: if measure.py is unreadable (e.g. a
+    plugin refresh GC'd the version dir the baked ${CLAUDE_PLUGIN_ROOT} path
+    resolved to), the hook exits 0 silently instead of erroring on every event.
+    Mirrors the launcher guard in hooks.json.
+    """
     mp = _get_measure_py_path()
+    guard = f"[ -r '{mp}' ] || exit 0; "
     return {
-        "PreCompact": f"python3 '{mp}' compact-capture --trigger auto",
-        "SessionStart": f"python3 '{mp}' compact-restore",
-        "Stop": f"python3 '{mp}' compact-capture --trigger stop",
-        "SessionEnd": f"python3 '{mp}' compact-capture --trigger end",
+        "PreCompact": f"{guard}python3 '{mp}' compact-capture --trigger auto",
+        "SessionStart": f"{guard}python3 '{mp}' compact-restore",
+        "Stop": f"{guard}python3 '{mp}' compact-capture --trigger stop",
+        "SessionEnd": f"{guard}python3 '{mp}' compact-capture --trigger end",
     }
 
 
