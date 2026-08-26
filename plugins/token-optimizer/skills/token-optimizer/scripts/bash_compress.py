@@ -903,6 +903,18 @@ def _compress_lint(output):
 
 def _detect_pattern(command_str):
     """Detect which compression pattern to use based on command."""
+    # U9: user exclude runs BEFORE built-in detection so a user can remove a
+    # built-in command from compression (returns None = raw passthrough).
+    # User add runs AFTER built-in detection (at the bottom) so it only
+    # extends, never replaces a built-in handler.
+    try:
+        from command_filters import get_effective_filters
+        eff = get_effective_filters()
+        if eff.is_user_excluded(command_str):
+            return None
+    except Exception:
+        pass
+
     try:
         tokens = shlex.split(command_str)
     except ValueError:
@@ -1064,6 +1076,18 @@ def _detect_pattern(command_str):
     # v5.9 search results handler (grep/ripgrep output)
     elif cmd in ("grep", "rg", "ag", "ack"):
         return "search_results"
+
+    # U9: user TOML command filters (add only — exclude already ran at the
+    # top). Built-in detection ran first, so user add only extends, never
+    # replaces a built-in handler for the same command. The _is_safe_add gate
+    # already ran in the loader, so add entries are read-only and
+    # handler-validated.
+    try:
+        add_entry = eff.find_user_add(command_str)
+        if add_entry is not None:
+            return add_entry.handler
+    except Exception:
+        pass
 
     return None
 

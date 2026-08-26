@@ -49,7 +49,7 @@
 ## Other
 
 - `measure.py savings` -- Cumulative dollar savings report
-- `measure.py expand [--list|<tool-use-id>]` -- Retrieve archived tool results
+- `measure.py expand [--list|<tool-use-id>|--search <query>]` -- Retrieve archived tool results, or search by keyword/lineage
 - `measure.py setup-hook [--uninstall]` -- SessionEnd tracking hook
 - `measure.py setup-quality-bar [--uninstall]` -- Terminal status line
 - `measure.py plugin-cleanup` -- Detect duplicate skills and archive overlaps

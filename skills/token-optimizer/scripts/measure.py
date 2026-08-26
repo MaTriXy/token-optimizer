@@ -780,7 +780,7 @@ PROVIDER_CACHE_PROFILES = {
         "confidence": "verified",
     },
     "deepseek": {
-        "label": "DeepSeek (Context Caching on Disk)",
+        "label": "code review (Context Caching on Disk)",
         "cache_kind": "automatic_discount",
         "effective_ttl_seconds": 3600,     # persists hours-to-days; conservative 1h
         "write_premium": 1.0,              # automatic, no write charge
@@ -808,7 +808,7 @@ def _resolve_cache_profile(model, runtime=None):
     """Resolve a model id (+ runtime) to its provider cache profile.
 
     Returns the (profile_key, profile_dict). Pure lookup, never raises.
-    Resolution: OpenAI/Gemini/DeepSeek model families first (provider-specific
+    Resolution: OpenAI/Gemini/code review model families first (provider-specific
     rate cards already recognize these), then Claude (Claude Code vs raw API by
     runtime), else the honest "unknown/none" profile.
     """
@@ -10909,7 +10909,7 @@ _CACHE_COLLAPSE_PROMPT_COMPARABLE_FRACTION = 0.5  # next prompt >= 50% of prev p
 
 
 def _input_and_cached_read_rates(model):
-    """Return (input_rate, cached_read_rate) per-MTok for OpenAI/Gemini/DeepSeek
+    """Return (input_rate, cached_read_rate) per-MTok for OpenAI/Gemini/code review
     automatic-discount models, or None if the model isn't a priced non-Claude one.
 
     Used by the automatic_discount detector to price a cached-share collapse:
@@ -10926,7 +10926,7 @@ def _input_and_cached_read_rates(model):
         return r["input"], r.get("cache_read", r["input"])
     value = _strip_provider_prefixes(model) if model else ""
     if value.startswith("deepseek"):
-        # DeepSeek cache hit = 1/10 input (90% off). No per-model card here;
+        # code review cache hit = 1/10 input (90% off). No per-model card here;
         # use the verified ratio against a nominal input rate proxy of 1.0 so the
         # COST scales with the verified 0.9x delta regardless of absolute price.
         return 1.0, 0.1
@@ -16219,7 +16219,7 @@ def _detect_explicit_ttl(turns, tier_data, profile, dominant_model=None, detail_
 
 
 def _detect_automatic_collapse(turns, profile, dominant_model=None, detail_out=None):
-    """automatic_discount / explicit_storage detector (OpenAI, Gemini, DeepSeek).
+    """automatic_discount / explicit_storage detector (OpenAI, Gemini, code review).
 
     These providers never emit a cache-CREATION event; the cache is automatic and
     cached reads are discounted. Expiry shows up as a COLLAPSE in the cached/prompt
@@ -16328,7 +16328,7 @@ def _cache_remedy_text(remedy_key):
 
     Verified 2026-06-11 against current public docs (Anthropic prompt-caching,
     Claude Code CHANGELOG, OpenAI prompt-caching, Gemini context-caching,
-    DeepSeek context-caching). Each remedy reflects exactly what that provider
+    code review context-caching). Each remedy reflects exactly what that provider
     actually offers — no overclaiming.
     """
     remedies = {
@@ -16355,7 +16355,7 @@ def _cache_remedy_text(remedy_key):
             "the cached tokens, so size the TTL to your reuse pattern."
         ),
         "deepseek": (
-            "DeepSeek Context Caching on Disk is automatic (no knob); cache hits cost "
+            "code review Context Caching on Disk is automatic (no knob); cache hits cost "
             "1/10 of input. Keep prompt prefixes stable and reuse them promptly while "
             "the on-disk cache is warm (it clears within hours-to-days of disuse)."
         ),
@@ -17239,7 +17239,7 @@ def collect_sessions(days=90, quiet=False, rebuild=False):
             for ag, cnt in sub_agents.items():
                 parsed["subagents_used"][ag] = parsed["subagents_used"].get(ag, 0) + cnt
 
-        # Fix #18: Build combined model usage (parent + subagents) for
+        # a follow-up fix: Build combined model usage (parent + subagents) for
         # model_daily attribution. Kept SEPARATE from parsed["model_usage"]
         # which stays parent-only for: session_log storage, dom_model
         # selection, and cost calculations. Merging into model_usage would
@@ -17830,7 +17830,7 @@ def _collect_trends_from_jsonl(days=30):
                 for ag, cnt in sub_agents.items():
                     parsed["subagents_used"][ag] = parsed["subagents_used"].get(ag, 0) + cnt
 
-            # Fix #18: Build combined model usage for model_mix reporting.
+            # a follow-up fix: Build combined model usage for model_mix reporting.
             # Kept separate from parsed["model_usage"] (parent-only) to
             # preserve correct dom_model for cost calculations.
             all_model_usage = dict(parsed["model_usage"])
@@ -27969,6 +27969,13 @@ def _codex_backfill_tool_archive(filepath=None, session_id=None, max_outputs=20)
                         char_count,
                         token_est,
                         compressed_preview=summary,
+                        # LOW fix: make the backfilled archive full-text
+                        # searchable and give it the same lineage tag the JSON
+                        # entry + manifest already carry. output_text=summary
+                        # (not the full response) keeps the session DB lean
+                        # while still discoverable via search.
+                        output_text=summary,
+                        archived_from="codex-session-backfill",
                     )
                     store.insert_intel_event(tool_name, tool_use_id, summary, char_count)
                 except Exception:
@@ -28128,6 +28135,56 @@ def expand_archived(tool_use_id=None, session_id=None, list_all=False):
     if not session_id:
         print("  Tip: Use 'expand --list' to see all archived results.", file=sys.stderr)
     sys.exit(1)
+
+
+def expand_search(query, session_id=None, limit=20):
+    """Search archived tool outputs by keyword/lineage.
+
+    Uses SessionStore.search_tool_outputs (FTS5 with LIKE fallback) to resolve
+    a query to matching archived keys. Prints each match as a single line with
+    key, tool name, command/path, source file path, language, archived_from,
+    and a short snippet. The agent then runs ``expand <key>`` to retrieve the
+    full content. No new persistence: reads the U6 index only. Never raises.
+    """
+    if not query or not query.strip():
+        print("Usage: expand --search <query> [--session <session_id>]", file=sys.stderr)
+        sys.exit(1)
+    try:
+        from session_store import SessionStore
+        # Search the current session when no --session is given; otherwise
+        # search the specified session. Falls back to "unknown" when neither
+        # CLAUDE_SESSION_ID nor an explicit sid is available.
+        sid = session_id or os.environ.get("CLAUDE_SESSION_ID", "unknown")
+        store = SessionStore(sid)
+        results = store.search_tool_outputs(query, limit=limit)
+        store.close()
+    except Exception as e:
+        print(f"[Error] Search failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not results:
+        print(f"[Search] No results found for: {query}")
+        return
+
+    print(f"[Search] {len(results)} result(s) for: {query}\n")
+    for r in results:
+        key = r.get("tool_use_id", "?")
+        name = r.get("tool_name", "?")
+        cmd = r.get("command_or_path", "") or ""
+        src = r.get("source_file_path", "") or ""
+        lang = r.get("language", "") or ""
+        origin = r.get("archived_from", "") or ""
+        snippet = (r.get("snippet", "") or "").replace("\n", " ")[:120]
+        print(f"  {key}")
+        print(f"    tool: {name}  origin: {origin}  lang: {lang}")
+        if cmd:
+            print(f"    cmd/path: {cmd[:120]}")
+        if src:
+            print(f"    source: {src[:120]}")
+        if snippet:
+            print(f"    snippet: {snippet}")
+        print()
+    print("  Use 'expand <key>' to retrieve the full content.")
 
 
 def archive_cleanup(session_id=None):
@@ -29169,8 +29226,7 @@ def _opening_context_text(cwd):
     signal is the project implied by cwd. Returns the cwd's project dir name
     with hyphens/underscores split into words so it tokenizes against sidecar
     topics ("token-optimizer" -> "token optimizer"). Returns '' for a home /
-    generic cwd so the relevance fallback has no signal and stays silent (R4:
-    many users do not open a clean project folder). Never raises.
+    generic cwd so the relevance fallback has no signal and stays silent (many users do not open a clean project folder). Never raises.
     """
     if not cwd:
         return ""
@@ -29196,7 +29252,7 @@ def _opening_context_text(cwd):
 # per-session flag file beside the quality cache. The Claude statusline
 # (statusline.js) reads it and shows a compact ``⤸resumable`` token in the
 # terminal UI ONLY -- never in any hook ``additionalContext`` payload, so it
-# costs zero billed tokens (R2). Codex has no non-billed render surface for this
+# costs zero billed tokens. Codex has no non-billed render surface for this
 # (its native status_line is a static item list), so it carries no equivalent
 # signal -- see codex_statusline.py. The flag is ts-gated (30 min) so the signal
 # does not outlive the resumable window.
@@ -29470,7 +29526,7 @@ def compact_restore(session_id=None, cwd=None, is_compact=False, new_session_onl
         # cwd does not surface an unrelated project's checkpoint (e.g. a token-optimizer
         # checkpoint leaking into an unrelated tool's session run from the same home dir).
         #
-        # U1 (R1): the old blind fallback surfaced ``checkpoints[0]`` (most recent
+        # U1: the old blind fallback surfaced ``checkpoints[0]`` (most recent
         # from ANY project) whenever no cwd-prefix match existed, so an unrelated/
         # fresh session got pointed at an irrelevant checkpoint and sometimes read
         # it (~1,500 tokens wasted). Now: when no cwd-prefix match exists, score
@@ -29533,7 +29589,7 @@ def compact_restore(session_id=None, cwd=None, is_compact=False, new_session_onl
         # D4: the statusline resumable signal fires whenever an ELIGIBLE (age +
         # own-session filtered) candidate exists -- NOT only when the billed
         # pointer clears the relevance bar. This is the missed-genuine-resume
-        # case (R2): the billed pointer stays silent to save tokens, but the
+        # case: the billed pointer stays silent to save tokens, but the
         # near-zero-cost statusline still tells the user a resumable checkpoint is
         # available. Only the BILLED pointer is gated on relevance. The flag
         # points at the strongest eligible candidate we can identify (cwd match >
@@ -29771,7 +29827,7 @@ def _checkpoint_topic_score(prompt_text, checkpoint, cwd=None):
 # --- U2: content-based, cwd-free, IDF-weighted checkpoint relevance scorer ---
 #
 # Defensible relevance of an opening prompt (or any opening-context text) against
-# a checkpoint's SIDECAR fields, without folder/path-prefix matching (R4). Overlap
+# a checkpoint's SIDECAR fields, without folder/path-prefix matching. Overlap
 # is weighted by inverse document frequency across the checkpoint pool so generic
 # glue ("the", "run", "fix", "build") that appears in every checkpoint cannot
 # dominate. Recency is only a weak prior; cwd is an OPTIONAL same-work bonus and
@@ -29808,7 +29864,7 @@ _RELEVANCE_RECENCY_BONUS = 0.05
 _RELEVANCE_RECENCY_WINDOW_MIN = 180
 # Optional same-work bonus when a caller hands a cwd and the checkpoint's
 # working set lives under it. Small enough that content overlap still governs;
-# the scorer works WITHOUT it (R4).
+# the scorer works WITHOUT it.
 _RELEVANCE_CWD_BONUS = 0.10
 # Resume-intent bonus (U6 calibration): when the prompt carries a resume cue
 # ("continue working on...", "resume the...", "pick up where...") AND there is
@@ -30212,7 +30268,7 @@ def checkpoint_relevance_score(text, checkpoint_path, pool=None, cwd=None):
                     score += _RELEVANCE_RECENCY_BONUS
         except Exception:
             pass
-    # Optional same-work bonus (R4: the scorer works without cwd).
+    # Optional same-work bonus (the scorer works without cwd).
     if cwd:
         try:
             sc = _read_checkpoint_sidecar(checkpoint_path) or {}
@@ -39158,7 +39214,7 @@ def run_ensure_health():
                 except OSError:
                     continue
         if needs_refresh:
-            # v5.4.19 (Fix #8): serialise concurrent ensure-health updates so
+            # v5.4.19 (a follow-up fix): serialise concurrent ensure-health updates so
             # two Claude sessions starting simultaneously don't both write the
             # daemon script and fight over launchctl kickstart. soft_fail=True
             # means the second session just skips the update (the first will
@@ -39728,7 +39784,7 @@ def _format_window_note(cached):
 
 
 def _verbosity_measured_savings(baseline_avg, post_nudge_outputs):
-    """Measured output-token savings from a verbosity nudge (U5, R5).
+    """Measured output-token savings from a verbosity nudge.
 
     Computes the REAL saving from post-nudge output: max(0, baseline_avg -
     actual_post_nudge_avg) x turns. Never an estimate, never a negative
@@ -40044,7 +40100,7 @@ def run_verbosity_steer(transcript_path=None, quiet=True, session_id=None):
             },
         })
 
-        # U5 (R5): book 0 at nudge time. The old code booked a hardcoded
+        # U5: book 0 at nudge time. The old code booked a hardcoded
         # 10-15% x 800 ASSUMED saving the moment the nudge fired, without
         # measuring the counterfactual. In the competitor's data output actually
         # ROSE after the nudge, so the assumed figure was actively wrong. Now:
@@ -42314,16 +42370,24 @@ if __name__ == "__main__":
     elif args[0] == "expand":
         # Retrieve archived tool result
         list_all = "--list" in args
+        search_query = None
         sid = None
         tool_id = None
         for i, a in enumerate(args[1:], start=1):
             if a == "--session" and i + 1 < len(args):
                 sid = args[i + 1]
+            elif a == "--search" and i + 1 < len(args):
+                search_query = args[i + 1]
+            elif a == "--grep" and i + 1 < len(args):
+                search_query = args[i + 1]
             elif a.startswith("--"):
                 continue
-            elif tool_id is None:
+            elif tool_id is None and search_query is None:
                 tool_id = a
-        expand_archived(tool_use_id=tool_id, session_id=sid, list_all=list_all)
+        if search_query is not None:
+            expand_search(query=search_query, session_id=sid)
+        else:
+            expand_archived(tool_use_id=tool_id, session_id=sid, list_all=list_all)
     elif args[0] == "archive-cleanup":
         # Clean up archived tool results
         sid = None

@@ -178,6 +178,21 @@ class _JsTsSymbolSummary:
     exported: bool = False
 
 
+@dataclass(frozen=True)
+class ReferenceGraph:
+    """Intra-file symbol reference graph.
+
+    Directed: an edge ``(caller, callee)`` means ``caller`` references
+    ``callee``. Nodes are the file's defined symbols (functions/classes/methods)
+    plus the synthetic ``"<module>"`` source for module-level references. The
+    graph is computed on-read from a single file's AST/source and is NEVER
+    persisted (no relationship graph storage beyond the hook process).
+    """
+
+    nodes: Tuple[str, ...]
+    edges: Tuple[Tuple[str, str], ...]
+
+
 def is_python_file(file_path: str | os.PathLike[str]) -> bool:
     """Return True when the path looks like a Python source file."""
 
@@ -198,11 +213,32 @@ def detect_structure_language(file_path: str | os.PathLike[str]) -> str:
 
 
 def is_structure_supported_file(file_path: str | os.PathLike[str]) -> bool:
-    """Return True when this module may attempt a structure map."""
+    """Return True when this module may attempt a structure map.
+
+    fix-6: the tree-sitter languages (.go/.rs/.c/.java/...) are included ONLY
+    when the optional backend is both flag-enabled and actually usable, so the
+    on-read path (handle_read gates on this predicate) genuinely delivers
+    multi-language structure instead of the backend being unreachable. The
+    default flag-OFF hot path is unchanged: the env flag is checked first with a
+    cheap string compare and structure_map_ts is not even imported when off.
+    """
 
     if is_python_file(file_path) or is_js_ts_file(file_path):
         return True
-    return Path(str(file_path)).suffix.lower() in NON_CODE_SUFFIXES
+    suffix = Path(str(file_path)).suffix.lower()
+    if suffix in NON_CODE_SUFFIXES:
+        return True
+    # Opt-in tree-sitter backend. Gate on the flag before importing the module
+    # (mirrors structure_map_ts._flag_enabled) so flag-off stays byte-identical.
+    flag = os.environ.get("TOKEN_OPTIMIZER_STRUCTURE_MAP_TREESITTER", "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        try:
+            from structure_map_ts import SUFFIX_TO_TS_LANG, is_available
+            if suffix in SUFFIX_TO_TS_LANG and is_available():
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def estimate_tokens(text: str) -> int:
@@ -356,6 +392,26 @@ def summarize_code_source(
             file_tokens_est=file_tokens_est,
             file_size_bytes=file_size_bytes,
         )
+    # optional tree-sitter backend for non-Python/non-JS-TS languages.
+    # Additive only: tried before the digest fallback, never replaces the
+    # stdlib ast/regex path. Gated by TOKEN_OPTIMIZER_STRUCTURE_MAP_TREESITTER
+    # (default off) and is_available(); on any error returns None and falls
+    # through to the digest path unchanged.
+    if suffix not in JS_TS_SUFFIXES and suffix != PYTHON_SUFFIX:
+        try:
+            from structure_map_ts import is_available as _ts_available
+            if _ts_available():
+                from structure_map_ts import summarize_with_tree_sitter
+                ts_result = summarize_with_tree_sitter(
+                    source,
+                    path,
+                    file_tokens_est=file_tokens_est,
+                    file_size_bytes=file_size_bytes,
+                )
+                if ts_result is not None:
+                    return ts_result
+        except Exception:
+            pass
     if file_size_bytes is None:
         file_size_bytes = len(source.encode("utf-8", errors="ignore"))
     if file_tokens_est is None:
@@ -498,6 +554,18 @@ def summarize_python_source(
         method_count=total_methods,
     )
 
+    # rank symbols by reference-graph centrality so skeleton truncation
+    # keeps the most-referenced symbols. Computed only from the graph already
+    # derivable on-read; empty/None ranking leaves source order unchanged.
+    # fix-2: fail open. A deep AST can raise RecursionError inside the
+    # reference-graph walk; ranking is a
+    # nice-to-have ordering hint, so any failure degrades to source order
+    # rather than crashing the (PreToolUse) redundant-read path.
+    try:
+        ranking = pagerank_symbols(extract_reference_graph(source, "python", path))
+    except Exception:
+        ranking = {}
+
     rendered = _render_candidate(
         replacement_type,
         path=path,
@@ -507,6 +575,7 @@ def summarize_python_source(
         classes=top_level_classes,
         functions=top_level_functions,
         assignments=top_level_assignments,
+        ranking=ranking,
     )
 
     if len(rendered) > MAX_REPLACEMENT_CHARS[replacement_type]:
@@ -519,6 +588,7 @@ def summarize_python_source(
             functions=top_level_functions,
             assignments=top_level_assignments,
             preferred=replacement_type,
+            ranking=ranking,
         )
 
     if len(rendered) > MAX_REPLACEMENT_CHARS[replacement_type]:
@@ -1492,6 +1562,7 @@ def _render_candidate(
     classes: Sequence[_ClassSummary],
     functions: Sequence[_FunctionSummary],
     assignments: Sequence[str],
+    ranking: Optional[dict] = None,
 ) -> str:
     sections: List[str] = [f"python {replacement_type}", f"lines: {line_count}"]
 
@@ -1506,6 +1577,7 @@ def _render_candidate(
                 classes=classes,
                 functions=functions,
                 assignments=assignments,
+                ranking=ranking,
             )
         )
     elif replacement_type == "top_level":
@@ -1515,6 +1587,7 @@ def _render_candidate(
                 classes=classes,
                 functions=functions,
                 assignments=assignments,
+                ranking=ranking,
             )
         )
     elif replacement_type == "signatures":
@@ -1524,6 +1597,7 @@ def _render_candidate(
                 classes=classes,
                 functions=functions,
                 assignments=assignments,
+                ranking=ranking,
             )
         )
     else:
@@ -1538,6 +1612,7 @@ def _render_skeleton(
     classes: Sequence[_ClassSummary],
     functions: Sequence[_FunctionSummary],
     assignments: Sequence[str],
+    ranking: Optional[dict] = None,
 ) -> List[str]:
     lines: List[str] = []
 
@@ -1547,17 +1622,20 @@ def _render_skeleton(
             lines.append(f"  - {item}")
 
     if classes:
+        ranked_classes = _rank_sort(classes, ranking)
         lines.append(f"classes ({len(classes)}):")
-        for cls in _shorten_list(classes, MAX_SKELETON_CLASSES):
+        for cls in _shorten_list(ranked_classes, MAX_SKELETON_CLASSES):
             lines.append(f"  - {cls.signature} @ L{cls.lineno}")
             if cls.methods:
                 lines.append("    methods:")
-                for method in _shorten_list(cls.methods, MAX_SKELETON_METHODS_PER_CLASS):
+                ranked_methods = _rank_sort(cls.methods, ranking)
+                for method in _shorten_list(ranked_methods, MAX_SKELETON_METHODS_PER_CLASS):
                     lines.append(f"      - {_strip_signature_prefix(method.signature)} @ L{method.lineno}")
 
     if functions:
+        ranked_functions = _rank_sort(functions, ranking)
         lines.append(f"functions ({len(functions)}):")
-        for func in _shorten_list(functions, MAX_SKELETON_TOP_LEVEL_FUNCTIONS):
+        for func in _shorten_list(ranked_functions, MAX_SKELETON_TOP_LEVEL_FUNCTIONS):
             lines.append(f"  - {func.signature} @ L{func.lineno}")
 
     if assignments:
@@ -1574,6 +1652,7 @@ def _render_top_level(
     classes: Sequence[_ClassSummary],
     functions: Sequence[_FunctionSummary],
     assignments: Sequence[str],
+    ranking: Optional[dict] = None,
 ) -> List[str]:
     lines: List[str] = []
 
@@ -1582,15 +1661,19 @@ def _render_top_level(
         for item in _shorten_list(imports, MAX_TOP_LEVEL_IMPORTS):
             lines.append(f"  - {item}")
 
-    symbol_lines: List[str] = []
+    # Build (label, name, lineno) triples so centrality can order symbols
+    # before the MAX_TOP_LEVEL_SYMBOLS truncation, keeping the most-referenced
+    # symbols instead of the first-N-by-source-order triples: List[Tuple[str, str, int]] = []
     for cls in classes:
-        symbol_lines.append(f"{cls.signature} @ L{cls.lineno}")
+        triples.append((f"{cls.signature} @ L{cls.lineno}", cls.name, cls.lineno))
     for func in functions:
-        symbol_lines.append(f"{func.signature} @ L{func.lineno}")
+        triples.append((f"{func.signature} @ L{func.lineno}", func.name, func.lineno))
     for item in assignments:
-        symbol_lines.append(f"assign {item}")
+        triples.append((f"assign {item}", item, 0))
 
-    if symbol_lines:
+    if triples:
+        ordered = _rank_sort_triples(triples, ranking)
+        symbol_lines = [label for label, _, _ in ordered]
         lines.append(f"symbols ({len(symbol_lines)}):")
         for item in _shorten_list(symbol_lines, MAX_TOP_LEVEL_SYMBOLS):
             lines.append(f"  - {item}")
@@ -1604,30 +1687,49 @@ def _render_signatures(
     classes: Sequence[_ClassSummary],
     functions: Sequence[_FunctionSummary],
     assignments: Sequence[str],
+    ranking: Optional[dict] = None,
 ) -> List[str]:
     lines: List[str] = []
-    items: List[str] = []
 
     if imports:
         lines.append(f"imports ({len(imports)}):")
         for item in _shorten_list(imports, MAX_SKELETON_TOP_LEVEL_IMPORTS):
             lines.append(f"  - {item}")
 
+    triples: List[Tuple[str, str, int]] = []
     for cls in classes:
-        items.append(f"{cls.signature} @ L{cls.lineno}")
+        triples.append((f"{cls.signature} @ L{cls.lineno}", cls.name, cls.lineno))
         for method in cls.methods:
-            items.append(f"{_strip_signature_prefix(method.signature)} @ L{method.lineno}")
+            triples.append(
+                (f"{_strip_signature_prefix(method.signature)} @ L{method.lineno}", method.name, method.lineno)
+            )
     for func in functions:
-        items.append(f"{func.signature} @ L{func.lineno}")
+        triples.append((f"{func.signature} @ L{func.lineno}", func.name, func.lineno))
     for item in assignments:
-        items.append(f"assign {item}")
+        triples.append((f"assign {item}", item, 0))
 
-    if items:
+    if triples:
+        ordered = _rank_sort_triples(triples, ranking)
+        items = [label for label, _, _ in ordered]
         lines.append(f"signatures ({len(items)}):")
         for item in _shorten_list(items, MAX_SIGNATURE_ITEMS):
             lines.append(f"  - {item}")
 
     return lines
+
+
+def _rank_sort_triples(
+    triples: Sequence[Tuple[str, str, int]],
+    ranking: Optional[dict],
+) -> List[Tuple[str, str, int]]:
+    """Order (label, name, lineno) triples by descending centrality, ties
+    broken by source order (lineno). No ranking -> source order unchanged."""
+    if not ranking:
+        return list(triples)
+    return sorted(
+        triples,
+        key=lambda t: (-float(ranking.get(t[1], 0.0)), t[2]),
+    )
 
 
 def _render_digest_lines(*, path: str, line_count: int) -> List[str]:
@@ -2246,6 +2348,7 @@ def _shrink_or_fallback(
     functions: Sequence[_FunctionSummary],
     assignments: Sequence[str],
     preferred: str,
+    ranking: Optional[dict] = None,
 ) -> Tuple[str, str]:
     order = {
         "skeleton": ["skeleton", "top_level", "signatures", "digest"],
@@ -2264,6 +2367,7 @@ def _shrink_or_fallback(
             classes=classes,
             functions=functions,
             assignments=assignments,
+            ranking=ranking,
         )
         if len(rendered) <= MAX_REPLACEMENT_CHARS[replacement_type]:
             return rendered, replacement_type
@@ -2365,15 +2469,403 @@ def _is_public_symbol(name: str) -> bool:
     return not name.startswith("_")
 
 
+# ---------------------------------------------------------------------------
+# structure_map v2 — periphery reference graph + one-hop relationships
+#
+# On-read only. Nothing here writes to disk: the reference graph is derived
+# from a single file's AST/source and dropped after the hook returns. One-hop
+# edges are resolved against the filesystem at read time and bounded by
+# PERIPHERY_MAX_RELATIONS so the hot path never reads an unbounded fan-out.
+# ---------------------------------------------------------------------------
+
+PERIPHERY_MAX_RELATIONS = 8
+PERIPHERY_MAX_FILES = 5
+PERIPHERY_BUDGET_CHARS = 1200
+
+_MODULE_NODE = "<module>"
+
+# Relative JS/TS import specifiers we resolve one hop out (bare module imports
+# like `react` are not filesystem-resolvable without a node_modules walk, which
+# would violate the no-subprocess/no-resident-store constraint, so they are
+# skipped).
+_JS_TS_FROM_SPEC_RE = re.compile(r"""from\s+['"]([^'"]+)['"]""")
+_JS_TS_SIDE_EFFECT_IMPORT_RE = re.compile(r"""import\s+['"]([^'"]+)['"]""")
+_JS_TS_EXT_PROBE = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts")
+_JS_TS_INDEX_PROBE = ("index.ts", "index.js", "index.mjs", "index.cjs", "index.mts", "index.cts")
+
+
+def _call_target_name(func: ast.AST) -> Optional[str]:
+    """Resolve an ast.Call func to a bare symbol name for the reference graph."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _collect_direct_calls(
+    node: ast.AST,
+    caller: str,
+    edges: List[Tuple[str, str]],
+    defined: set,
+) -> None:
+    """Collect Call edges inside ``node``'s body, NOT descending into nested
+    def/class scopes (those get their own caller via _walk_scopes)."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(child, ast.Call):
+            name = _call_target_name(child.func)
+            if name and name in defined:
+                edges.append((caller, name))
+        _collect_direct_calls(child, caller, edges, defined)
+
+
+def _walk_scopes(
+    node: ast.AST,
+    edges: List[Tuple[str, str]],
+    defined: set,
+    caller: str = _MODULE_NODE,
+) -> None:
+    """Scope-aware walk: each FunctionDef/ClassDef becomes its own caller scope."""
+    _collect_direct_calls(node, caller, edges, defined)
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            _walk_scopes(child, edges, defined, caller=child.name)
+
+
+def _extract_python_reference_graph(source: str, file_path: str) -> ReferenceGraph:
+    try:
+        tree = ast.parse(source, filename=file_path)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return ReferenceGraph((), ())
+    # fix-2: _walk_scopes/_collect_direct_calls recurse over the AST and can
+    # hit RecursionError on a deeply-nested tree.
+    # The reference graph only orders skeleton truncation, so any failure here
+    # degrades to an empty graph (source order) rather than propagating.
+    try:
+        defined: set = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined.add(node.name)
+        edges: List[Tuple[str, str]] = []
+        _walk_scopes(tree, edges, defined, caller=_MODULE_NODE)
+    except Exception:
+        return ReferenceGraph((), ())
+    nodes = sorted(defined | {_MODULE_NODE})
+    return ReferenceGraph(tuple(nodes), tuple(edges))
+
+
+def extract_reference_graph(
+    source: str,
+    language: Optional[str] = None,
+    file_path: str = "memory",
+) -> ReferenceGraph:
+    """Extract the intra-file symbol reference graph.
+
+    Nodes are the file's defined symbols plus ``<module>``; edges are directed
+    ``(caller, callee)`` references. Pure stdlib, deterministic, no I/O. For
+    unsupported languages returns an empty graph (callers fall back to source
+    order). Used by ``pagerank_symbols`` to order skeleton symbol
+    selection by reference centrality.
+
+    Only Python centrality ordering is wired into the summarizer
+    (``summarize_python_source``). The JS/TS regex-based graph builder was
+    never consumed by any caller -- the JS/TS render path does not thread a
+    ranking -- so it was removed rather than left as dead code (fix, LOW). JS/TS
+    (and every other language) returns an empty graph here.
+    """
+    lang = (language or detect_structure_language(file_path)).lower()
+    if lang == "python":
+        return _extract_python_reference_graph(source, file_path)
+    return ReferenceGraph((), ())
+
+
+def _python_search_roots(target: Path) -> List[Path]:
+    """Filesystem roots for absolute Python import resolution: the target's
+    directory, the cwd, and any ``src/`` ancestor (src-layout packages)."""
+    roots: List[Path] = [target.parent, Path.cwd()]
+    for parent in target.parents:
+        if parent.name == "src":
+            roots.append(parent)
+    # Dedupe preserving order.
+    seen: set = set()
+    out: List[Path] = []
+    for r in roots:
+        rp = str(r.resolve())
+        if rp not in seen:
+            seen.add(rp)
+            out.append(r)
+    return out
+
+
+def _module_to_file_candidates(module_dotted: str, base: Path) -> List[Path]:
+    parts = [p for p in module_dotted.split(".") if p]
+    if not parts:
+        return []
+    b = base.joinpath(*parts)
+    return [b.with_suffix(".py"), b / "__init__.py"]
+
+
+def _resolve_python_one_hop(target: Path, content: Optional[str] = None) -> List[Path]:
+    try:
+        # Reuse the caller's already-in-memory source when provided (hot path:
+        # the just-read target), avoiding a second read+parse of the same file.
+        source = content if content is not None else target.read_text(
+            encoding="utf-8", errors="replace"
+        )
+        tree = ast.parse(source, filename=str(target))
+    except (SyntaxError, ValueError, RecursionError, MemoryError, OSError):
+        return []
+    roots = _python_search_roots(target)
+    out: List[Path] = []
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                for root in roots:
+                    out.extend(_module_to_file_candidates(alias.name, root))
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                base = target.parent
+                for _ in range(max(0, node.level - 1)):
+                    base = base.parent
+                if node.module:
+                    out.extend(_module_to_file_candidates(node.module, base))
+                else:
+                    for alias in node.names:
+                        out.extend(_module_to_file_candidates(alias.name, base))
+            elif node.module:
+                for root in roots:
+                    out.extend(_module_to_file_candidates(node.module, root))
+    return out
+
+
+def _resolve_js_ts_spec(spec: str, base_dir: Path) -> List[Path]:
+    target_path = base_dir / spec
+    if target_path.suffix.lower() in JS_TS_SUFFIXES:
+        return [target_path]
+    cands: List[Path] = [target_path.with_suffix(ext) for ext in _JS_TS_EXT_PROBE]
+    cands.extend(target_path / idx for idx in _JS_TS_INDEX_PROBE)
+    return cands
+
+
+def _resolve_js_ts_one_hop(target: Path, content: Optional[str] = None) -> List[Path]:
+    try:
+        source = content if content is not None else target.read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return []
+    raw_lines = source.splitlines()
+    clean_lines = _strip_js_ts_comments_and_strings(source).splitlines()
+    specs: List[str] = []
+    for raw, clean_line in zip(raw_lines, clean_lines):
+        cs = clean_line.strip()
+        if not cs or not JS_TS_IMPORT_RE.match(cs):
+            # Only resolve real import statements (the clean line gates out
+            # commented-out imports); the specifier itself lives in a string
+            # literal that the stripper blanks, so extract from the raw line.
+            continue
+        for rx in (_JS_TS_FROM_SPEC_RE, _JS_TS_SIDE_EFFECT_IMPORT_RE):
+            for m in rx.finditer(raw):
+                spec = m.group(1)
+                if spec.startswith("."):
+                    specs.append(spec)
+    base_dir = target.parent
+    out: List[Path] = []
+    for spec in specs:
+        out.extend(_resolve_js_ts_spec(spec, base_dir))
+    return out
+
+
+def _is_periphery_eligible(path: Path, target: Optional[Path] = None) -> bool:
+    """A periphery file worth skeletonizing: real, code/text-supported, under
+    the AST cap, and not the target itself."""
+    try:
+        if not path.is_file():
+            return False
+        if target is not None and path.resolve() == target.resolve():
+            return False
+        if not is_structure_supported_file(path):
+            return False
+        if path.stat().st_size > MAX_AST_BYTES:
+            return False
+        return True
+    except OSError:
+        return False
+
+
+def resolve_one_hop_relationships(
+    file_path: str | os.PathLike[str],
+    language: Optional[str] = None,
+    *,
+    limit: int = PERIPHERY_MAX_RELATIONS,
+    content: Optional[str] = None,
+) -> List[str]:
+    """Resolve one-hop call/import edges to candidate file paths at read time
+    No result is written to disk. Bounded to ``limit`` paths; skips
+    missing/binary/oversized paths and the target itself. One hop only -- no
+    transitive closure.
+
+    ``content`` (optional): the target's already-in-memory source. When the
+    caller has it (the just-read target on the hot path), it is threaded through
+    so the target is not re-read/re-parsed from disk.
+    """
+    p = Path(str(file_path))
+    lang = (language or detect_structure_language(p)).lower()
+    try:
+        if lang == "python":
+            raw = _resolve_python_one_hop(p, content=content)
+        elif lang in ("javascript", "typescript"):
+            raw = _resolve_js_ts_one_hop(p, content=content)
+        else:
+            raw = []
+        seen: set = set()
+        out: List[str] = []
+        for cand in raw:
+            try:
+                resolved = str(cand.resolve())
+            except OSError:
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if _is_periphery_eligible(cand, target=p):
+                out.append(str(cand))
+            if len(out) >= limit:
+                break
+        return out
+    except Exception:
+        return []
+
+
+def build_periphery_skeleton(
+    related_paths: Sequence[str],
+    *,
+    limit: int = PERIPHERY_MAX_FILES,
+    budget: int = PERIPHERY_BUDGET_CHARS,
+) -> str:
+    """Build a bounded periphery skeleton block from resolved related files
+    Reuses ``summarize_code_file`` so the skeleton format is identical
+    to the existing one -- no new skeleton format. Capped by ``budget`` chars
+    and ``limit`` files. Returns ``""`` when nothing fits or no paths resolve.
+    Never raises.
+    """
+    parts: List[str] = []
+    total = 0
+    count = 0
+    for raw in related_paths:
+        if count >= limit or total >= budget:
+            break
+        p = Path(raw)
+        try:
+            result = summarize_code_file(p)
+        except Exception:
+            continue
+        if not result.replacement_text:
+            continue
+        chunk = f"# periphery: {p.name} ({result.replacement_type})\n{result.replacement_text}"
+        if total + len(chunk) > budget:
+            break
+        parts.append(chunk)
+        total += len(chunk)
+        count += 1
+    return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# PageRank symbol ranking for skeleton selection
+#
+# Pure stdlib, deterministic, no network. Ranks a file's symbols by reference
+# centrality so skeleton truncation keeps the most-referenced symbols instead
+# of the first-N-by-source-order. Capped iterations/node count for hot-path
+# latency. When no graph is available the ranking is empty and callers keep
+# source order unchanged.
+# ---------------------------------------------------------------------------
+
+_PAGERANK_MAX_NODES = 5000
+_PAGERANK_MAX_ITERATIONS = 50
+
+
+def pagerank_symbols(
+    graph: ReferenceGraph,
+    damping: float = 0.85,
+    iterations: int = _PAGERANK_MAX_ITERATIONS,
+) -> dict:
+    """Run standard PageRank over the intra-file reference graph; return a
+    mapping ``symbol -> centrality score``. Pure stdlib, deterministic. Caps
+    iterations (<=50) and node count (<=5000) so the hot path never runs away
+    on a large graph. An empty/degenerate graph returns a stable uniform
+    ranking (or empty dict) without raising.
+    """
+    nodes = list(graph.nodes)
+    if not nodes:
+        return {}
+    n = len(nodes)
+    if n > _PAGERANK_MAX_NODES:
+        # Degenerate large graph: uniform ranking, no iteration.
+        return {node: 1.0 / n for node in nodes}
+    node_set = set(nodes)
+    out_degree = {node: 0 for node in nodes}
+    incoming: dict = {node: [] for node in nodes}
+    for src, dst in graph.edges:
+        if src in node_set and dst in node_set:
+            out_degree[src] = out_degree.get(src, 0) + 1
+            incoming[dst].append(src)
+    score = {node: 1.0 / n for node in nodes}
+    iters = max(1, min(iterations, _PAGERANK_MAX_ITERATIONS))
+    for _ in range(iters):
+        dangling_sum = sum(score[node] for node in nodes if out_degree[node] == 0)
+        new_score = {}
+        for node in nodes:
+            rank = (1.0 - damping) / n
+            in_sum = 0.0
+            for src in incoming[node]:
+                od = out_degree[src]
+                if od > 0:
+                    in_sum += score[src] / od
+            rank += damping * in_sum
+            # Standard dangling-node redistribution: a node with no out-edges
+            # distributes its score uniformly across all nodes.
+            rank += damping * dangling_sum / n
+            new_score[node] = rank
+        score = new_score
+    return score
+
+
+def _rank_sort(items: Sequence, ranking: Optional[dict]) -> List:
+    """Stable sort by descending centrality, ties broken by source order
+    (``lineno``). Items with no centrality score (absent or 0) keep source
+    order at the tail. ``ranking`` None/empty -> source order unchanged.
+    """
+    if not ranking:
+        return list(items)
+    return sorted(
+        items,
+        key=lambda it: (
+            -float(ranking.get(getattr(it, "name", ""), 0.0)),
+            getattr(it, "lineno", 0),
+        ),
+    )
+
+
 __all__ = [
+    "PERIPHERY_BUDGET_CHARS",
+    "PERIPHERY_MAX_FILES",
+    "PERIPHERY_MAX_RELATIONS",
+    "ReferenceGraph",
     "StructureMapResult",
+    "build_periphery_skeleton",
     "detect_structure_language",
     "estimate_tokens",
+    "extract_reference_graph",
     "is_js_ts_file",
     "is_python_file",
     "is_structure_supported_file",
     "looks_generated_js_ts",
     "looks_generated_python",
+    "pagerank_symbols",
+    "resolve_one_hop_relationships",
     "summarize_code_file",
     "summarize_code_source",
     "summarize_js_ts_source",

@@ -132,6 +132,21 @@ def _has_dangerous_chars(command_str):
 
 def _is_whitelisted(command_str):
     """Check if command matches the compression whitelist."""
+    # U9: consult user TOML command filters. User exclude overrides the
+    # built-in whitelist (a user can remove "git status" from compression);
+    # user add extends it (a user can add "cargo test" with a handler). The
+    # _is_safe_add gate already ran in the loader, so add entries are
+    # read-only and handler-validated. Categorical exclusions (dangerous
+    # chars, git write subcmds, interpreters) are enforced by the caller
+    # BEFORE this function and are not affected by user config.
+    try:
+        from command_filters import get_effective_filters
+        eff = get_effective_filters()
+        if eff.is_user_excluded(command_str):
+            return False
+    except Exception:
+        pass
+
     try:
         tokens = shlex.split(command_str)
     except ValueError:
@@ -183,6 +198,17 @@ def _is_whitelisted(command_str):
     # Never rewrite shell interpreters or privilege-escalation wrappers (also prevents recursion on rewritten commands).
     if cmd in ("bash", "sh", "zsh", "dash", "fish", "sudo", "su"):
         return False
+
+    # U9: user add entries extend the whitelist. The _is_safe_add gate already
+    # ran in the loader (command_filters.load_filters), so the entry is
+    # read-only and mapped to a known handler. Built-in detection ran first,
+    # so user rules only extend, never replace a built-in handler.
+    try:
+        add_entry = eff.find_user_add(command_str)
+        if add_entry is not None:
+            return True
+    except Exception:
+        pass
 
     return False
 

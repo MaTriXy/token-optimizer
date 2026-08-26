@@ -96,8 +96,9 @@ def _is_first_read_active_enabled():
     """Whether validated cohorts serve a SKELETON instead of the full file.
 
     Default ON. Off (TOKEN_OPTIMIZER_FIRST_READ_ACTIVE=0) drops every cohort back
-    to shadow (measure-only) without disabling measurement. The full file always
-    stays one `expand`/range-read away (see _serve_first_read_skeleton).
+    to shadow (measure-only) without disabling measurement. The full file is
+    always served (retarget: the target is never skeletonized; periphery
+    skeletons are injected as additionalContext, see _serve_first_read_retarget).
     """
     return is_v5_flag_enabled(
         "v5_first_read_active",
@@ -725,14 +726,22 @@ def _summarize_redundant_read(
     except OSError:
         return None, "unreadable"
 
-    summary = summarize_code_source(
-        content,
-        file_path=file_path,
-        offset=offset,
-        limit=limit,
-        file_tokens_est=file_tokens_est,
-        file_size_bytes=len(content.encode("utf-8", errors="ignore")),
-    )
+    # fix-2: fail open. This runs inside the PreToolUse Read hook; an uncaught
+    # error in summarization (e.g. a RecursionError on a pathological AST) would
+    # crash the hook and could block the user's Read. Any failure here returns
+    # (None, "summarize_error"), which the caller treats as not-eligible and
+    # serves the file normally.
+    try:
+        summary = summarize_code_source(
+            content,
+            file_path=file_path,
+            offset=offset,
+            limit=limit,
+            file_tokens_est=file_tokens_est,
+            file_size_bytes=len(content.encode("utf-8", errors="ignore")),
+        )
+    except Exception:
+        return None, "summarize_error"
     reason_code = summary.reason
 
     if not summary.eligible:
@@ -813,10 +822,15 @@ def _first_read_compress(
             and cohort not in _demoted_cohorts()
             and result.replacement_text
         ):
-            return _serve_first_read_skeleton(
-                file_path, stat, size, language, session_id, store, mode,
-                content, result, orig_tokens, skel_tokens,
-                save_hook_context_enabled, quiet,
+            # retarget: the Read TARGET is served full (never denied); the
+            # compression budget moves to PERIPHERY skeletons injected as
+            # additionalContext. Returns False so the caller serves the full
+            # target via the normal allow path. No ``first_read_skeleton`` event
+            # is emitted for the target, and the target-keyed ``active_fr:``
+            # marker is no longer armed here (periphery files carry their own,
+            # armed inside _inject_periphery_skeletons once U2 populates them).
+            return _serve_first_read_retarget(
+                file_path, size, language, session_id, store, content, quiet,
             )
 
         # SHADOW (cohort not yet promoted): serve full, measure the opportunity.
@@ -850,135 +864,156 @@ def _first_read_compress(
             original_tokens=orig_tokens,
             compressed_tokens=skel_tokens,
         )
+        # U5: record a tool_outputs row with source lineage so the shadow
+        # first-read is self-identifiable from the SQLite store and joinable
+        # to the file-archive meta. Keyed by a derived stable id so the row
+        # and the file archive stay joinable. Fail-open: a write error here
+        # does not affect the read path (the skeleton event above already
+        # recorded the opportunity).
+        try:
+            import hashlib as _hl
+            _fr_tool_use_id = "fr_shadow_" + _hl.sha256(
+                f"{session_id}|{file_path}".encode("utf-8", errors="replace")
+            ).hexdigest()[:16]
+            _fr_output_hash = _hl.sha256(
+                (result.replacement_text or "")[:10000].encode("utf-8", errors="replace")
+            ).hexdigest()[:16]
+            store.insert_tool_output(
+                tool_use_id=_fr_tool_use_id,
+                tool_name="Read",
+                tool_type="read",
+                command_or_path=file_path[:500],
+                output_hash=_fr_output_hash,
+                output_chars=len(result.replacement_text or ""),
+                output_tokens_est=skel_tokens,
+                compressed_preview=(result.replacement_text or "")[:1500],
+                source_file_path=file_path[:500],
+                language=language,
+                archived_from="first_read_skeleton",
+                output_text=(result.replacement_text or "")[:50000],
+            )
+        except Exception:
+            pass
         return False
     except Exception:
         return False
 
 
-def _serve_first_read_skeleton(
+def _inject_periphery_skeletons(
     file_path: str,
-    stat: os.stat_result,
+    content: str,
+    language: str,
+    session_id: str,
+    store: "SessionStore",
+    quiet: bool,
+    target_band: str = "",
+) -> None:
+    """Inject bounded skeletons of periphery (one-hop) files as additionalContext.
+
+    the Read target is served full by the caller; this hook point
+    adds skeletons of related files the agent would otherwise have to explore.
+    The reference graph is computed on-read, one hop out, and never persisted
+    (no DB/cache writes beyond the periphery edit-rate marker, which lives in
+    the existing per-session store).
+
+    Resolves one-hop relationships for the just-read target, builds a bounded
+    periphery block (PageRank-ordered once U3 lands), and emits it via
+    ``_emit_pretool_response(None, None, block)`` only when it fits
+    ``_additional_context_within_cap``; otherwise the block is dropped (the
+    target is still served full). Periphery-keyed ``active_fr:<periphery_path>``
+    edit-rate markers are armed with the TARGET's lang|band so the cohort
+    tripwire attributes a periphery edit to the target's cohort. Fail-open:
+    any error drops the block.
+    """
+    try:
+        from structure_map import (
+            build_periphery_skeleton, resolve_one_hop_relationships,
+        )
+        # Thread the already-in-memory target source so resolve_one_hop doesn't
+        # re-read/re-parse the file we just read on the hot path (LOW).
+        related = resolve_one_hop_relationships(file_path, language, content=content)
+        if not related:
+            return
+        block = build_periphery_skeleton(related)
+        if not block:
+            return
+        message = (
+            f"[Token Optimizer] Periphery skeletons for {Path(file_path).name} "
+            f"(one-hop relations: {len(related)}). The file you opened is served "
+            f"in full; these are bounded maps of related files."
+        )
+        text = message + "\n\n" + block
+        if not _additional_context_within_cap(text, _hook_additional_context_saved()):
+            # Never withhold the target: drop the periphery block over the cap.
+            return
+        _arm_periphery_markers(related, language, target_band, store)
+        _emit_pretool_response(None, None, text)
+    except Exception:
+        return
+
+
+def _arm_periphery_markers(
+    related: list,
+    language: str,
+    target_band: str,
+    store: "SessionStore",
+) -> None:
+    """Arm periphery-keyed ``active_fr:<periphery_path>`` edit-rate markers.
+
+    The marker stores the TARGET's lang|band (not the periphery file's) so the
+    cohort tripwire attributes a subsequent edit of a periphery file to the
+    target's cohort -- the signal that the periphery skeleton omitted
+    content the model then needed. Best-effort; never raises.
+    """
+    if store is None:
+        return
+    for p in related:
+        try:
+            store.set_meta(
+                f"active_fr:{p}",
+                json.dumps({
+                    "ts": time.time(),
+                    "lang": language,
+                    "band": target_band,
+                    "resolved": 0,
+                }),
+            )
+        except Exception:
+            pass
+
+
+def _serve_first_read_retarget(
+    file_path: str,
     size: int,
     language: str,
     session_id: str,
     store: "SessionStore",
-    mode: str,
     content: str,
-    result: StructureMapResult,
-    orig_tokens: int,
-    skel_tokens: int,
-    save_hook_context_enabled: bool,
     quiet: bool,
 ) -> bool:
-    """ACTIVE mode: serve the skeleton in place of the full file. Returns True
-    iff it actually withheld content (a deny was emitted), else False.
+    """ACTIVE mode, retargeted Returns False so the caller serves the
+    Read TARGET in full -- the target is never replaced by a skeleton.
 
-    Invariant (the whole safety story): content is withheld ONLY when the full
-    original has been successfully archived and is recoverable via `expand <key>`.
-    If archiving fails for any reason, we FAIL OPEN — return False so the caller
-    serves the full file. Once archived, logging is best-effort and can never
-    abandon the deny we committed to. The original file on disk is never touched;
-    a ranged Read or a direct Edit also reach the full content.
+    The compression budget moves to the PERIPHERY: bounded skeletons of one-hop
+    call/import relatives are injected as additionalContext (never replacing
+    content already promised to the model). _inject_periphery_skeletons owns
+    that path and arms periphery-keyed edit-rate markers; the target-keyed
+    ``active_fr:<file_path>`` marker is NOT armed here, so the cohort tripwire
+    now measures periphery edits, not target edits.
+
+    No ``first_read_skeleton`` measured event is emitted for the target. Shadow
+    (measure-only) behavior is unchanged and preserves telemetry continuity.
+    Fully fail-open: any error in the periphery path drops the block (the target
+    is already served full), so this always returns False.
     """
-    net_saved = max(0, orig_tokens - skel_tokens)
-    # Archive FIRST. No guaranteed path back to the full content => do not withhold.
     try:
-        from archive_result import (
-            archive_entry_exists, archive_original, build_archive_pointer, derive_archive_key,
-        )
-        key = derive_archive_key(session_id, file_path, stat.st_mtime_ns)
-        if archive_original(content, session_id, key, "Read", quiet=quiet,
-                            file_path=file_path, language=language) is None:
-            return False
-        # Re-check the entry survived any concurrent retention prune before we
-        # emit a pointer that would strand the model with an unrecoverable expand.
-        if not archive_entry_exists(session_id, key):
-            return False
-        body = build_archive_pointer(result.replacement_text, len(content), key)
-    except Exception:
-        return False
-
-    context = "\n".join([
-        f"[Token Optimizer] {Path(file_path).name} is large (~{orig_tokens:,} tokens). "
-        f"Serving a {result.replacement_type} skeleton (~{net_saved:,} tokens saved).",
-        f"Need the full file? Run: expand {key}  "
-        "(or Read a specific offset/limit range, or Edit the file directly).",
-        "",
-        body,
-    ])
-    reason = (
-        f"{Path(file_path).name}: large-file first read served as a "
-        f"{result.replacement_type} skeleton; full content available via expand or a ranged Read."
-    )
-
-    # Arm the ACTIVE-mode edit-rate marker (WS2 tripwire). A subsequent edit to
-    # this same file means the served skeleton withheld content the model needed
-    # — the live quality signal the runtime tripwire watches per cohort. Distinct
-    # key from the shadow marker so the two edit-rates never cross-contaminate.
-    # Written BEFORE the measured event so a partial-write failure biases the
-    # edit-rate HIGH (safe / demotes), never low. Best-effort.
-    try:
-        band = _first_read_size_band(size)
-        store.set_meta(
-            f"active_fr:{file_path}",
-            json.dumps({
-                "ts": time.time(),
-                "lang": language,
-                "band": band,
-                "resolved": 0,
-            }),
+        _inject_periphery_skeletons(
+            file_path, content, language, session_id, store, quiet,
+            target_band=_first_read_size_band(size),
         )
     except Exception:
         pass
-
-    # The original is archived, so the deny is now safe to emit. Side-channel
-    # logging is best-effort and MUST NOT prevent _emit_pretool_response.
-    try:
-        from compression_log import log_compression_event
-        # command_pattern carries lang|band so the WS2 tripwire can compute a
-        # per-cohort live edit-rate (measured skeletons vs measured follow-ups).
-        log_compression_event(
-            feature=FEATURE_FIRST_READ_SKELETON,
-            session_id=session_id,
-            command_pattern=f"{language}|{_first_read_size_band(size)}",
-            tier="measured",
-            verified=True,
-            quality_preserved=True,
-            detail=f"active size_bytes={size} type={result.replacement_type}",
-            original_tokens=orig_tokens,
-            compressed_tokens=skel_tokens,
-        )
-    except Exception:
-        pass
-    try:
-        _log_decision(
-            "block",
-            file_path,
-            "first_read_skeleton",
-            session_id,
-            mode=mode,
-            actual_substitution=True,
-            eligible=True,
-            language=language,
-            reason_code="first_read_skeleton_active",
-            offset=0,
-            limit=0,
-            replacement_type=result.replacement_type,
-            file_tokens_est=orig_tokens,
-            replacement_tokens_est=skel_tokens,
-            net_saved_tokens_est=net_saved,
-            replacement_fingerprint=result.fingerprint,
-            repeat_replacement_count=0,
-            save_hook_additional_context_enabled=save_hook_context_enabled,
-            confidence=result.confidence,
-        )
-    except Exception:
-        pass
-    if not quiet:
-        print(f"[Read Cache] First-read skeleton: {file_path} (saved~{net_saved:,})",
-              file=sys.stderr)
-    _emit_pretool_response("deny", reason, context)
-    return True
+    return False
 
 
 def _resolve_first_read_shadow_on_edit(
@@ -998,7 +1033,7 @@ def _resolve_first_read_shadow_on_edit(
     Known limitation: the marker lives in the per-session store, so an edit in a
     DIFFERENT session than the shadow read is not resolved. The proxy therefore
     undercounts edits for cross-session read→edit patterns, biasing the edit-rate
-    LOW (toward "promote"). The promotion decision (R9) must account for this with
+    LOW (toward "promote"). The promotion decision must account for this with
     a conservative gate and human review before any active-mode flip — it must
     not auto-promote purely on this proxy.
     """

@@ -1390,6 +1390,19 @@ def archive_result(quiet: bool = False) -> None:
         # matches the redacted preview/archive rather than pre-redaction plaintext.
         safe_command_or_path = _redact_credentials(str(command_or_path))
         output_hash = hashlib.sha256(safe_response[:10000].encode("utf-8", errors="replace")).hexdigest()[:16]
+        # U5: source lineage tags. When the tool input carried a file_path,
+        # record it (redacted) plus the detected language and the archive
+        # origin so the row is self-identifiable and joinable to the file
+        # archive meta without transcript archaeology.
+        raw_file_path = hook_input.get("tool_input", {}).get("file_path")
+        lineage_source_file = _redact_credentials(str(raw_file_path)) if raw_file_path else None
+        lineage_language = None
+        if lineage_source_file:
+            try:
+                from structure_map import detect_structure_language
+                lineage_language = detect_structure_language(lineage_source_file)
+            except Exception:
+                lineage_language = None
         store = SessionStore(session_id)
         store.insert_tool_output(
             tool_use_id=tool_use_id,
@@ -1400,6 +1413,10 @@ def archive_result(quiet: bool = False) -> None:
             output_chars=char_count,
             output_tokens_est=token_est,
             compressed_preview=safe_response[:1500],
+            source_file_path=lineage_source_file[:500] if lineage_source_file else None,
+            language=lineage_language,
+            archived_from="PostToolUse",
+            output_text=safe_response[:50000],
         )
     except Exception:
         pass

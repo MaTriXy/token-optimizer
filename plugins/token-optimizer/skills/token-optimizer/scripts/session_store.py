@@ -5,8 +5,12 @@ Per-session SQLite database for tool output caching, file read tracking,
 and command deduplication. Replaces the per-session JSON cache files
 with a structured, ACID-safe store.
 
-Plain SQLite with indexed columns, no FTS5. All lookups are exact match
-(PRIMARY KEY), not keyword search.
+Exact-match lookups use indexed PRIMARY KEY columns. The archive
+(``tool_outputs``) additionally carries an EXTERNAL-CONTENT FTS5 mirror
+(``tool_outputs_fts``, ``content='tool_outputs'``) kept in sync by triggers,
+so full-text search is a true mirror of the base table (dedup follows the base
+PRIMARY KEY, legacy rows backfilled by a one-time ``rebuild``). A bounded
+``LIKE`` query is the fallback when SQLite is built without FTS5.
 
 Configuration:
   - WAL mode for concurrent read/write from separate hook processes
@@ -36,7 +40,10 @@ SESSION_STORE_DIR = SNAPSHOT_DIR / "session-store"
 MAX_DB_SIZE_BYTES = 50 * 1024 * 1024  # 50MB cap
 CLEANUP_AGE_HOURS = 48
 
-_SCHEMA_VERSION = 1
+# v2: added tool_outputs lineage columns + the FTS5 archive index, and
+# converted that index to an external-content mirror of tool_outputs. The bump
+# gates the one-time FTS backfill/rebuild migration in _ensure_fts5_index.
+_SCHEMA_VERSION = 2
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS file_reads (
@@ -64,7 +71,11 @@ CREATE TABLE IF NOT EXISTS tool_outputs (
     output_chars INTEGER NOT NULL,
     output_tokens_est INTEGER NOT NULL,
     compressed_preview TEXT,
-    timestamp REAL NOT NULL
+    timestamp REAL NOT NULL,
+    source_file_path TEXT,
+    language TEXT,
+    archived_from TEXT,
+    output_text TEXT
 );
 
 CREATE TABLE IF NOT EXISTS command_outputs (
@@ -114,6 +125,20 @@ CREATE TABLE IF NOT EXISTS hint_serves (
 """
 
 
+def _is_real_fts_absence(exc: sqlite3.OperationalError) -> bool:
+    """True only when the OperationalError means FTS5 is genuinely absent from
+    this SQLite build (so it is safe to cache _fts5_available=False for the
+    process). A transient ``database is locked`` / ``busy`` returns False and
+    must NOT be cached -- it is retried on a later connect."""
+    msg = str(exc).lower()
+    return (
+        "no such module" in msg
+        or "unknown tokenizer" in msg
+        or "no such tokenizer" in msg
+        or "no such fts5" in msg
+    )
+
+
 def _sanitize_session_id(sid: str) -> str:
     # Generate a unique fallback instead of a static "unknown" string.
     # A static fallback would cause all invalid/missing session IDs to share
@@ -158,6 +183,20 @@ class SessionStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(f"PRAGMA busy_timeout={int(self._busy_timeout_ms)}")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        # Defense-in-depth privacy (the parent dir is already 0700): the DB and
+        # its WAL/SHM sidecars hold cached tool output, so restrict them to the
+        # owner (0600). sqlite creates them honoring umask (commonly 0644), so
+        # tighten explicitly. Best-effort; never break a connect on chmod.
+        import os as _os
+        for _p in (
+            self.db_path,
+            self.db_path.with_suffix(".db-wal"),
+            self.db_path.with_suffix(".db-shm"),
+        ):
+            try:
+                _os.chmod(_p, 0o600)
+            except OSError:
+                pass
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
         return self._conn
@@ -167,11 +206,191 @@ class SessionStore:
         if conn is None:
             return
         conn.executescript(_SCHEMA_SQL)
+        # Read the PRIOR schema version BEFORE stamping the current one, so the
+        # FTS migration can tell a pre-v2 DB (legacy standalone FTS or none)
+        # from an already-migrated one. None => brand-new / pre-versioning DB.
+        prior_version = self._read_schema_version(conn)
+        # U5: idempotent in-place migration for the lineage columns on
+        # pre-existing tool_outputs tables (PRAGMA-introspect then ALTER).
+        # Runs BEFORE the FTS setup so the external-content mirror + triggers
+        # can reference the lineage columns (output_text in particular).
+        self._ensure_tool_output_columns(conn)
+        # U6/fix-1: probe + setup the external-content FTS5 mirror (LIKE
+        # fallback). Backfills legacy rows once, gated on prior_version < 2.
+        self._ensure_fts5_index(conn, prior_version)
+        # Stamp the current schema version last (INSERT OR REPLACE so the bump
+        # actually lands on pre-existing DBs, not just brand-new ones).
         conn.execute(
-            "INSERT OR IGNORE INTO session_meta (key, value) VALUES (?, ?)",
+            "INSERT OR REPLACE INTO session_meta (key, value) VALUES (?, ?)",
             ("_schema_version", str(_SCHEMA_VERSION)),
         )
         conn.commit()
+
+    @staticmethod
+    def _read_schema_version(conn: sqlite3.Connection) -> Optional[int]:
+        """Return the stored ``_schema_version`` (int) or None when absent/
+        unreadable. Never raises."""
+        try:
+            row = conn.execute(
+                "SELECT value FROM session_meta WHERE key = '_schema_version'"
+            ).fetchone()
+        except sqlite3.DatabaseError:
+            return None
+        if not row:
+            return None
+        try:
+            return int(row[0])
+        except (TypeError, ValueError):
+            return None
+
+    def _ensure_tool_output_columns(self, conn: sqlite3.Connection) -> None:
+        """Add source_file_path/language/archived_from/output_text to
+        tool_outputs if absent.
+
+        Mirrors the compression_log tier-migration pattern: PRAGMA table_info
+        to introspect, then ALTER TABLE ADD COLUMN for each missing one. Safe
+        to call on every connect; idempotent (SQLite ADD COLUMN is a no-op
+        once the column exists). Never raises on a corrupt/missing table.
+        """
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(tool_outputs)").fetchall()}
+        except sqlite3.DatabaseError:
+            return
+        for col in ("source_file_path", "language", "archived_from", "output_text"):
+            if col not in cols:
+                try:
+                    conn.execute(f"ALTER TABLE tool_outputs ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError:
+                    pass
+
+    # U6/fix-1: external-content FTS5 mirror over the archive.
+    _fts5_available: Optional[bool] = None
+
+    def _ensure_fts5_index(
+        self, conn: sqlite3.Connection, prior_version: Optional[int] = None
+    ) -> None:
+        """Probe FTS5 and set up an EXTERNAL-CONTENT mirror of ``tool_outputs``.
+
+        External content (``content='tool_outputs'``) makes the FTS index a
+        true mirror of the base table rather than a separate copy:
+
+          * Dedup follows the base PRIMARY KEY. The AFTER INSERT trigger fires
+            only when ``INSERT OR IGNORE`` actually writes a new row, so
+            re-inserting the same ``tool_use_id`` (e.g. read_cache's stable
+            ``fr_shadow_<sha>`` id on a re-read) never appends a duplicate FTS
+            row -- search returns each match exactly once.
+          * Search reads content from the base table, so every base row is
+            visible, including legacy rows written before FTS existed.
+          * A one-time ``'rebuild'`` (gated on a pre-v2 schema version)
+            backfills the entire existing archive into the index.
+
+        Availability is cached once per process, but ONLY a genuine absence
+        (``no such module`` / ``unknown tokenizer``) disables FTS. A transient
+        ``database is locked`` / ``busy`` is left uncached so a later connect
+        retries -- a lock must never permanently disable FTS for the process.
+        Never raises.
+        """
+        if SessionStore._fts5_available is False:
+            return
+        if SessionStore._fts5_available is None:
+            try:
+                conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS _fts5_probe USING fts5(x)")
+                conn.execute("DROP TABLE IF EXISTS _fts5_probe")
+                SessionStore._fts5_available = True
+            except sqlite3.OperationalError as exc:
+                if _is_real_fts_absence(exc):
+                    SessionStore._fts5_available = False
+                # transient (locked/busy or unknown): leave None, retry later
+                return
+        # A pre-v2 DB either has no FTS or the legacy STANDALONE (non-mirror)
+        # tool_outputs_fts from the first U6 cut; both must be replaced by the
+        # external-content mirror and backfilled once. A brand-new DB
+        # (prior_version is None) also takes this path -- rebuild over an empty
+        # base is a no-op.
+        needs_backfill = prior_version is None or prior_version < 2
+        try:
+            if needs_backfill:
+                self._drop_fts_objects(conn)
+            self._create_fts_objects(conn)
+            if needs_backfill:
+                conn.execute(
+                    "INSERT INTO tool_outputs_fts(tool_outputs_fts) VALUES('rebuild')"
+                )
+        except sqlite3.OperationalError as exc:
+            if _is_real_fts_absence(exc):
+                SessionStore._fts5_available = False
+            # transient: leave availability as-is; retried on the next connect
+
+    @staticmethod
+    def _drop_fts_objects(conn: sqlite3.Connection) -> None:
+        """Drop the FTS mirror + its sync triggers (idempotent)."""
+        for stmt in (
+            "DROP TRIGGER IF EXISTS tool_outputs_ai",
+            "DROP TRIGGER IF EXISTS tool_outputs_ad",
+            "DROP TRIGGER IF EXISTS tool_outputs_au",
+            "DROP TABLE IF EXISTS tool_outputs_fts",
+        ):
+            conn.execute(stmt)
+
+    @staticmethod
+    def _create_fts_objects(conn: sqlite3.Connection) -> None:
+        """Create the external-content FTS mirror + AFTER INSERT/DELETE/UPDATE
+        sync triggers (all IF NOT EXISTS, so safe on every connect)."""
+        conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS tool_outputs_fts USING fts5(
+                   tool_use_id UNINDEXED,
+                   tool_name,
+                   command_or_path,
+                   source_file_path,
+                   language,
+                   archived_from,
+                   output_text,
+                   content='tool_outputs',
+                   content_rowid='rowid',
+                   tokenize='porter unicode61'
+               )"""
+        )
+        # AFTER INSERT fires only on a real insert (INSERT OR IGNORE that is
+        # ignored fires nothing) -> automatic dedup, no separate guard needed.
+        conn.execute(
+            """CREATE TRIGGER IF NOT EXISTS tool_outputs_ai
+               AFTER INSERT ON tool_outputs BEGIN
+                 INSERT INTO tool_outputs_fts(
+                     rowid, tool_use_id, tool_name, command_or_path,
+                     source_file_path, language, archived_from, output_text)
+                 VALUES (
+                     new.rowid, new.tool_use_id, new.tool_name, new.command_or_path,
+                     new.source_file_path, new.language, new.archived_from, new.output_text);
+               END"""
+        )
+        conn.execute(
+            """CREATE TRIGGER IF NOT EXISTS tool_outputs_ad
+               AFTER DELETE ON tool_outputs BEGIN
+                 INSERT INTO tool_outputs_fts(
+                     tool_outputs_fts, rowid, tool_use_id, tool_name, command_or_path,
+                     source_file_path, language, archived_from, output_text)
+                 VALUES (
+                     'delete', old.rowid, old.tool_use_id, old.tool_name, old.command_or_path,
+                     old.source_file_path, old.language, old.archived_from, old.output_text);
+               END"""
+        )
+        conn.execute(
+            """CREATE TRIGGER IF NOT EXISTS tool_outputs_au
+               AFTER UPDATE ON tool_outputs BEGIN
+                 INSERT INTO tool_outputs_fts(
+                     tool_outputs_fts, rowid, tool_use_id, tool_name, command_or_path,
+                     source_file_path, language, archived_from, output_text)
+                 VALUES (
+                     'delete', old.rowid, old.tool_use_id, old.tool_name, old.command_or_path,
+                     old.source_file_path, old.language, old.archived_from, old.output_text);
+                 INSERT INTO tool_outputs_fts(
+                     rowid, tool_use_id, tool_name, command_or_path,
+                     source_file_path, language, archived_from, output_text)
+                 VALUES (
+                     new.rowid, new.tool_use_id, new.tool_name, new.command_or_path,
+                     new.source_file_path, new.language, new.archived_from, new.output_text);
+               END"""
+        )
 
     def close(self) -> None:
         if self._conn is not None:
@@ -322,6 +541,10 @@ class SessionStore:
         output_chars: int,
         output_tokens_est: int,
         compressed_preview: Optional[str] = None,
+        source_file_path: Optional[str] = None,
+        language: Optional[str] = None,
+        archived_from: Optional[str] = None,
+        output_text: Optional[str] = None,
     ) -> None:
         if self._is_over_size_cap():
             return
@@ -330,16 +553,81 @@ class SessionStore:
             """INSERT OR IGNORE INTO tool_outputs
                (tool_use_id, tool_name, tool_type, command_or_path,
                 output_hash, output_chars, output_tokens_est,
-                compressed_preview, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                compressed_preview, timestamp,
+                source_file_path, language, archived_from, output_text)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 tool_use_id, tool_name, tool_type, command_or_path,
                 output_hash, output_chars, output_tokens_est,
                 compressed_preview, time.time(),
+                source_file_path, language, archived_from, output_text,
             ),
         )
+        # fix-1: the external-content FTS mirror is maintained by the AFTER
+        # INSERT trigger, which fires only when the INSERT OR IGNORE above
+        # actually writes a new row. No manual FTS write here -- that was the
+        # source of duplicate FTS rows on re-insert of the same tool_use_id.
         conn.commit()
+
+    # ----- tool_outputs search (U6: FTS5 with LIKE fallback) -----
+
+    def search_tool_outputs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Full-text search over archived tool outputs Returns rows of (tool_use_id, tool_name, command_or_path,
+        source_file_path, language, archived_from, snippet) ranked by
+        relevance. Uses FTS5 ``bm25()`` when available; falls back to a
+        bounded ``LIKE '%term%'`` query over the lineage + output_text
+        columns when FTS5 is not compiled into SQLite. Never raises: an
+        empty/invalid query or a missing index returns an empty list.
+        """
+        if not query or not query.strip():
+            return []
+        conn = self._connect()
+        safe_limit = max(1, min(int(limit or 20), 200))
+        if SessionStore._fts5_available:
+            try:
+                rows = conn.execute(
+                    """SELECT t.tool_use_id, t.tool_name, t.command_or_path,
+                              t.source_file_path, t.language, t.archived_from,
+                              snippet(tool_outputs_fts, 6, '>>', '<<', '...', 16) AS snippet
+                       FROM tool_outputs_fts f
+                       JOIN tool_outputs t ON t.rowid = f.rowid
+                       WHERE tool_outputs_fts MATCH ?
+                       ORDER BY bm25(tool_outputs_fts)
+                       LIMIT ?""",
+                    (query, safe_limit),
+                ).fetchall()
+                # fix (LOW): the external-content mirror covers every base row,
+                # so a successful-but-EMPTY FTS result is authoritative -- there
+                # is no match. Return it directly; only fall through to LIKE on
+                # an actual OperationalError (e.g. an FTS MATCH syntax error).
+                return [dict(r) for r in rows]
+            except sqlite3.OperationalError:
+                pass  # FTS query failed (e.g. MATCH syntax) -> try LIKE
+        # LIKE fallback: bounded substring search over lineage + output_text.
+        # fix-4: escape LIKE wildcards (% and _) in the user query and declare
+        # an ESCAPE char so a literal '%'/'_' matches itself, not any-run.
+        try:
+            escaped = (
+                query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            rows = conn.execute(
+                r"""SELECT tool_use_id, tool_name, command_or_path,
+                          source_file_path, language, archived_from,
+                          substr(COALESCE(output_text, compressed_preview, ''), 1, 200) AS snippet
+                   FROM tool_outputs
+                   WHERE tool_name LIKE ? ESCAPE '\' OR command_or_path LIKE ? ESCAPE '\'
+                      OR source_file_path LIKE ? ESCAPE '\' OR language LIKE ? ESCAPE '\'
+                      OR archived_from LIKE ? ESCAPE '\' OR output_text LIKE ? ESCAPE '\'
+                      OR compressed_preview LIKE ? ESCAPE '\'
+                   ORDER BY timestamp DESC
+                   LIMIT ?""",
+                (pattern, pattern, pattern, pattern, pattern, pattern, pattern, safe_limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.OperationalError:
+            return []
 
     # ----- command_outputs -----
 

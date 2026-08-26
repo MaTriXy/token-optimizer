@@ -210,8 +210,7 @@ These ten rows are the ones where Token Optimizer is the only 🟢 in the row: w
 
 |  | Token Optimizer | Headroom | RTK | Boost | context-mode | `/context` |
 |---|---|---|---|---|---|---|
-| Compaction survival | 🟢 Progressive checkpoints, restore, tool output digest | 🔴 | 🔴 | — | 🟡 Session guide only | 🔴 |
-| Session continuity | 🟢 Cross-session hints, cold-resume, checkpoint scoring | 🔴 | 🔴 | — | 🟡 Session guide | 🔴 |
+| Session continuity | 🟢 Progressive checkpoints before compaction + restore after, cross-session hints, cold-resume, tool-output digest; measured ~3.9M tokens / ~$19 recovered in a 30-day snapshot (checkpoint restores + lean resumes) | 🔴 | 🔴 | — | 🟡 Session guide only | 🔴 |
 | Structural waste audit | 🟢 Deep per-component (CLAUDE.md, skills, MCP, memory) | 🔴 | 🔴 | 🔴 | 🔴 | 🟡 Summary only |
 | CLAUDE.md and MEMORY.md health | 🟢 8 auditors + attention-curve scoring | 🔴 | 🔴 | 🔴 | 🔴 | 🔴 |
 | Model routing and behavioral coaching | 🟢 12 detectors, subagent cost breakdown, anti-patterns | 🔴 | 🔴 | — | 🔴 | 🟡 Basic suggestions |
@@ -228,7 +227,7 @@ These ten rows are the ones where Token Optimizer is the only 🟢 in the row: w
 |---|---|---|---|---|---|---|
 | No command rewriting required | 🟢 Hook-wired, fires automatically | 🟢 Transparent proxy | 🟢 Hook-based rewrite | 🟢 `boost init` wires supported agents; terminal use can be prefixed | 🟡 Automatic on hook-capable platforms | N/A Native command |
 | Full original recoverable | 🟢 Raw archived before compression, `expand` retrieves it; failures never compressed | 🟢 Reversible retrieval | 🟡 Full output saved on command failure | 🟢 Vendor documents command-output recovery | — | N/A Does not compress |
-| Register a custom command filter | 🔴 Built-in command set; no user filter API | — | 🟢 Custom TOML filters | 🟢 TOML filters | — | N/A |
+| Register a custom command filter | 🟢 Custom TOML filters (`command-filters.toml`, additive + exclude, safety-gated) | — | 🟢 Custom TOML filters | 🟢 TOML filters | — | N/A |
 | User-tunable configuration | 🟢 92 code-referenced `TOKEN_OPTIMIZER_*` names, explicitly split into user-facing and internal controls; additive allowlist; `.contextignore` | 🟢 Documented configuration | 🟢 `config.toml` and environment controls | 🟢 Filter TOML | 🟢 Documented configuration | N/A |
 | Cache-safe | 🟢 Never modifies existing context prefix | 🟡 Proxy mode rewrites in-flight | 🟢 Pre-shell only | 🟢 Pre-shell only | 🟡 MCP overhead | 🟢 |
 | Zero baseline context overhead | 🟢 External process, no context injection | 🔴 Injects instructions | 🟢 Shell-level only | 🟢 Shell-level only | 🔴 MCP server overhead | 🟢 Native |
@@ -237,11 +236,11 @@ These ten rows are the ones where Token Optimizer is the only 🟢 in the row: w
 | Multi-platform | 🟢 Claude Code, VS Code, Codex, OpenClaw, OpenCode, Hermes, Copilot | 🟢 Claude Code, Cursor, Codex, Aider, Copilot | 🟢 15 integrations | 🟡 Cursor, Claude Code, Copilot, Codex CLI | 🟢 17 integrations | 🔴 Claude Code only |
 | Per-task model and effort advice | 🟢 `route` sizes the task before you spend | — | — | — | — | — |
 | Keep-Warm (cache TTL refresh) | 🟢 Opt-in ping before cache expiry, tripwire auto-off | 🔴 | 🔴 | — | 🔴 | 🔴 |
-| End-to-end task-outcome benchmark | 🔴 Output-token A/B only | — | — | 🟢 Vendor reports Terminal-Bench 2.0 with the same pass rate and ~12% lower cost | — | N/A |
+| End-to-end task-outcome benchmark | 🟡 Controlled A/B on 7 real tasks (output tokens) + measured real-session with/without savings; pass-rate study not yet run | — | — | 🟢 Vendor reports Terminal-Bench 2.0 with the same pass rate and ~12% lower cost | — | N/A |
 | Signed and checksum-verified install | 🟢 `CHECKSUMS.sha256` per release, verified at install, CI-enforced | — | — | 🔴 Installer verifies neither a checksum nor a signature | — | N/A |
 
 </details>
-An em dash means the capability was not verified from first-party material in the 2026-07-26 source audit; it is not a claim that the capability is absent. Boost's "pre-shell" and "shell-level" cells are sourced from its documented wrapper form (`boost <command>`); the mechanism `boost init` uses to wire an agent is not described in its first-party material. Token Optimizer's compression claims are tested against real sessions and an 87-fixture suite you can run yourself. **[Full benchmark methodology and results →](BENCHMARK.md)**
+An em dash means the capability was not verified from first-party material in the 2026-07-26 source audit (Boost's first-party material re-verified 2026-08-26); it is not a claim that the capability is absent. This page scores command-output compression only; JFrog Boost's separately-shipped BoostGraph, a local code-map its agent queries on request, is a different capability and out of scope here. Boost's "pre-shell" and "shell-level" cells are sourced from its documented wrapper form (`boost <command>`); the mechanism `boost init` uses to wire an agent is not described in its first-party material. Token Optimizer's compression claims are tested against real sessions and an 87-fixture suite you can run yourself. **[Full benchmark methodology and results →](BENCHMARK.md)**
 
 <p align="center">
   <a href="https://alexgreensh.github.io/token-optimizer/reference/comparison/"><img src="https://img.shields.io/badge/Read%20the%20official%20full%20comparison-in%20our%20docs-0b7285?style=for-the-badge" alt="Read the official full comparison page in our documentation"></a>
@@ -328,6 +327,8 @@ Disable: `TOKEN_OPTIMIZER_READ_CACHE_MODE=shadow`
 
 On the **first** read of a large **code** file (Python or TypeScript, 16KB–256KB) in a history-validated cohort, the Read returns a structural skeleton (signatures/imports) instead of the full file, with a one-line notice and the full content always one step away: `expand <key>`, a ranged Read (`offset`/`limit`), or a direct Edit. The original is archived before any substitution, fail-open — if archiving can't happen, the full file is served.
 
+As of v5.12, the target file is always served in full on the first read; savings come from periphery skeletons (one-hop relationships, PageRank-ordered) injected alongside the target, not from withholding the target itself. This eliminates the re-read flip-flop that demoted cohorts under the old tripwire.
+
 This applies to **code only**. Markdown and other prose are **not** skeletoned on first read (as of v5.11.27): a headings-only outline drops load-bearing prose, so docs always come back complete. A runtime tripwire auto-demotes a code cohort back to measure-only if its live edit-rate climbs.
 
 Disable serving (keep measurement): `TOKEN_OPTIMIZER_FIRST_READ_ACTIVE=0`. Disable entirely: `TOKEN_OPTIMIZER_FIRST_READ_SHADOW=0`. Both are also visible and toggleable via `measure.py v5 status` and the dashboard Manage tab.
@@ -339,6 +340,34 @@ Rewrites common CLI commands to return compressed summaries. Covers lint, log ta
 ![Bash Output Compression](skills/token-optimizer/assets/bash-compression.svg)
 
 Disable: `TOKEN_OPTIMIZER_BASH_COMPRESS=0`
+
+### Custom Command Filters (TOML)
+
+You can extend the bash-compression allowlist with your own read-only commands
+and exclude commands you don't want compressed, via a TOML file at
+`<runtime-home>/token-optimizer/command-filters.toml` (override the path with
+`TOKEN_OPTIMIZER_COMMAND_FILTERS`).
+
+```toml
+# Add a read-only command to an existing compression handler.
+# handler must be one of the built-in pattern names (pytest, lint, ls, etc.).
+[filters.add]
+my-tests = { command = "cargo test", handler = "pytest" }
+my-lint = { command = "ruff check", handler = "lint" }
+
+# Exclude commands from compression (glob patterns supported).
+[filters.exclude]
+commands = ["git status", "ls -la"]
+```
+
+Safety is immutable: the loader rejects `add` entries that name a shell
+interpreter (`bash`, `python`, `node`, ...), a privilege-escalation wrapper
+(`sudo`, `su`, `doas`), a destructive write subcommand (`rm`, `chmod`, `dd`,
+...), or any command containing shell metacharacters (`;`, `|`, `$`, ...).
+Categorical exclusions (dangerous chars, git write subcommands, interpreters)
+are enforced in the hook and dispatch code and cannot be overridden by user
+config. Built-in detection always runs first, so a user `add` only extends
+the set, never replaces a built-in handler for the same command.
 
 ### Search Result Compression
 
@@ -411,7 +440,13 @@ This isn't just storage. The system tracks how many results were archived vs re-
 ```bash
 python3 measure.py expand --list          # List archived tool results
 python3 measure.py expand <tool-use-id>   # Retrieve a specific result
+python3 measure.py expand --search <query>  # Search archived results by keyword/lineage
 ```
+
+`expand --search` runs a full-text search (FTS5 with a `LIKE` fallback) over
+archived tool outputs, including the full response body, tool name, command,
+source file path, language, and archive origin. Each match prints the key,
+lineage, and a snippet. Use `expand <key>` to retrieve the full content.
 
 Some MCP tools are *documented* to return large verbatim payloads (source fetchers, doc retrievers) where a metadata preview defeats the point. Allowlist those so their full result reaches context instead of being replaced (it's still archived, so `expand` works). Set a comma-separated list of `fnmatch` globs matched against the full tool name:
 
