@@ -414,12 +414,44 @@ def _write_dashboard_meta(html_path):
     """Write the (version, shape) sidecar next to a dashboard HTML we just wrote,
     so the sidecar always names the build that produced the on-disk HTML. Every
     writer of a shared dashboard MUST call this after writing, or the downgrade
-    guard reads a stale version and can be bypassed. Fail-soft; never raises."""
+    guard reads a stale version and can be bypassed. Fail-soft; never raises.
+
+    atomic meta write: mkstemp + fchmod + os.replace, matching the HTML
+    write. A plain Path.write_text truncates-then-writes in place, so a concurrent
+    reader between the truncate and the final byte reads a torn/empty sidecar, and
+    an interleave of two writers can leave an (html_new, meta_old) pairing that
+    lets an OLDER concurrent build's downgrade guard misfire and clobber a NEWER
+    dashboard. os.replace makes each reader see one complete sidecar or the prior
+    one, never a partial. Callers MUST write this AFTER the HTML os.replace so the
+    sidecar never advertises a version whose HTML is not yet on disk."""
+    _write_dashboard_meta_atomic(_dashboard_meta_path(html_path))
+
+
+def _write_dashboard_meta_atomic(meta_path):
+    """Atomically write the current (version, shape) sidecar to ``meta_path``.
+    Shared by ``_write_dashboard_meta`` and the inline post-HTML write in
+    ``generate_standalone_dashboard`` so both take the identical torn-write-proof
+    path. Fail-soft; never raises (a failed sidecar must not break generation)."""
+    meta_path = Path(meta_path)
+    blob = json.dumps({"version": TOKEN_OPTIMIZER_VERSION, "shape": _DASHBOARD_SHAPE_MARKER})
     try:
-        _dashboard_meta_path(html_path).write_text(
-            json.dumps({"version": TOKEN_OPTIMIZER_VERSION, "shape": _DASHBOARD_SHAPE_MARKER}),
-            encoding="utf-8",
-        )
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_name = tempfile.mkstemp(dir=str(meta_path.parent), prefix=".dashmeta-", suffix=".tmp")
+        try:
+            if hasattr(os, "fchmod"):  # POSIX only (os.fchmod is absent on Windows)
+                os.fchmod(tmp_fd, 0o600)
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                f.write(blob)
+            os.replace(tmp_name, str(meta_path))
+        except BaseException:
+            # BaseException, not OSError: writers under a hook budget can raise
+            # _HookTimeout mid-write; clean up the temp then re-raise so the
+            # timeout still propagates (same contract as the HTML write).
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
     except OSError:
         pass
 
@@ -6257,15 +6289,14 @@ def generate_standalone_dashboard(days=30, quiet=False, force=False):
         return None
 
     # Sidecar meta (version + shape) next to each written HTML, so ensure-health's
-    # staleness check reads a few bytes instead of the whole 4-5MB file.
-    _meta_blob = json.dumps({
-        "version": TOKEN_OPTIMIZER_VERSION,
-        "shape": _DASHBOARD_SHAPE_MARKER,
-    })
+    # staleness check reads a few bytes instead of the whole 4-5MB file. Written
+    # AFTER the HTML os.replace above and itself atomic: a torn or
+    # (html_new, meta_old) sidecar can let an OLDER concurrent build's downgrade
+    # guard clobber a NEWER dashboard, so both writes must be all-or-nothing.
     for wp in write_paths:
         try:
             if wp.exists():
-                _dashboard_meta_path(wp).write_text(_meta_blob, encoding="utf-8")
+                _write_dashboard_meta_atomic(_dashboard_meta_path(wp))
         except OSError:
             pass
 
@@ -6524,7 +6555,7 @@ def _dispatch_collect(args):
             pass
 
 
-def _spawn_detached_dashboard_selfheal(days=30):
+def _spawn_detached_dashboard_selfheal(days=30, force=False):
     """Rebuild the dashboard in a DETACHED, unbounded background process.
 
     Bug B self-heal: when a bounded hook-path regen is killed by the 20s budget
@@ -6539,6 +6570,12 @@ def _spawn_detached_dashboard_selfheal(days=30):
       * is quiet and never opens a browser.
     The child is unbounded, so it cannot itself time out and re-spawn -- no loop.
     Fire-and-forget; never raises (a failed self-heal must not break the hook).
+
+    ``force`` appends ``--force`` so the child bypasses the 60s write throttle.
+    Used by the version-bump self-heal: a stale file written seconds ago by a
+    just-killed regen must not throttle-skip the heal. The PR #154 version guard
+    still applies inside generate_standalone_dashboard (force governs the throttle,
+    not version precedence), so a forced heal never clobbers a newer dashboard.
     """
     try:
         env = dict(os.environ)
@@ -6547,13 +6584,16 @@ def _spawn_detached_dashboard_selfheal(days=30):
         # Detach so the child outlives the killed hook: POSIX new session, or
         # (on Windows) DETACHED_PROCESS. start_new_session is POSIX-only.
         popen_kw = {} if os.name == "nt" else {"start_new_session": True}
+        argv = [sys.executable, os.path.abspath(__file__),
+                "dashboard", "--quiet", "--days", str(int(days))]
+        if force:
+            argv.append("--force")
         # creationflags MUST be inlined and mention _NO_WINDOW (CREATE_NO_WINDOW,
         # 0 off-Windows) so a console-less Windows host never flashes a cmd window
         # -- and so the spawn-site invariant test can see it. DETACHED_PROCESS is 0
         # off-Windows, so this evaluates to 0 on POSIX (the only valid value there).
         subprocess.Popen(
-            [sys.executable, os.path.abspath(__file__),
-             "dashboard", "--quiet", "--days", str(int(days))],
+            argv,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -6564,6 +6604,80 @@ def _spawn_detached_dashboard_selfheal(days=30):
         )
     except Exception:
         pass
+
+
+# Thundering-herd guard for the version-bump dashboard self-heal. The marker is
+# a short-lived inflight breadcrumb, NOT a held-for-duration lock: the first
+# concurrent SessionStart claims it and spawns the detached forced rebuild; every
+# other session that reaches the stale-sidecar branch within the window sees the
+# fresh marker and no-ops. Reclaimed once older than the window so a genuinely
+# later version bump can heal again (and a crashed spawner never wedges the heal).
+_DASHBOARD_HEAL_LOCK_NAME = "dashboard.heal.lock"
+_DASHBOARD_HEAL_LOCK_STALE_SECONDS = 60
+
+
+def _dashboard_heal_spawn_due():
+    """Return True iff THIS caller should spawn the version-bump dashboard heal.
+
+    Bug (thundering herd): on a version bump every concurrent
+    SessionStart's ensure-health tick sees the stale sidecar and each spawns a
+    DETACHED, unbounded, FORCED ~9s rebuild -- N sessions => N simultaneous
+    builds all racing os.replace on the same dashboard.html (the very lock
+    contention the api/regenerate retry was calibrated around). This collapses
+    that to ONE: the first caller atomically claims ``dashboard.heal.lock``
+    (O_CREAT|O_EXCL, the same pidfile shape as ``_keepwarm_tick_singleton`` and
+    ``_daemon_install_lock``) and spawns; concurrent callers within the staleness
+    window see the fresh marker and skip. The marker is deliberately NOT unlinked
+    on the happy path -- it must OUTLIVE this call to suppress the herd, and it is
+    reclaimed by the next caller once it ages past the window.
+
+    Fail-OPEN: any unexpected filesystem error returns True (spawn). A missed
+    dedup just costs one extra rebuild, strictly better than skipping the heal.
+    """
+    marker = SNAPSHOT_DIR / _DASHBOARD_HEAL_LOCK_NAME
+    try:
+        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return True
+    fd = None
+    try:
+        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        # A recent spawn already claimed the marker. Reclaim ONLY if it is stale;
+        # a fresh marker means a heal is already in flight, so no-op.
+        try:
+            age = time.time() - marker.stat().st_mtime
+        except OSError:
+            return True  # unreadable mtime: don't suppress the heal
+        if age <= _DASHBOARD_HEAL_LOCK_STALE_SECONDS:
+            return False
+        # Known bounded residual (same unlink+O_EXCL shape as
+        # _keepwarm_tick_singleton): the fresh-claim path above is race-free, but
+        # if TWO ticks both observe the SAME stale marker and both pass the age
+        # check before either unlinks, both can reclaim and spawn -- at most 2
+        # rebuilds, only at the 60s staleness edge with concurrent sessions. That
+        # is consistent with the fail-open contract (an extra rebuild is harmless;
+        # the detached child is itself idempotent via os.replace + the #154 version
+        # guard), so it is accepted rather than serialised with a heavier lock.
+        try:
+            os.unlink(str(marker))
+            fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            return False  # lost the reclaim race to another session -- it heals
+        except OSError:
+            return True
+    except OSError:
+        return True
+    try:
+        os.write(fd, str(os.getpid()).encode("ascii"))
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    return True
 
 
 def _dispatch_dashboard(args):
@@ -6599,6 +6713,10 @@ def _dispatch_dashboard(args):
     if not cp:
         days = 30
         quiet = "--quiet" in args or "-q" in args
+        # --force bypasses the 60s write throttle. The detached version-bump
+        # self-heal passes it so a stale file just written by a killed regen
+        # cannot throttle-skip the heal (the PR #154 version guard still applies).
+        force = "--force" in args
         for i, a in enumerate(args):
             if a == "--days" and i + 1 < len(args):
                 try:
@@ -6610,7 +6728,7 @@ def _dispatch_dashboard(args):
         )
         timed_out = False
         try:
-            out = generate_standalone_dashboard(days=days, quiet=quiet)
+            out = generate_standalone_dashboard(days=days, quiet=quiet, force=force)
         except _HookTimeout:
             out = None
             timed_out = True
@@ -6618,9 +6736,13 @@ def _dispatch_dashboard(args):
             _clear_hook_budget(deadline)
         # Bug B self-heal: a bounded hook regen that the 20s budget killed leaves
         # the on-disk dashboard stale. Finish it in a detached, unbounded child so
-        # the file catches up without ever blocking the session.
+        # the file catches up without ever blocking the session. forward
+        # `force` -- a killed --force regen just wrote a stale file seconds ago, so
+        # the detached retry must ALSO bypass the 60s write throttle or it
+        # throttle-skips and the file stays stale (the PR #154 version guard still
+        # applies, so a forced heal never clobbers a newer dashboard).
         if timed_out:
-            _spawn_detached_dashboard_selfheal(days=days)
+            _spawn_detached_dashboard_selfheal(days=days, force=force)
         if out and serve:
             _serve_dashboard(out, port=serve_port, host=serve_host)
         elif out and not quiet:
@@ -21115,22 +21237,57 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             _regen_inflight = True
             try:
                 for step in ("collect", "dashboard"):
-                    r = subprocess.run(
-                        [sys.executable, target, step, "--quiet"],
-                        capture_output=True, text=True, timeout=REGEN_STEP_TIMEOUT,
-                        creationflags=_NO_WINDOW,
-                        # A human pressed Regenerate and is waiting: mark it
-                        # INTERACTIVE so the child is not killed by the 20s hook
-                        # budget (Bug B). The daemon's own REGEN_STEP_TIMEOUT is
-                        # the real, saner cap here.
-                        env={{**os.environ, "TOKEN_OPTIMIZER_INTERACTIVE": "1"}},
-                    )
+                    # A human pressed Regenerate: the "dashboard" step MUST carry
+                    # --force so the 60s write throttle can never silently no-op the
+                    # click into serving the same stale file (the very ambiguity that
+                    # let a two-day-old dashboard look freshly regenerated). collect
+                    # has no such throttle, so it needs no flag.
+                    argv = [sys.executable, target, step, "--quiet"]
+                    if step == "dashboard":
+                        argv.append("--force")
+                    # retry cap: retry ONLY the "dashboard" step -- the
+                    # one with the observed intermittent hang (lock contention
+                    # makes the normally-~9s build blow past a single
+                    # REGEN_STEP_TIMEOUT shot) -- and do NOT double the cap on the
+                    # retry. The earlier "2 attempts per step, doubled cap" put the
+                    # worst case at REGEN_STEP_TIMEOUT*(1+2)*2 = 6x = 270s, WORSE
+                    # than the ~240s wedge the original per-step cap fixed. Capping
+                    # every attempt at a flat REGEN_STEP_TIMEOUT and retrying only
+                    # the flaky step bounds the worst case at
+                    # REGEN_STEP_TIMEOUT*(1 + 2) = 3x = 135s, well under 240s, while
+                    # still surviving one transient dashboard hang. `collect` has no
+                    # observed hang, so it stays single-shot.
+                    _max_attempts = 2 if step == "dashboard" else 1
+                    r = None
+                    _timeout_exc = None
+                    for _attempt in range(_max_attempts):
+                        _to = REGEN_STEP_TIMEOUT
+                        try:
+                            r = subprocess.run(
+                                argv,
+                                capture_output=True, text=True, timeout=_to,
+                                creationflags=_NO_WINDOW,
+                                # A human pressed Regenerate and is waiting: mark it
+                                # INTERACTIVE so the child is not killed by the 20s
+                                # hook budget (Bug B). The daemon's own per-attempt
+                                # timeout is the real, saner cap here.
+                                env={{**os.environ, "TOKEN_OPTIMIZER_INTERACTIVE": "1"}},
+                            )
+                            _timeout_exc = None
+                            break
+                        except subprocess.TimeoutExpired as _te:
+                            _timeout_exc = _te
+                            _log_regen("MANUAL regen %s timed out after %d seconds (attempt %d/%d)" % (step, _to, _attempt + 1, _max_attempts))
+                    if _timeout_exc is not None:
+                        _log_regen("MANUAL regen error: %s" % _timeout_exc)
+                        self._json_response(500, {{"ok": False, "step": step, "msg": "regeneration timed out: " + str(_timeout_exc)}})
+                        return
                     if r.returncode != 0:
                         msg = (r.stderr or r.stdout or "").strip()[:300] or ("%s exited %d" % (step, r.returncode))
                         _log_regen("MANUAL regen failed at %s: %s" % (step, msg))
                         self._json_response(500, {{"ok": False, "step": step, "msg": msg}})
                         return
-            except (subprocess.TimeoutExpired, OSError) as e:
+            except OSError as e:
                 _log_regen("MANUAL regen error: %s" % e)
                 self._json_response(500, {{"ok": False, "msg": "regeneration failed: " + str(e)}})
                 return
@@ -23775,6 +23932,13 @@ def _is_our_hook_entry(entry) -> bool:
     our_scripts = (
         "measure.py", "read_cache.py", "statusline.js", "archive_result.py",
         "context_intel.py", "activity_tracker.py",
+        # the #139 UserPromptSubmit dispatcher. Without it a hook that
+        # runs userpromptsubmit_runner.py (+ token-optimizer) is not recognised
+        # as ours, so ownership-gated repair/reconciliation skips it. Whitelisting
+        # the script name here is inert until the dispatcher ships (it is not yet
+        # in this branch) and never matches a foreign hook (the token-optimizer
+        # substring is still required alongside it).
+        "userpromptsubmit_runner.py",
     )
     if "token-optimizer" in low and any(s in low for s in our_scripts):
         return True
@@ -35107,7 +35271,13 @@ def setup_quality_bar(dry_run=False, uninstall=False, status_only=False, force=F
         hooks = settings.get("hooks", {})
         removed = 0
 
-        # Remove UserPromptSubmit quality-cache hooks
+        # Remove UserPromptSubmit quality-cache hooks.
+        # intent, do NOT broaden: this filter matches ONLY the legacy
+        # `quality-cache` command literal on purpose. Unlike _is_our_hook_entry
+        # (whose whitelist recognises the #139 userpromptsubmit_runner.py
+        # dispatcher), uninstall must NOT strip the dispatcher: it is multi-purpose
+        # and deleting it here would take unrelated hooks down with the quality
+        # bar. The narrow literal is the correct, deliberate scope for uninstall.
         if "UserPromptSubmit" in hooks:
             new_groups = []
             for group in hooks["UserPromptSubmit"]:
@@ -39210,9 +39380,30 @@ def run_ensure_health():
                 except OSError:
                     _fresh = False
             if not _fresh:
+                # Hand the ~9s rebuild to a DETACHED, unbounded, FORCED child
+                # instead of running it in-process. run_ensure_health() runs under
+                # an 8s SIGALRM budget (see the ensure-health dispatch), and this
+                # rebuild is ~9s, so an in-process call reliably tripped
+                # _HookTimeout (a BaseException the local `except Exception` cannot
+                # catch). That aborted the WHOLE ensure-health tick BEFORE the
+                # daemon-script auto-update block below ever ran -- so on a version
+                # bump both the HTML AND the daemon script stayed stale, and unlike
+                # the CLI dashboard path there was no detached-child fallback here
+                # to ever catch the HTML up. The detached child finishes the forced
+                # rebuild off the hot path (re-reading a now-healthy meter, which
+                # clears the runway placeholder), and this cheap spawn returns at
+                # once so execution always reaches the daemon-script update.
+                # thundering herd: guard the spawn with a short-lived
+                # inflight marker so N concurrent SessionStarts on a version bump
+                # collapse to ONE detached rebuild instead of N racing os.replace
+                # on the same file. Mirrors the sibling _daemon_install_lock(
+                # soft_fail=True) serialisation the daemon-script update below
+                # already uses; _dashboard_heal_spawn_due() fails OPEN so a lock
+                # glitch never skips the heal.
                 try:
-                    generate_standalone_dashboard(quiet=True, force=True)
-                    print(f"  [Token Optimizer] Refreshed dashboard to v{TOKEN_OPTIMIZER_VERSION}")
+                    if _dashboard_heal_spawn_due():
+                        _spawn_detached_dashboard_selfheal(days=30, force=True)
+                        print(f"  [Token Optimizer] Refreshing dashboard to v{TOKEN_OPTIMIZER_VERSION} in the background")
                 except Exception as _e:
                     print(f"  [Token Optimizer] dashboard refresh failed: {_e}", file=sys.stderr)
     except Exception as _e:
@@ -39276,7 +39467,32 @@ def run_ensure_health():
                     for p in candidate_paths:
                         try:
                             p.parent.mkdir(parents=True, exist_ok=True)
-                            p.write_text(new_script, encoding="utf-8")
+                            # atomic daemon-script write: temp sibling +
+                            # os.replace instead of a raw write_text. This block
+                            # runs under the 8s ensure-health hook budget; a
+                            # SIGALRM (_HookTimeout) mid-write would truncate
+                            # dashboard-server.py, leaving a syntactically broken
+                            # daemon that never starts. os.replace swaps the file
+                            # in one step so a reader/loader sees the old or the new
+                            # script whole, never a torn one.
+                            tmp_fd, tmp_name = tempfile.mkstemp(
+                                dir=str(p.parent), prefix=".dashsrv-", suffix=".tmp")
+                            try:
+                                if hasattr(os, "fchmod"):  # POSIX only
+                                    os.fchmod(tmp_fd, 0o600)
+                                with os.fdopen(tmp_fd, "w", encoding="utf-8") as _f:
+                                    _f.write(new_script)
+                                os.replace(tmp_name, str(p))
+                            except BaseException:
+                                # BaseException, not OSError: a mid-write
+                                # _HookTimeout (the 8s budget) must still clean up
+                                # the temp and propagate. OSError is caught below as
+                                # a per-path write failure.
+                                try:
+                                    os.unlink(tmp_name)
+                                except OSError:
+                                    pass
+                                raise
                             wrote_any = True
                         except OSError as e:
                             write_failures.append((p, e))
