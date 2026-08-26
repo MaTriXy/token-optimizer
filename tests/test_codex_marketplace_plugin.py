@@ -191,12 +191,24 @@ def test_codex_mirror_hooks_json_is_async_stipped_root():
                     hook["timeout"] = CODEX_SESSION_END_TIMEOUT_CAP
         return doc
 
+    # Third sanctioned transform: launcher commands are rewritten to the Codex
+    # runtime version-resolver. Undo it in the mirror before comparing so this
+    # test still catches any OTHER drift.
+    from _codex_mirror_norm import guard_from_resolver
+
+    def _deresolve(o):
+        if isinstance(o, dict):
+            return {k: (guard_from_resolver(v) if k == "command" else _deresolve(v)) for k, v in o.items()}
+        if isinstance(o, list):
+            return [_deresolve(v) for v in o]
+        return o
+
     expected = _clamp_session_end(
         _strip_async(json.loads(root_hj.read_text(encoding="utf-8")))
     )
-    actual = json.loads(mirror_hj.read_text(encoding="utf-8"))
+    actual = _deresolve(json.loads(mirror_hj.read_text(encoding="utf-8")))
     assert actual == expected, (
         "plugins/token-optimizer/hooks/hooks.json drifted from the root "
-        "hooks.json modulo the async keys and the SessionEnd timeout clamp; "
-        "rerun scripts/sync-codex-marketplace-plugin.sh."
+        "hooks.json modulo the async keys, the SessionEnd timeout clamp, and the "
+        "Codex resolver rewrite; rerun scripts/sync-codex-marketplace-plugin.sh."
     )

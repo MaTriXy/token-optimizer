@@ -107,6 +107,30 @@ for group in data.get("hooks", {}).get("SessionEnd", []):
         t = hook.get("timeout")
         if isinstance(t, (int, float)) and t > CODEX_SESSION_END_TIMEOUT_CAP:
             hook["timeout"] = CODEX_SESSION_END_TIMEOUT_CAP
+# (Codex mid-session self-heal) Rewrite the fail-open launcher guard into a
+# runtime version-resolver: prefer ${CLAUDE_PLUGIN_ROOT}, else scan the parent dir
+# for the newest installed version. Codex pins ${CLAUDE_PLUGIN_ROOT} to the
+# session's plugin version, so on a mid-session refresh the old dir is already
+# gone; scanning for the newest heals without a restart. Claude keeps the simple
+# guard in the root hooks.json — its ${CLAUDE_PLUGIN_ROOT} already tracks the live
+# version, and a resolver's $(...) would flip _hook_command_identity's dedup path.
+_GUARD = ('L="${CLAUDE_PLUGIN_ROOT}/hooks/python-launcher.sh"; [ -r "$L" ] || exit 0; '
+          'exec "$b" "$L" "${CLAUDE_PLUGIN_ROOT}/hooks/run.py"')
+_RESOLVER = ('D="${CLAUDE_PLUGIN_ROOT}"; [ -r "$D/hooks/python-launcher.sh" ] || '
+             'D="$(ls -d "${D%/*}"/*/ 2>/dev/null | grep -E "/[0-9]+[.][0-9]+[.][0-9]+/$" | sort -V | tail -n1)"; '
+             'D="${D%/}"; [ -r "$D/hooks/python-launcher.sh" ] || exit 0; '
+             'exec "$b" "$D/hooks/python-launcher.sh" "$D/hooks/run.py"')
+def resolverize(o):
+    if isinstance(o, dict):
+        c = o.get("command")
+        if isinstance(c, str) and _GUARD in c:
+            o["command"] = c.replace(_GUARD, _RESOLVER)
+        for v in o.values():
+            resolverize(v)
+    elif isinstance(o, list):
+        for v in o:
+            resolverize(v)
+resolverize(data)
 with open(p, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
     f.write("\n")

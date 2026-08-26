@@ -46,9 +46,28 @@ def test_every_launcher_command_is_guarded(hooks_path):
     cmds = _launcher_commands(hooks_path)
     assert cmds, f"no launcher commands found in {hooks_path}"
     for cmd in cmds:
-        assert '[ -r "$L" ]' in cmd, (
+        # Two fail-open shapes are valid: the simple guard (Claude/Cowork, where
+        # ${CLAUDE_PLUGIN_ROOT} tracks the live version) and the Codex mirror's
+        # runtime version-resolver (prefer the root, else scan for the newest dir).
+        guarded = '[ -r "$L" ]' in cmd
+        resolver = 'sort -V' in cmd and '[ -r "$D/hooks/python-launcher.sh" ]' in cmd
+        assert guarded or resolver, (
             f"unguarded launcher command (would 127 on a stale version dir):\n{cmd}"
         )
+
+
+def test_codex_mirror_uses_runtime_resolver():
+    """The Codex marketplace mirror must self-heal mid-session (resolve the newest
+    version dir per call), since Codex pins ${CLAUDE_PLUGIN_ROOT} to the session's
+    plugin version. Claude/Cowork keep the simpler guard."""
+    codex = _launcher_commands(REPO / "plugins" / "token-optimizer" / "hooks" / "hooks.json")
+    for cmd in codex:
+        assert 'sort -V' in cmd and 'ls -d' in cmd, f"Codex mirror command lost its resolver:\n{cmd}"
+    for tree in ("hooks", "cowork/token-optimizer/hooks"):
+        for cmd in _launcher_commands(REPO / tree / "hooks.json"):
+            assert 'sort -V' not in cmd, (
+                f"{tree} must keep the simple guard (resolver's $(...) breaks Claude dedup):\n{cmd}"
+            )
 
 
 @pytest.mark.parametrize("hooks_path", HOOKS_JSON_FILES, ids=lambda p: p.parent.parent.name)

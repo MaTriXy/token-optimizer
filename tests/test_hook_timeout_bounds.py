@@ -142,11 +142,14 @@ def test_timeouts_leave_room_for_a_healthy_run():
 def test_mirror_timeouts_match_the_root():
     """The Codex mirror strips async and clamps SessionEnd to Codex's 3s cap;
     every OTHER timeout must equal the root. Any other drift is a bug."""
+    from _codex_mirror_norm import guard_from_resolver
     root = {
         (e, m, c): h.get("timeout") for e, m, c, h in _flatten(HOOKS_JSON)
     }
+    # Normalize the Codex mirror's resolver rewrite back to the guard so commands
+    # (the dict keys) line up with the root; only timeout drift is under test here.
     mirror = {
-        (e, m, c): h.get("timeout") for e, m, c, h in _flatten(MIRROR_HOOKS_JSON)
+        (e, m, guard_from_resolver(c)): h.get("timeout") for e, m, c, h in _flatten(MIRROR_HOOKS_JSON)
     }
     assert root.keys() == mirror.keys(), "hook sets differ between root and mirror"
     drifted = []
