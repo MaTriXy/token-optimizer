@@ -147,6 +147,14 @@ export interface RealizedSavings {
    * Same INVARIANT as compressionMeasuredUsd: never summed into the headline.
    */
   compressionMeasuredWindowUsd: number;
+  /**
+   * RAW metered compression TOKENS saved over the lookback window (the
+   * `totalTokensSaved` from TrendsStore.getCompressionSavings). Window-summed,
+   * NOT monthly-scaled. Exposed so the Tokens Saved card can show a
+   * token-denominated SAVED figure alongside the SPENT model-mix token total
+   * (both share the same window). Never summed into any $ headline.
+   */
+  compressionMeasuredWindowTokens: number;
   /** Estimated verbosity-steer $ before the baseline-output reprice. */
   verbosityMeasuredUsd: number;
   /** Repriced verbosity-steer $ (estimated output reduction at baseline mix). */
@@ -194,6 +202,7 @@ const NOT_READY = (status: string): RealizedSavings => ({
   transformationPct: 0,
   compressionMeasuredUsd: 0,
   compressionMeasuredWindowUsd: 0,
+  compressionMeasuredWindowTokens: 0,
   verbosityMeasuredUsd: 0,
   verbosityTransformationUsd: 0,
   savingsPerSession: 0,
@@ -217,6 +226,9 @@ const NOT_READY = (status: string): RealizedSavings => ({
  *   `rowsOverride`      bypasses the DB (raw session_log rows) for tests.
  *   `compressionOverride` injects the measured compression dollars when the DB
  *                       is bypassed (rowsOverride present); default 0.
+ *   `compressionTokensOverride` injects the measured compression TOKENS saved
+ *                       over the window when the DB is bypassed; default 0.
+ *                       Plumbs through to `compressionMeasuredWindowTokens`.
  */
 export function computeRealizedSavings(
   dataDir: string,
@@ -224,9 +236,11 @@ export function computeRealizedSavings(
   now: number = Date.now(),
   rowsOverride?: Array<Record<string, unknown>>,
   compressionOverride?: number,
+  compressionTokensOverride?: number,
 ): RealizedSavings {
   let rows: Array<Record<string, unknown>> = rowsOverride ?? [];
   let measuredCompression = compressionOverride ?? 0;
+  let measuredCompressionTokens = compressionTokensOverride ?? 0;
   let measuredVerbosity = 0;
 
   if (!rowsOverride) {
@@ -234,12 +248,18 @@ export function computeRealizedSavings(
     try {
       rows = store.getAllSessions();
       // Compression add-back (pool #3) reads metered savings_events for the window.
-      measuredCompression = store.getCompressionSavings(days, now).totalCostSavedUsd;
+      // Both the $ (for the transformation headline) and the token count (for the
+      // Tokens Saved card) come from the same query — neither is summed into the
+      // other's headline.
+      const comp = store.getCompressionSavings(days, now);
+      measuredCompression = comp.totalCostSavedUsd;
+      measuredCompressionTokens = comp.totalTokensSaved;
       // Verbosity-steer add-back (pool #4) reads estimated savings_events.
       measuredVerbosity = store.getVerbositySavings(days, now);
     } catch {
       rows = [];
       measuredCompression = 0;
+      measuredCompressionTokens = 0;
       measuredVerbosity = 0;
     } finally {
       store.close();
@@ -517,6 +537,7 @@ export function computeRealizedSavings(
     transformationPct,
     compressionMeasuredUsd,
     compressionMeasuredWindowUsd,
+    compressionMeasuredWindowTokens: Math.max(0, measuredCompressionTokens),
     verbosityMeasuredUsd,
     verbosityTransformationUsd: verbosityAddback,
     savingsPerSession: beforeCps - afterCps,

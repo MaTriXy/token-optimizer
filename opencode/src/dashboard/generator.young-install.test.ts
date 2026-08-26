@@ -194,3 +194,101 @@ test("mature install: run-rate /mo hero restored, 'so far' wording absent", () =
   // A2: run-rate keeps the original subset framing (hero IS the superset here).
   expect(html).toContain("subset of the transformation estimate above");
 });
+
+test("Tokens Saved card renders from live session_log + savings_events data", () => {
+  const now = Date.now();
+  // Mature install so savings.ready=true. The seed inserts 3 tool_archive
+  // savings_events with tokens_saved=1000 each -> SAVED = 3000 tokens.
+  // The 40 after-rows carry real token volumes -> SPENT > 0.
+  // We add extra savings_events to get a meaningful percentage for assertions.
+  seed(dir, now, 200, 35, 29, 40, 0.6, 4_000_000, 0.56);
+
+  // Add 20 more tool_archive events at 500K tokens each -> +10M tokens.
+  // Total SAVED = 3000 (from seed) + 10_000_000 = 10_003_000.
+  const db2 = new Database(path.join(dir, "trends.db"));
+  const insertEvent = db2.prepare(
+    `INSERT INTO savings_events (timestamp, event_type, tokens_saved, cost_saved_usd, session_id, model, detail)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (let i = 0; i < 20; i++) {
+    insertEvent.run(new Date(now - i * DAY).toISOString(), "tool_archive", 500_000, 1.0, `extra-${i}`, "sonnet", "test");
+  }
+  db2.close();
+
+  const html = generateDashboard({ dataDir: dir });
+
+  // --- Exact computed values ---
+  // SPENT (billable, excludes cache_read): 40 rows * (fi + cw + out) = 40 * 168869 = 6754760
+  // SAVED: 3000 (seed) + 20 * 500000 = 10_003_000
+  // total = 6754760 + 10_003_000 = 16_757_760
+  // savedPct = round(10003000 / 16757760 * 100) = 60
+  // spentPct = 100 - 60 = 40
+  const SPENT = 6_754_760;
+  const SAVED = 10_003_000;
+  const TOTAL = SPENT + SAVED;
+  const SAVED_PCT = Math.round(SAVED / TOTAL * 100);
+  const SPENT_PCT = 100 - SAVED_PCT;
+  function fmtNum(n: number): string {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+    return String(Math.round(n));
+  }
+
+  // Card header + hero
+  expect(html).toContain("Tokens Saved");
+  expect(html).toContain("what never had to be sent");
+  expect(html).toContain("tokens saved");
+  // Hero shows the EXACT SAVED figure
+  expect(html).toContain(`>${fmtNum(SAVED)}</`);
+  // Sub-line with the EXACT percentage
+  expect(html).toContain(`≈${SAVED_PCT}%`);
+  expect(html).toContain("of your total token load");
+  // Spent vs Saved bar — EXACT segment strings and widths
+  expect(html).toContain(`spent · ${fmtNum(SPENT)}`);
+  expect(html).toContain(`saved · ${fmtNum(SAVED)}`);
+  expect(html).toContain(`width:${SPENT_PCT}%`);
+  expect(html).toContain(`width:${SAVED_PCT}%`);
+  // Would-be total
+  expect(html).toContain(`without Token Optimizer: ≈${fmtNum(TOTAL)}`);
+  expect(html).toContain(`have sent <strong style="color:var(--text);font-weight:500">≈${fmtNum(TOTAL)}</strong>`);
+  // Model-mix-as-usage section, relabeled with the SPENT figure
+  expect(html).toContain(`Where the ${fmtNum(SPENT)} you spent went`);
+  expect(html).toContain("which models do the work");
+  // Footer
+  expect(html).toContain("Metered floor.");
+  expect(html).toContain("no per-token cost");
+  // The card must not introduce "/mo" into its own section. The card now
+  // renders in BOTH the Overview and Savings views; slice the FIRST card
+  // (Overview) from "Tokens Saved" to "Daily Activity" (the next section
+  // after the Overview card) and verify the card's own markup is clean.
+  // (The savings-view hero and measured-floor card both legitimately carry
+  // "/mo"; only the token-denominated card must not.)
+  const cardStart = html.indexOf("Tokens Saved");
+  const cardEnd = html.indexOf("Daily Activity");
+  const cardHtml = html.slice(cardStart, cardEnd);
+  expect(cardHtml).not.toContain("/mo");
+  // The card must not emit the estimated-slice footer sentence (opencode has
+  // no token-denominated estimated tier). Assert the actual omitted phrase.
+  expect(cardHtml).not.toContain("A further");
+  expect(cardHtml).not.toContain("not</b> included here");
+});
+
+test("Tokens Saved card is absent on a mature install with zero savings_events", () => {
+  const now = Date.now();
+  // Mature install: seed a full baseline (anchor + 35 before-rows + 40 after-rows)
+  // but then DELETE all savings_events so SAVED = 0 while SPENT > 0.
+  // This isolates the SAVED=0 fail-open path from the baseline-not-ready path.
+  seed(dir, now, 200, 35, 29, 40, 0.6, 4_000_000, 0.56);
+  const db2 = new Database(path.join(dir, "trends.db"));
+  db2.exec("DELETE FROM savings_events");
+  db2.close();
+
+  const html = generateDashboard({ dataDir: dir });
+  // Card must NOT render (fail-open: SAVED = 0 despite mature baseline).
+  expect(html).not.toContain("Tokens Saved");
+  expect(html).not.toContain("what never had to be sent");
+  // The savings VIEW should still render (baseline is mature, just no compression events).
+  // The card now lives in BOTH the Overview and Savings views, so its absence
+  // confirms the SAVED=0 fail-open path.
+  expect(html).toContain("id=\"view-savings\"");
+});

@@ -59,6 +59,7 @@ const baseData: DashboardData = {
     totalRuns: 0,
     totalCost: 0,
     totalTokens: 0,
+    totalBillableTokens: 0,
     allCostZero: true,
     monthlySavings: 0,
     wasteCount: 0,

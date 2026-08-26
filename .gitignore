@@ -37,3 +37,6 @@ plugins/token-optimizer/skills/token-optimizer/references/roadmap.md
 
 # internal design journal, never ship
 decisions.md
+
+# Devin CLI session artifacts
+.devin/

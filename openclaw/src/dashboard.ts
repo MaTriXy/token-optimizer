@@ -7,7 +7,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { AgentRun, WasteFinding, AuditReport, totalTokens, Severity, CostlyPrompt } from "./models";
+import { AgentRun, WasteFinding, AuditReport, totalTokens, billableTokens, Severity, CostlyPrompt } from "./models";
 import { QualityReport, contextWindowForModel, scoreSessionQuality, scoreToGrade } from "./quality";
 import { ContextAudit, SkillDetail, McpServer, ManageData } from "./context-audit";
 import type { RealizedSavings, SavingsEventsSummary } from "./savings";
@@ -52,6 +52,12 @@ interface OverviewData {
   totalRuns: number;
   totalCost: number;
   totalTokens: number;
+  // Billable total (fresh_input + cache_create + output, EXCLUDES cache_read)
+  // summed across ALL logged sessions — the same basis the Tokens Saved card
+  // uses for SPENT. Distinct from totalTokens (which includes cache_read) and
+  // from sum(data.models[*].tokens) (which is model-attributed; runs without
+  // a model tag would be missing from that sum, creating a reconciliation gap).
+  totalBillableTokens: number;
   allCostZero: boolean;
   monthlySavings: number;
   wasteCount: number;
@@ -235,7 +241,9 @@ function aggregateByModel(runs: AgentRun[]): ModelBucket[] {
     const entry = map.get(r.model) ?? { cost: 0, runs: 0, tokens: 0 };
     entry.cost += r.costUsd;
     entry.runs++;
-    entry.tokens += totalTokens(r.tokens);
+    // Billable basis (fresh_input + cache_create + output, EXCLUDES cache_read)
+    // to match canonical model_mix / SPENT. See billableTokens in models.ts.
+    entry.tokens += billableTokens(r.tokens);
     map.set(r.model, entry);
   }
 
@@ -330,6 +338,11 @@ export function buildDashboardData(
       totalRuns: runs.length,
       totalCost: report.totalCostUsd,
       totalTokens: report.totalTokens,
+      // Billable total across ALL logged sessions (fresh_input + cache_create +
+      // output, excludes cache_read). Computed independently from the model
+      // buckets so it is the true all-logged billable figure, not a
+      // model-attributed subset.
+      totalBillableTokens: runs.reduce((s, r) => s + billableTokens(r.tokens), 0),
       allCostZero,
       monthlySavings: report.monthlySavingsUsd,
       wasteCount: report.findings.length,
@@ -394,6 +407,7 @@ function fmtCost(n: number): string {
 }
 
 function fmtTokens(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
@@ -517,6 +531,8 @@ function renderOverview(data: DashboardData): string {
 
     ${data.context ? renderContextOverviewBar(data.context, data) : ""}
 
+    ${renderTokensSavedCard(data)}
+
     ${renderV5ActiveCompressionCard()}
 
     ${data.agents.length > 0 ? renderAgentCards(data.agents.slice(0, 6)) : ""}
@@ -604,6 +620,179 @@ function renderV5ActiveCompressionCard(): string {
     <div class="v5-features">${featureRows}</div>
     ${totalsLine}
     <div class="v5-hint">Toggle with <code>token-optimizer v5 enable &lt;feature-id&gt;</code></div>
+  </div>`;
+}
+
+/**
+ * Tokens Saved card: a savings hero + a spent-vs-saved bar above the global
+ * model-mix bar (which is USAGE / spent). Mirrors the canonical dashboard.html
+ * card in the same visual spirit.
+ *
+ *   SAVED = merged measured total = compression_events ∪ savings_events
+ *           (deduped: savings_events is authoritative for shared keys,
+ *           compression_events adds v5-only keys), EXCLUDING estimated-tier
+ *           categories. Mirrors canonical _get_merged_savings.
+ *   SPENT = sum of the global model-mix token counts (data.models[*].tokens),
+ *           which are billable-basis (fresh_input + cache_create + output,
+ *           EXCLUDES cache_read) — see aggregateByModel / billableTokens.
+ *   TOTAL = SPENT + SAVED (the would-have-sent counterfactual).
+ *   PCT   = round(SAVED / TOTAL * 100); spentPct = 100 - savedPct (no 101%).
+ *
+ * Fail-open: returns "" when SPENT or SAVED is not a positive finite number,
+ * so the overview never throws or shows NaN. The model-mix bar is
+ * token-proportional here (SPENT is token-denominated), reusing the existing
+ * .model-bar classes. No estimated-token tier is exposed alongside the v5
+ * measured figure on this surface, so the mockup's "estimated savings not
+ * included" sentence is omitted (per the brief: only show that sentence when
+ * the surface exposes an estimate).
+ */
+function renderTokensSavedCard(data: DashboardData): string {
+  // SPENT = the BILLABLE total (fresh_input + cache_create + output, excludes
+  // cache_read) summed across ALL logged sessions — NOT the sum of the
+  // per-model mix. model_mix only covers model-attributed runs, so tokens
+  // billed without a model tag would be dropped, making the card contradict
+  // the dashboard's own tokens summary. Fail-open: if the billable total is
+  // missing/zero, fall back to sum(data.models[*].tokens) (the model-attributed
+  // billable sum) rather than 0 (never NaN).
+  const modelMixSum = data.models.reduce((s, m) => s + m.tokens, 0);
+  const billableTotal = data.overview.totalBillableTokens;
+  const spentTokens = billableTotal > 0 ? billableTotal : modelMixSum;
+  // NaN guard: NaN <= 0 is false, so use !(x > 0) to catch NaN.
+  if (!(spentTokens > 0)) return "";
+
+  const days = data.daysScanned > 0 ? data.daysScanned : 30;
+
+  // --- SAVED: merge compression_events ∪ savings_events (measured only) ---
+  // Pool 1: compression_events (v5 features) via getCompressionSummary.
+  let compressionTokens = 0;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const tel = require("./telemetry") as {
+      getCompressionSummary: (days?: number) => {
+        total_tokens_saved: number;
+        total_events: number;
+        overall_ratio: number;
+        by_feature: Record<string, { events: number; tokens_saved: number }>;
+      };
+    };
+    compressionTokens = Number(tel.getCompressionSummary(days).total_tokens_saved) || 0;
+  } catch {
+    // telemetry file absent — compression pool is 0, savings_events may still have data.
+  }
+
+  // Pool 2: savings_events (measured categories only, excluding estimated tier).
+  // readSavingsEventsByCategory is already imported at the top of this module.
+  // data.savingsEvents is pre-computed in buildDashboardData but is NOT windowed
+  // to daysScanned — it reads all events. We re-read with a window here to align
+  // SAVED to the same window as SPENT.
+  let savingsEventsTokens = 0;
+  try {
+    const windowed = readSavingsEventsByCategory(undefined, { days, now: Date.now() });
+    // Exclude estimated-tier categories (setup_optimization, mcp_cap,
+    // hint_followed, verbosity_steer) — mirrors measure.py relocations.
+    // Also net tool_archive_reexpand against tool_archive (B6).
+    const byType = new Map<string, number>();
+    for (const cat of windowed.categories) {
+      if (cat.eventType === "setup_optimization" || cat.eventType === "mcp_cap" ||
+          cat.eventType === "hint_followed" || cat.eventType === "verbosity_steer") continue;
+      byType.set(cat.eventType, cat.tokensSaved);
+    }
+    const reexpand = byType.get("tool_archive_reexpand");
+    if (reexpand) {
+      byType.delete("tool_archive_reexpand");
+      const ta = byType.get("tool_archive");
+      if (ta) byType.set("tool_archive", Math.max(0, ta - reexpand));
+    }
+    for (const v of byType.values()) savingsEventsTokens += v;
+  } catch {
+    // savings-events file absent — savings_events pool is 0.
+  }
+
+  // Merge: savings_events is authoritative for shared keys; compression_events
+  // adds v5-only keys. Since we only have the GRAND total from
+  // getCompressionSummary (not per-key), we use the canonical fallback: if a
+  // category appears in savings_events, it's already counted there, so we
+  // subtract the compression pool's contribution for that key. But
+  // getCompressionSummary doesn't expose per-key tokens in a way we can dedup
+  // against savings_events categories without the by_feature breakdown.
+  //
+  // Practical merge: the compression_events pool (v5 features like delta_read,
+  // quality_nudge, loop_prevention) is DISJOINT from savings_events categories
+  // (tool_archive, structural_savings) in the canonical model — the dedup rule
+  // in _get_merged_savings only fires when a key appears in BOTH, which is the
+  // legacy migration edge case. So the simple sum is correct for the common
+  // case, and the by_feature breakdown lets us subtract overlaps if any.
+  let savedTokens = compressionTokens + savingsEventsTokens;
+  // Dedup: if a compression feature key also appears in savings_events,
+  // subtract the compression pool's tokens for that key (savings_events wins).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const tel = require("./telemetry") as {
+      getCompressionSummary: (days?: number) => {
+        by_feature: Record<string, { tokens_saved: number }>;
+      };
+    };
+    const byFeature = tel.getCompressionSummary(days).by_feature;
+    const windowed = readSavingsEventsByCategory(undefined, { days, now: Date.now() });
+    const seTypes = new Set(windowed.categories.map((c) => c.eventType));
+    for (const [feature, fdata] of Object.entries(byFeature)) {
+      if (seTypes.has(feature)) {
+        savedTokens -= Number(fdata.tokens_saved) || 0;
+      }
+    }
+  } catch {
+    // dedup skipped — sum is still correct for the disjoint case.
+  }
+  if (!(savedTokens > 0)) return "";
+
+  const total = spentTokens + savedTokens;
+  const savedPct = Math.round((savedTokens / total) * 100);
+  const spentPct = 100 - savedPct; // no 101% rounding
+
+  // Untracked remainder: tokens billed WITHOUT a model tag (in SPENT but not
+  // in model_mix). Reconciles the model bar to the headline SPENT.
+  const untrackedTokens = Math.max(0, spentTokens - modelMixSum);
+
+  // Global model-mix bar (token-proportional) + legend, reusing .model-bar.
+  // Denominator is spentTokens so the bar sums to the headline SPENT.
+  const modelEntries = [...data.models].sort((a, b) => b.tokens - a.tokens);
+  const segments = modelEntries
+    .map((m) => {
+      const pct = (m.tokens / spentTokens) * 100;
+      const pctStr = pct.toFixed(1);
+      const label = pct >= 8 ? `<span class="segment-label">${Math.round(pct)}%</span>` : "";
+      return `<div class="model-segment" style="width:${pctStr}%;background:${modelColor(m.model)};position:relative;overflow:hidden" data-tt-model="${esc(m.model)}" data-tt-pct="${pctStr}" data-tt-tokens="${fmtTokens(m.tokens)}">${label}</div>`;
+    })
+    .join("");
+  const untrackedSegment = untrackedTokens > 0
+    ? `<div class="model-segment other" style="width:${((untrackedTokens / spentTokens) * 100).toFixed(1)}%" title="untracked: ${fmtTokens(untrackedTokens)} tokens billed without a model tag"></div>`
+    : "";
+  const legend = modelEntries
+    .map((m) => {
+      const pct = Math.round((m.tokens / spentTokens) * 100);
+      return `<div class="model-legend-item"><div class="model-legend-dot" style="background:${modelColor(m.model)}"></div>${esc(m.model)} ${pct}% (${fmtTokens(m.tokens)} tok)</div>`;
+    })
+    .join("");
+  const untrackedLegend = untrackedTokens > 0
+    ? `<div class="model-legend-item"><div class="model-legend-dot other"></div>untracked ${Math.round((untrackedTokens / spentTokens) * 100)}% (${fmtTokens(untrackedTokens)} tok)</div>`
+    : "";
+  const modelMixHtml = `<div class="model-bar">${segments}${untrackedSegment}</div><div class="model-legend">${legend}${untrackedLegend}</div>`;
+
+  return `<div class="card">
+    <div class="card-header"><span>Tokens Saved</span><span class="label" style="font-family:var(--font-mono);font-size:12px;color:var(--c-text-dim);text-transform:uppercase;letter-spacing:0.08em">Last ${days} days · what never had to be sent</span></div>
+    <div style="display:flex;align-items:baseline;gap:var(--s-3);flex-wrap:wrap;margin-top:var(--s-2)"><div class="metric-large savings-hero">${fmtTokens(savedTokens)}</div><div class="metric-unit">tokens saved</div></div>
+    <div class="metric-sub tight">Token Optimizer cut <span class="pct">≈${savedPct}%</span> of your total token load. You spent <b>${fmtTokens(spentTokens)}</b>, and it saved <b>${fmtTokens(savedTokens)}</b> more that never got sent.</div>
+    <div class="ts-divider"></div>
+    <div class="ts-section-label"><span>Spent vs Saved</span><span class="muted">without Token Optimizer: ≈${fmtTokens(total)}</span></div>
+    <div class="sv-bar" title="spent ${fmtTokens(spentTokens)} + saved ${fmtTokens(savedTokens)} = ${fmtTokens(total)} would-be total">
+      <div class="sv-seg spent" style="width:${spentPct}%">spent · ${fmtTokens(spentTokens)}</div>
+      <div class="sv-seg saved" style="width:${savedPct}%">saved · ${fmtTokens(savedTokens)}</div>
+    </div>
+    <div class="sv-caption">Without Token Optimizer you'd have sent <b>≈${fmtTokens(total)}</b> to do the same work.</div>
+    <div class="ts-divider"></div>
+    <div class="ts-section-label"><span>Where the ${fmtTokens(spentTokens)} you spent went</span><span class="muted">which models do the work</span></div>
+    ${modelMixHtml}
+    <div class="ts-foot"><span class="tier">Metered floor.</span> Every token counted is measured, not estimated. Subscription plan — counted in tokens, no per-token cost.</div>
   </div>`;
 }
 
@@ -1244,6 +1433,7 @@ function renderSavings(data: DashboardData): string {
     ${header}
     ${opportunityPanel}
     ${hero}
+    ${renderTokensSavedCard(data)}
     ${cumulative}
     ${levers}
     ${measuredFloor}
@@ -2317,10 +2507,82 @@ h1, h2, h3, h4 { font-weight: 400; }
   flex-wrap: wrap;
   font-size: 12px;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   color: var(--c-text-dim);
 }
 .model-legend-item { display: flex; align-items: center; gap: 6px; }
 .model-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+
+/* TOKENS SAVED CARD (spent vs saved) — same visual language as the
+   canonical dashboard.html card. SAVED = v5 measured compression tokens
+   (getCompressionSummary), SPENT = sum of the global model-mix tokens.
+   Numbers come live from the payload, never hardcoded. */
+.metric-large.savings-hero {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 84px;
+  line-height: 0.9;
+  color: var(--c-savings, var(--c-success));
+  text-shadow: 0 0 26px rgba(74,222,128,0.28);
+  font-variant-numeric: tabular-nums;
+  text-wrap: balance;
+}
+[data-theme="light"] .metric-large.savings-hero { text-shadow: none; }
+.metric-unit {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 24px;
+  color: var(--c-text-dim);
+  letter-spacing: 0.03em;
+}
+.metric-sub.tight {
+  font-size: 18px;
+  color: var(--c-text-dim);
+  line-height: 1.5;
+  margin-top: var(--s-3);
+  text-wrap: pretty;
+  max-width: 62ch;
+}
+.metric-sub.tight b { color: var(--c-text-main); font-weight: 500; }
+.metric-sub.tight .pct { color: var(--c-savings, var(--c-success)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ts-divider { height: 1px; background: var(--c-border); margin: var(--s-4) 0 var(--s-3); }
+.ts-section-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--c-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--s-2);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-3);
+}
+.ts-section-label .muted { text-transform: none; letter-spacing: 0; color: var(--c-text-faint); font-size: 12px; }
+.sv-bar {
+  display: flex;
+  height: 34px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.04);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.sv-seg { height: 100%; display: flex; align-items: center; padding: 0 12px; white-space: nowrap; font-weight: 500; }
+.sv-seg.spent { background: linear-gradient(90deg, #2b3242, #3a4356); color: rgba(255,255,255,0.92); justify-content: flex-start; }
+.sv-seg.saved { background: linear-gradient(90deg, #4ade80, #22c55e); color: #06121f; justify-content: flex-end; }
+.sv-caption { font-size: 14px; color: var(--c-text-dim); margin-top: var(--s-2); text-wrap: pretty; }
+.sv-caption b { color: var(--c-text-main); font-weight: 500; }
+.ts-foot {
+  margin-top: var(--s-4);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-faint);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+.ts-foot .tier { color: var(--c-savings, var(--c-success)); }
 
 /* PROJ ROWS */
 .proj-row {
@@ -2748,10 +3010,14 @@ function renderJS(): string {
   // Bind model segment tooltips
   document.querySelectorAll('.model-segment[data-tt-model]').forEach(function(seg) {
     seg.addEventListener('mouseover', function(e) {
+      // Cost-proportional bars carry data-tt-cost; the Tokens Saved card's
+      // token-proportional bar carries data-tt-tokens instead. Show whichever
+      // this segment exposes so the tooltip never renders "undefined".
+      var secondary = this.dataset.ttCost != null ? this.dataset.ttCost : (this.dataset.ttTokens != null ? this.dataset.ttTokens + ' tokens' : '');
       showTooltip(e,
         '<div class="tt-label">' + te(this.dataset.ttModel) + '</div>' +
         '<div class="tt-value">' + te(this.dataset.ttPct) + '%</div>' +
-        '<div class="tt-secondary">' + te(this.dataset.ttCost) + '</div>'
+        '<div class="tt-secondary">' + te(secondary) + '</div>'
       );
     });
     seg.addEventListener('mousemove', positionTooltip);

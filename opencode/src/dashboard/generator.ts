@@ -78,6 +78,115 @@ export function generateDashboard(opts: DashboardOptions): string {
   const totalCompactions = sessions.reduce((s, r) => s + num(r.compactions), 0);
   const totalDuration = sessions.reduce((s, r) => s + num(r.duration_seconds), 0);
 
+  // ---- Tokens Saved card (spent vs saved) ----
+  // SAVED = measured compression tokens saved over the window, read DIRECTLY
+  //   from TrendsStore.getCompressionSavings (NOT through
+  //   RealizedSavings.compressionMeasuredWindowTokens, which is 0 on every
+  //   NOT_READY path — the card must appear whenever measured savings exist,
+  //   independent of the USD baseline maturity gate). getCompressionSavings
+  //   already excludes estimated-tier categories and nets re-expansions, so
+  //   this IS the full measured token total for opencode (no separate
+  //   compression_events table exists, unlike canonical/openclaw).
+  // SPENT = BILLABLE total across ALL logged sessions (fresh_input +
+  //   cache_create + output, EXCLUDES cache_read) — the SAME figure the
+  //   dashboard's own tokens summary uses, NOT the sum of the per-model mix.
+  //   model_mix only covers model-attributed rows; tokens billed without a
+  //   model tag would be dropped, making the card contradict the tokens
+  //   summary. In opencode every session gets a model (even "unknown"), so
+  //   sum(modelTokenCounts) === spentTokens and the untracked remainder is 0
+  //   in practice — but the reconciliation logic is included for parity with
+  //   the canonical/openclaw surfaces and future-proofing.
+  // Fail-open: the card renders only when BOTH are > 0; otherwise it is "".
+  // No estimated-token tier is exposed on this surface (opencode's estimated
+  // verbosity tier is USD, not tokens), so the mockup's estimated-slice footer
+  // sentence is intentionally omitted.
+  let savedTokens = 0;
+  try {
+    const cardStore = new TrendsStore(opts.dataDir);
+    try {
+      savedTokens = Math.max(0, cardStore.getCompressionSavings(days).totalTokensSaved);
+    } finally {
+      cardStore.close();
+    }
+  } catch {
+    savedTokens = 0;
+  }
+  const modelTokenCounts: Record<string, number> = {};
+  let spentTokens = 0;
+  for (const r of sessions) {
+    const model = String(r.model ?? "unknown");
+    // Billable basis: fresh_input + cache_create + output, EXCLUDES cache_read.
+    // Matches canonical model_mix (measure.py: billable = u["inp"] + u["cc"] + u["out"]).
+    const t = num(r.tokens_input) + num(r.tokens_cache_write) + num(r.tokens_output);
+    if (!(t > 0)) continue;
+    modelTokenCounts[model] = (modelTokenCounts[model] ?? 0) + t;
+    spentTokens += t;
+  }
+  const tsTotal = spentTokens + savedTokens;
+  const tsSavedPct = tsTotal > 0 ? Math.round((savedTokens / tsTotal) * 100) : 0;
+  const tsSpentPct = 100 - tsSavedPct; // no 101% rounding
+  const tsModelEntries = Object.entries(modelTokenCounts).sort((a, b) => b[1] - a[1]);
+  // Untracked remainder: tokens billed WITHOUT a model tag (in SPENT but not
+  // in model_mix). Reconciles the model bar to the headline SPENT. In opencode
+  // every session gets a model (even "unknown"), so this is 0 in practice.
+  const tsModelMixSum = tsModelEntries.reduce((s, [, t]) => s + t, 0);
+  const tsUntrackedTokens = Math.max(0, spentTokens - tsModelMixSum);
+  const tsShowCard = spentTokens > 0 && savedTokens > 0;
+  function modelSwatch(m: string): string {
+    if (m.includes("opus")) return "#a855f7";
+    if (m.includes("sonnet")) return "#3b82f6";
+    if (m.includes("haiku")) return "#22c55e";
+    if (m.includes("gpt-5.4") || m.includes("gpt-5.2")) return "#f472b6";
+    if (m.includes("gpt-5")) return "#fb923c";
+    if (m.includes("gpt-4")) return "#c084fc";
+    if (m.includes("gemini")) return "#34d399";
+    if (m.includes("deepseek")) return "#60a5fa";
+    if (m.includes("qwen")) return "#fbbf24";
+    if (m.includes("local")) return "#6b7280";
+    return "#8b8fa0";
+  }
+  const tokensSavedCard = !tsShowCard ? "" : (() => {
+    const segments = tsModelEntries.map(([m, t]) => {
+      const pct = (t / spentTokens) * 100;
+      const pctStr = pct.toFixed(1);
+      const label = pct >= 8 ? `<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:monospace;font-size:11px;font-weight:500;color:rgba(255,255,255,0.9);text-shadow:0 1px 3px rgba(0,0,0,0.5);white-space:nowrap;pointer-events:none">${Math.round(pct)}%</span>` : "";
+      return `<div style="width:${pctStr}%;background:${modelSwatch(m)};position:relative;overflow:hidden" title="${esc(m)}: ${pctStr}% (${fmtNum(t)} tokens)">${label}</div>`;
+    }).join("");
+    const untrackedSegment = tsUntrackedTokens > 0
+      ? `<div style="width:${((tsUntrackedTokens / spentTokens) * 100).toFixed(1)}%;background:#8b8fa0;position:relative;overflow:hidden" title="untracked: ${fmtNum(tsUntrackedTokens)} tokens billed without a model tag"></div>`
+      : "";
+    const legend = tsModelEntries.map(([m, t]) => {
+      const pct = Math.round((t / spentTokens) * 100);
+      return `<div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:${modelSwatch(m)}"></span>${esc(m)} ${pct}% (${fmtNum(t)} tok)</div>`;
+    }).join("");
+    const untrackedLegend = tsUntrackedTokens > 0
+      ? `<div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:#8b8fa0"></span>untracked ${Math.round((tsUntrackedTokens / spentTokens) * 100)}% (${fmtNum(tsUntrackedTokens)} tok)</div>`
+      : "";
+    return `<div class="card" style="margin-top:var(--s-4)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--s-4);border-bottom:1px solid var(--border);padding-bottom:var(--s-2)">
+        <span style="font-weight:600;font-size:20px;letter-spacing:0.05em">Tokens Saved</span>
+        <span style="font-family:monospace;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">Last ${days} days · what never had to be sent</span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:var(--s-3);flex-wrap:wrap;margin-top:var(--s-2)">
+        <span style="font-family:monospace;font-weight:300;font-size:84px;line-height:0.9;color:var(--success);font-variant-numeric:tabular-nums;text-wrap:balance">${fmtNum(savedTokens)}</span>
+        <span style="font-family:sans-serif;font-weight:500;font-size:24px;color:var(--text-dim);letter-spacing:0.03em">tokens saved</span>
+      </div>
+      <div style="font-size:18px;color:var(--text-dim);line-height:1.5;margin-top:var(--s-3);text-wrap:pretty;max-width:62ch">Token Optimizer cut <span style="color:var(--success);font-weight:600;font-variant-numeric:tabular-nums">≈${tsSavedPct}%</span> of your total token load. You spent <strong style="color:var(--text);font-weight:500">${fmtNum(spentTokens)}</strong>, and it saved <strong style="color:var(--text);font-weight:500">${fmtNum(savedTokens)}</strong> more that never got sent.</div>
+      <div style="height:1px;background:var(--border);margin:var(--s-6) 0 var(--s-4)"></div>
+      <div style="font-family:monospace;font-size:13px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:var(--s-2);display:flex;justify-content:space-between;align-items:baseline;gap:var(--s-3)"><span>Spent vs Saved</span><span style="text-transform:none;letter-spacing:0;color:var(--text-dim);font-size:12px">without Token Optimizer: ≈${fmtNum(tsTotal)}</span></div>
+      <div style="display:flex;height:34px;border-radius:6px;overflow:hidden;background:var(--bg-hover);font-family:monospace;font-size:13px;font-variant-numeric:tabular-nums" title="spent ${fmtNum(spentTokens)} + saved ${fmtNum(savedTokens)} = ${fmtNum(tsTotal)} would-be total">
+        <div style="height:100%;display:flex;align-items:center;padding:0 12px;white-space:nowrap;font-weight:500;background:linear-gradient(90deg,#2b3242,#3a4356);color:rgba(255,255,255,0.92);justify-content:flex-start;width:${tsSpentPct}%">spent · ${fmtNum(spentTokens)}</div>
+        <div style="height:100%;display:flex;align-items:center;padding:0 12px;white-space:nowrap;font-weight:500;background:linear-gradient(90deg,#4ade80,#22c55e);color:#06121f;justify-content:flex-end;width:${tsSavedPct}%">saved · ${fmtNum(savedTokens)}</div>
+      </div>
+      <div style="font-size:14px;color:var(--text-dim);margin-top:var(--s-2);text-wrap:pretty">Without Token Optimizer you'd have sent <strong style="color:var(--text);font-weight:500">≈${fmtNum(tsTotal)}</strong> to do the same work.</div>
+      <div style="height:1px;background:var(--border);margin:var(--s-6) 0 var(--s-4)"></div>
+      <div style="font-family:monospace;font-size:13px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:var(--s-2);display:flex;justify-content:space-between;align-items:baseline;gap:var(--s-3)"><span>Where the ${fmtNum(spentTokens)} you spent went</span><span style="text-transform:none;letter-spacing:0;color:var(--text-dim);font-size:12px">which models do the work</span></div>
+      <div style="display:flex;height:28px;border-radius:6px;overflow:hidden;background:var(--bg-hover);margin-top:var(--s-2)">${segments}${untrackedSegment}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--s-6);margin-top:var(--s-2);font-size:15px;font-family:monospace;color:var(--text-dim);font-variant-numeric:tabular-nums">${legend}${untrackedLegend}</div>
+      <div style="margin-top:var(--s-6);font-family:monospace;font-size:12px;color:var(--text-dim);line-height:1.6;text-wrap:pretty"><span style="color:var(--success)">Metered floor.</span> Every token counted is measured, not estimated. Subscription plan — counted in tokens, no per-token cost.</div>
+    </div>`;
+  })();
+
   const rhGrade = scoreToGrade(Math.round(avgRH));
   const seGrade = scoreToGrade(Math.round(avgSE));
   const rhBand = scoreToBand(Math.round(avgRH));
@@ -266,6 +375,8 @@ tr:hover td { background: var(--bg-hover); }
 
     ${totalSessions === 0 ? '<div class="empty">No sessions recorded yet. Start using OpenCode with the Token Optimizer plugin to see data here.</div>' : ""}
 
+    ${tokensSavedCard}
+
     ${dailyStats.length > 0 ? `
     <div class="section-title">Daily Activity (Last ${days} Days)</div>
     <table>
@@ -399,6 +510,12 @@ tr:hover td { background: var(--bg-hover); }
       </div>
     </div>
     `}
+
+    <!-- TOKENS SAVED card (relocated from the Overview view): the 2nd card in
+         the Savings view, right after the transformation hero above and before
+         the measured-floor card below. Card content unchanged; only its
+         location moved. Fail-open: renders "" when SPENT or SAVED <= 0. -->
+    ${tokensSavedCard}
 
     <!-- MEASURED FLOOR card: the proven, event-by-event subset. -->
     <!-- SEPARATE from the transformation hero. Never summed into the headline.     -->
