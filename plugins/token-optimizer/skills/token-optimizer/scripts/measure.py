@@ -32684,8 +32684,15 @@ def setup_smart_compact(dry_run=False, uninstall=False, status_only=False):
         return
 
     # Install
-    # Plugin users get all smart compact hooks from hooks.json — skip settings.json (GitHub #7)
-    is_plugin = _is_running_from_plugin_cache() or _is_plugin_installed()
+    # Plugin users get all smart compact hooks from hooks.json — skip settings.json (GitHub #7).
+    # Synced (Cowork) installs get them from the cowork hooks.json too; include the
+    # synced check so we never bake a ${CLAUDE_PLUGIN_ROOT} path into settings.json for
+    # them (a single-quoted placeholder only resolves on text-substitution hosts).
+    is_plugin = (
+        _is_running_from_plugin_cache()
+        or _is_running_from_synced_plugin()
+        or _is_plugin_installed()
+    )
     if is_plugin:
         all_active = all(current_status.values())
         if all_active:

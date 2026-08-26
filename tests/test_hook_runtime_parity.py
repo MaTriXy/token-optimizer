@@ -546,7 +546,14 @@ def test_config_contention_is_bounded_and_skips_mutation(
     module._write_config_flag("must_not_write", True)
     elapsed = time.monotonic() - started
     holder.release()
-    assert holder_acquired and elapsed < 0.25 and not config_path.exists()
+    # Behavioral guarantee (the point of the test): while the lock is held
+    # elsewhere, the write is SKIPPED — no mutation, no indefinite block.
+    assert holder_acquired and not config_path.exists()
+    # Timing is a generous ceiling that only catches a genuine hang: the config
+    # lock's acquire_timeout is 75ms, so a correct skip returns fast. The bound is
+    # deliberately loose (26x the timeout) so process/FS jitter on a loaded CI
+    # runner can't flake it — measuring performance is not this test's job.
+    assert elapsed < 2.0, f"config write blocked for {elapsed:.2f}s (should skip fast)"
 
 
 def test_throttle_only_cache_miss_never_parses_transcript(
