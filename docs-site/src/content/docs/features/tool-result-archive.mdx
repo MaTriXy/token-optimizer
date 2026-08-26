@@ -21,6 +21,8 @@ Archiving moves a large result to disk and replaces it with a recoverable pointe
 
 The pointer left in context is written for the model, not just for you. It states the `tool_use_id` and the exact `expand` invocation, so when the model later realizes it needs the full output, it can issue the retrieval itself without guessing. The hint is what makes the archive usable mid-session rather than only a manual recovery tool.
 
+When the model knows *what* it needs but not *which* archived result holds it, `expand --search` runs a full-text search over the archived output (SQLite FTS5, with a plain-text fallback) and returns the matching chunk, so it recovers one relevant result instead of re-loading everything.
+
 ## When it fires
 
 Automatically, on the PostToolUse hook, for any tool result at or above the size threshold. It covers Bash, Read, Glob, Grep, Agent, and MCP results. Retrieval with `expand` is manual: it runs only when the model or you call it.
@@ -49,6 +51,10 @@ python3 measure.py expand --list
 
 # List archives for a specific session
 python3 measure.py expand --list --session SESSION_ID
+
+# Find an archived result by keyword instead of re-loading everything
+python3 measure.py expand --search "connection refused"
+python3 measure.py expand --search "stack trace" --session SESSION_ID
 
 # Manually archive the current pending result (normally automatic)
 python3 measure.py archive-result

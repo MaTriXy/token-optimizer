@@ -14,6 +14,7 @@ Each active compression feature has a `config.json` key and an environment overr
 | Variable | Default | Effect |
 |---|---|---|
 | `TOKEN_OPTIMIZER_BASH_COMPRESS` | enabled | Set to `0` to disable Bash output compression for eligible read-only commands |
+| `TOKEN_OPTIMIZER_COMMAND_FILTERS` | `<runtime-home>/token-optimizer/command-filters.toml` | Path to a user TOML file that adds read-only commands to the compression allowlist and excludes commands you never want compressed; composes with the built-ins, safety-gated, fail-open |
 | `TOKEN_OPTIMIZER_READ_CACHE` | enabled | Set to `0` to disable the read cache entirely (no delta, no skeleton substitution) |
 | `TOKEN_OPTIMIZER_READ_CACHE_DELTA` | enabled | Set to `0` to disable delta mode only (re-reads return full content instead of a diff) |
 | `TOKEN_OPTIMIZER_READ_CACHE_MODE` | `soft_block` | Select the read-cache mode: `soft_block`, `warn`, `shadow`, or `block`. See the modes table below. |
