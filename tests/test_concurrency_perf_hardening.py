@@ -18,6 +18,7 @@ Each test pins one fix so a future edit that reintroduces the defect fails here:
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -33,7 +34,7 @@ def _generated_src() -> str:
 
 
 def _extract(src, names, extra_ns=None):
-    ns = {"time": time, "os": os}
+    ns = {"time": time, "os": os, "_STATE_LOCK": threading.Lock()}
     ns.update(extra_ns or {})
     for const in ("_REJECT_LOG_LAST_TS", "_REJECT_LOG_MIN_GAP", "_REJECT_LOG_MAX_KEYS"):
         m = re.search(r"^%s(?::[^=]+)? = .*$" % re.escape(const), src, re.M)

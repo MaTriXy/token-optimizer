@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import types
 from pathlib import Path
 
@@ -396,8 +397,18 @@ def test_daemon_regen_nt_uses_create_no_window(monkeypatch, tmp_path):
         "MEASURE_PY_RESOLVE_TTL": 300,
         "DASHBOARD_FRESH_SECONDS": 120,
         "_last_regen": 0.0,
+        # issue #160: _maybe_refresh_dashboard now guards _last_regen with
+        # _STATE_LOCK; give the extracted method a real lock so it runs.
+        "_STATE_LOCK": threading.Lock(),
         "_resolve_measure_py": lambda: str(measure_py),
         "_log_regen": lambda msg: None,
+        # issue #160 follow-up: _maybe_refresh_dashboard now also claims the shared
+        # _regen_inflight guard and hands it to a reaper thread; give the extracted
+        # method those globals so it runs. The reaper is stubbed here (this test
+        # only checks the Popen creationflags, not the guard's lifetime).
+        "_regen_inflight": False,
+        "threading": threading,
+        "_reap_bg_regen": lambda proc: None,
     }
     ns["sys"].executable = sys.executable
     ns["__name__"] = "dashboard_server_test"
@@ -464,8 +475,18 @@ def test_daemon_regen_posix_uses_start_new_session(monkeypatch, tmp_path):
         "MEASURE_PY_RESOLVE_TTL": 300,
         "DASHBOARD_FRESH_SECONDS": 120,
         "_last_regen": 0.0,
+        # issue #160: _maybe_refresh_dashboard now guards _last_regen with
+        # _STATE_LOCK; give the extracted method a real lock so it runs.
+        "_STATE_LOCK": threading.Lock(),
         "_resolve_measure_py": lambda: str(measure_py),
         "_log_regen": lambda msg: None,
+        # issue #160 follow-up: _maybe_refresh_dashboard now also claims the shared
+        # _regen_inflight guard and hands it to a reaper thread; give the extracted
+        # method those globals so it runs. The reaper is stubbed here (this test
+        # only checks the Popen creationflags, not the guard's lifetime).
+        "_regen_inflight": False,
+        "threading": threading,
+        "_reap_bg_regen": lambda proc: None,
     }
     ns["sys"].executable = sys.executable
     ns["__name__"] = "dashboard_server_test"

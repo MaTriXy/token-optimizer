@@ -233,7 +233,7 @@ These ten rows are the ones where Token Optimizer is the only 🟢 in the row: w
 | Zero baseline context overhead | 🟢 External process, no context injection | 🔴 Injects instructions | 🟢 Shell-level only | 🟢 Shell-level only | 🔴 MCP server overhead | 🟢 Native |
 | Zero runtime dependencies | 🟢 Pure stdlib (Python/TypeScript) | 🟡 Python + Rust + optional model | 🟢 Single Rust binary | 🟢 Single binary | 🟡 SQLite adapter required | 🟢 N/A |
 | Zero telemetry | 🟢 Nothing leaves the machine | 🟡 `HEADROOM_TELEMETRY` opt-in, off by default | 🟡 Opt-in | 🔴 Collects commands invoked, command arguments, exit codes, duration, CI attributes, IP | 🟡 Varies | 🟢 |
-| Multi-platform | 🟢 Claude Code, VS Code, Codex, OpenClaw, OpenCode, Hermes, Copilot | 🟢 Claude Code, Cursor, Codex, Aider, Copilot | 🟢 15 integrations | 🟡 Cursor, Claude Code, Copilot, Codex CLI | 🟢 17 integrations | 🔴 Claude Code only |
+| Multi-platform | 🟢 Claude Code, VS Code, Cowork, Codex, OpenClaw, OpenCode, Hermes, Copilot | 🟢 Claude Code, Cursor, Codex, Aider, Copilot | 🟢 15 integrations | 🟡 Cursor, Claude Code, Copilot, Codex CLI | 🟢 17 integrations | 🔴 Claude Code only |
 | Per-task model and effort advice | 🟢 `route` sizes the task before you spend | — | — | — | — | — |
 | Keep-Warm (cache TTL refresh) | 🟢 Opt-in ping before cache expiry, tripwire auto-off | 🔴 | 🔴 | — | 🔴 | 🔴 |
 | End-to-end task-outcome benchmark | 🟡 Controlled A/B on 7 real tasks (output tokens) + measured real-session with/without savings; pass-rate study not yet run | — | — | 🟢 Vendor reports Terminal-Bench 2.0 with the same pass rate and ~12% lower cost | — | N/A |

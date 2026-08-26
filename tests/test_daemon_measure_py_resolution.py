@@ -13,6 +13,7 @@ and the result is containment-checked.
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -35,7 +36,10 @@ def _load_resolver(fallback: str, tmp_log: Path):
 
     src = measure._generate_daemon_script()
 
-    ns = {"os": os, "json": __import__("json"), "time": __import__("time")}
+    # issue #160: _resolve_measure_py now guards _MEASURE_PY_CACHE with
+    # _STATE_LOCK; give the extracted function a real lock so it runs in-isolation.
+    ns = {"os": os, "json": __import__("json"), "time": __import__("time"),
+          "_STATE_LOCK": threading.Lock()}
     for const in ["_MEASURE_PY_CACHE", "MEASURE_PY_RESOLVE_TTL"]:
         m = re.search(r"^%s = .*$" % re.escape(const), src, re.M)
         assert m, f"{const} missing from generated daemon"
