@@ -286,10 +286,17 @@ def test_run_py_consent_rejects_foreign_claude_plugin_data(monkeypatch, tmp_path
     monkeypatch.setenv("HOMEPATH", str(tmp_path)[len(tmp_path.drive):] if tmp_path.drive else str(tmp_path))
 
     # Legacy path (what a rejected/absent CLAUDE_PLUGIN_DATA falls through to)
-    # has NO consent flags -- the real, honest answer is "no consent yet".
+    # holds an explicit opt-out -- since unit D (v5.12.4 race fix), a
+    # flags-ABSENT config fails OPEN, so the only state whose honest answer
+    # is still "no consent" is a PRESENT enterprise_consent_shown: false
+    # (exactly what `measure.py consent --reset` persists). The discriminating
+    # power is unchanged: the foreign config claims True, the leak bug would
+    # read that True; the fix must read the legitimate False instead.
     legacy_config = tmp_path / ".claude" / "token-optimizer" / "config.json"
     legacy_config.parent.mkdir(parents=True)
-    legacy_config.write_text(json.dumps({}), encoding="utf-8")
+    legacy_config.write_text(
+        json.dumps({"enterprise_consent_shown": False}), encoding="utf-8"
+    )
 
     run_mod = _load_run_py()
     result = run_mod._check_consent(tmp_path / "plugin-root")

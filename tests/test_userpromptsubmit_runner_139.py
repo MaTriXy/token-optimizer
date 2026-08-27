@@ -334,8 +334,13 @@ def test_userpromptsubmit_runner_harness_guard_skips_gated(monkeypatch, tmp_path
 # --------------------------------------------------------------------------- #
 # (e) P0 consent-gate deadlock: consent=False must still bootstrap, then flip.
 #     These tests do NOT bypass consent -- they drive the REAL run._check_consent
-#     against a tmp config.json (flags unset => consent False) and prove the
-#     consolidated runner does not deadlock the way the pre-fix run.py gate did.
+#     against a tmp config.json and prove the consolidated runner does not
+#     deadlock the way the pre-fix run.py gate did.
+#     NOTE (unit D, v5.12.4 race fix): "config exists, flags unset" is the
+#     SessionStart race window and now fails OPEN (consent True), so the
+#     consent-False fixtures below use the only remaining consent-False state:
+#     an explicit opt-out (enterprise_consent_shown written False, exactly
+#     what `measure.py consent --reset` persists).
 # --------------------------------------------------------------------------- #
 
 
@@ -460,12 +465,15 @@ def _install_consent_recorder(monkeypatch, runner, write_flags_on_health):
 
 def test_consent_false_cowork_bootstraps_then_flips(monkeypatch, tmp_path):
     """P0 regression (the Cowork-fatal path). With consent False (config.json
-    exists, flags unset) and the Cowork harness guard active (CLAUDE_CODE_REMOTE
+    holds an explicit opt-out, enterprise_consent_shown: false) and the Cowork
+    harness guard active (CLAUDE_CODE_REMOTE
     set, no SessionStart to bootstrap out-of-band), the runner MUST still run
     ensure-health (the bootstrap) and skip the other five; ensure-health writes
     the consent flags; a subsequent prompt then sees consent True and runs all
     six. Does NOT bypass consent -- run._check_consent is real."""
-    runner, cfg_path = _load_runner_real_consent(monkeypatch, tmp_path, config_json="{}")
+    runner, cfg_path = _load_runner_real_consent(
+        monkeypatch, tmp_path, config_json='{"enterprise_consent_shown": false}'
+    )
     # Cowork harness guard (real _harness_only_context path): CLAUDE_CODE_REMOTE.
     monkeypatch.setenv("CLAUDE_CODE_REMOTE", "1")
     calls = _install_consent_recorder(monkeypatch, runner, write_flags_on_health=True)
@@ -474,7 +482,7 @@ def test_consent_false_cowork_bootstraps_then_flips(monkeypatch, tmp_path):
 
     # Sanity: consent really is False against the tmp config before we start.
     assert runner._check_consent() is False, (
-        "fixture error: tmp config must read consent=False (flags unset)"
+        "fixture error: tmp config must read consent=False (explicit opt-out)"
     )
 
     # First prompt: consent False. Only ensure-health (the bootstrap) runs.
@@ -513,7 +521,9 @@ def test_consent_false_non_harness_skips_all_and_stays_false(monkeypatch, tmp_pa
     bootstrap, so UserPromptSubmit correctly does nothing when consent is False
     and there is no harness guard. Preserves the pre-consolidation semantics
     (ensure-health was a harness-gated, consent-exempt entry)."""
-    runner, cfg_path = _load_runner_real_consent(monkeypatch, tmp_path, config_json="{}")
+    runner, cfg_path = _load_runner_real_consent(
+        monkeypatch, tmp_path, config_json='{"enterprise_consent_shown": false}'
+    )
     # No CLAUDE_CODE_REMOTE / CONTAINER_ID / harness markers => guard False.
     monkeypatch.delenv("CLAUDE_CODE_REMOTE", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_CONTAINER_ID", raising=False)
@@ -575,11 +585,14 @@ def test_run_py_exempts_runner_path_from_consent_gate(monkeypatch, tmp_path):
     Popen). This pins the run.py half of the P0 fix."""
     run = _load_run_py()
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(REPO))
-    # Make consent deterministically False via a tmp config with no flags.
+    # Make consent deterministically False via a tmp config holding an
+    # explicit opt-out (flags-unset is the fail-open race window, unit D).
     claude_dir = tmp_path / "claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
     (claude_dir / "token-optimizer").mkdir(parents=True, exist_ok=True)
-    (claude_dir / "token-optimizer" / "config.json").write_text("{}", encoding="utf-8")
+    (claude_dir / "token-optimizer" / "config.json").write_text(
+        '{"enterprise_consent_shown": false}', encoding="utf-8"
+    )
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
