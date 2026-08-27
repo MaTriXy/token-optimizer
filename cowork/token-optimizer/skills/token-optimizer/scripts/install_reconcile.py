@@ -745,6 +745,7 @@ def reconcile_uninstall(
     *,
     dry_run: bool = False,
     remove: bool = False,
+    daemon_already_stopped: bool = False,
 ) -> dict:
     """Report (and optionally remove) our stale host-manifest entries.
 
@@ -761,6 +762,13 @@ def reconcile_uninstall(
     explicit cleanup command (``remove=True``) it writes a backup of each file
     first, then removes our STALE entries, leaving other plugins' entries
     byte-identical. Never raises; all errors land in ``warnings``.
+
+    When *daemon_already_stopped* is True (set by ``measure.cleanup()`` after
+    step 1 already stopped the daemon), the live-daemon probe is SKIPPED and
+    any key whose installPath is gone is classified as stale. This prevents a
+    false-alive probe (e.g. a real daemon on a different port responding to
+    the health check, or a port collision in a test) from blocking manifest
+    pruning during cleanup.
 
     Returns a result dict with ``reported`` and ``removed`` lists plus
     ``backup`` (the backup dir created, when any) and ``warnings``.
@@ -790,7 +798,7 @@ def reconcile_uninstall(
     # -> not alive (the installPath rule still removes genuinely-stale entries),
     # and the call site below also guards so the protection can never raise.
     daemon_alive = False
-    if our_keys:
+    if our_keys and not daemon_already_stopped:
         try:
             daemon_alive = _dashboard_daemon_alive()
         except Exception:  # noqa: BLE001 -- protection must never raise

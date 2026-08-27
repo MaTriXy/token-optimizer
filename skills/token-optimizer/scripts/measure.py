@@ -24337,6 +24337,7 @@ def cleanup(dry_run=False, this_install_only=False):
     import install_reconcile
     reconcile = install_reconcile.reconcile_uninstall(
         CLAUDE_DIR, dry_run=dry_run, remove=True,
+        daemon_already_stopped=True,
     )
     for entry in reconcile.get("reported", []):
         stale_tag = " (stale)" if entry.get("stale") else " (active, kept)"
