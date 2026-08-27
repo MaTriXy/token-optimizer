@@ -35831,6 +35831,12 @@ def _input_rate_mix_ratio(days=30):
         return None
 
 
+# Minimum per-window API-credit overage before its dollar line is shown. Below
+# this the figure is immaterial (e.g. a freshly reset weekly window worth a few
+# cents) and reads as noise, so the window shows only its headroom bars.
+_MIN_OVERAGE_USD_SHOWN = 10.0
+
+
 def runway_snapshot(days=30, now=None):
     """Subscription runway: how much of your rate-limit window Token Optimizer
     hands back, and what the same windows would read without it.
@@ -35982,7 +35988,13 @@ def runway_snapshot(days=30, now=None):
                 _overage_cache[cache_key] = (ctx, rt)
             ctx, rt = _overage_cache[cache_key]
             total = ctx + rt
-            if total <= 0:
+            # Suppress immaterial dollar lines. Right after a limit reset the
+            # aligned window is only hours old, so its overage is a few cents
+            # ("≈$0.36 more in API credits") which reads as noise next to the
+            # headroom bars. Below _MIN_OVERAGE_USD_SHOWN the window carries no
+            # dollar line (returns None, like a sub-day window) and shows only
+            # its bars; the figure reappears once real usage accrues in-window.
+            if total < _MIN_OVERAGE_USD_SHOWN:
                 return None, None
             # Measured-vs-estimated boundary: context $ is metered from actual
             # tokens_saved; routing $ is an estimated counterfactual. Estimated
@@ -36057,6 +36069,13 @@ def runway_snapshot(days=30, now=None):
         # actually shows -- so the tier chip matches the number beside it. The 7d
         # merged call is already cached above; re-read the same components.
         _wk_ctx, _wk_rt = _overage_cache.get(_wk_cache_key, (0.0, 0.0))
+        # Suppress an immaterial weekly dollar figure (same rule as the per-window
+        # line above): below _MIN_OVERAGE_USD_SHOWN the spine reads zero so the
+        # card shows no "$X in API credits" line -- only the headroom bars. Right
+        # after a limit reset the aligned window is worth a few cents, and that
+        # reads as noise beside the bars.
+        if (_wk_ctx + _wk_rt) < _MIN_OVERAGE_USD_SHOWN:
+            _wk_ctx = _wk_rt = 0.0
         saved_context_usd = _wk_ctx
         saved_routing_usd = _wk_rt
         saved_usd_tier = ("estimated" if saved_routing_usd > 0
@@ -36826,18 +36845,28 @@ def _estimate_retrieval_serve_savings(days=30):
         return zero
 
 
-def _model_mix_shares(days=14):
+def _model_mix_shares(days=14, since=None):
     """Return {model: share_fraction} of total tokens over the window, + total.
 
     Reads model_daily (per-day per-model token totals). Shares sum to ~1.0.
     Returns {"shares": {...}, "total_tokens": int, "days": days} or empty shares
     when there is no data. Never raises.
+
+    When *since* is a non-empty ISO-8601 timestamp, its DATE part is used as the
+    cutoff (``date >= since_date``) instead of the rolling ``now - days``. This
+    aligns the routing mix to an external boundary (the subscription limit
+    reset) so the routing dollar figure scopes to the same window as the context
+    figure. model_daily is day-granular, so alignment is to the reset DAY (the
+    finest this table supports); sub-day precision is not available here.
     """
     out = {"shares": {}, "total_tokens": 0, "days": days}
     try:
         if not TRENDS_DB.exists():
             return out
-        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        if since:
+            cutoff = str(since)[:10]  # date part of the ISO timestamp
+        else:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         conn = _init_trends_db()
         try:
             rows = conn.execute(
@@ -37069,7 +37098,7 @@ def set_pretool_baseline(args):
         print(f"  [Error] Could not write baseline: {e}")
 
 
-def _compute_model_routing_savings(days=30):
+def _compute_model_routing_savings(days=30, since=None):
     """Model-routing savings: realized (mix shift vs baseline) + potential (remaining Opus).
 
     REALIZED: compare current model mix against the install-era baseline (snapshot
@@ -37098,7 +37127,7 @@ def _compute_model_routing_savings(days=30):
         "baseline_source": None, "evidence": "unavailable",
     }
     try:
-        current = _model_mix_shares(days=days)
+        current = _model_mix_shares(days=days, since=since)
         cur_shares = current.get("shares", {})
         cur_total = int(current.get("total_tokens", 0) or 0)
         if not cur_shares or cur_total <= 0:
@@ -38887,7 +38916,7 @@ def _get_merged_savings(days=30, since=None):
     contamination_exit = _estimate_contamination_exit_savings(days=days)
     handover_rerun = _estimate_handover_rerun_savings(days=days)
     retrieval_serve = _estimate_retrieval_serve_savings(days=days)
-    model_routing = _compute_model_routing_savings(days=days)
+    model_routing = _compute_model_routing_savings(days=days, since=since)
     output_waste = _estimate_output_waste(days=days)
     cache_drop = _estimate_cache_drop_savings(days=days)
     before_after = _estimate_before_after_savings(days=days, estimated_pools={
