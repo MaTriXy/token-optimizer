@@ -32,7 +32,7 @@ from pathlib import Path
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # ---------------------------------------------------------------------------
-# Claude Code tool-output truncation baseline (UNIT C: never lose to baseline)
+# Claude Code tool-output truncation baseline (never show more than baseline)
 # ---------------------------------------------------------------------------
 # Claude Code 2.1.247 (2026-08) replaces any tool result LARGER than
 # CC_PERSISTED_OUTPUT_THRESHOLD_CHARS with a ~2.2KB "<persisted-output>"
@@ -1607,7 +1607,7 @@ def _baseline_visible_chars(raw_chars):
 
 
 def _enforce_baseline_invariant(text, raw_output, archive_key):
-    """UNIT C: never show the model MORE chars than the CC baseline would.
+    """Never show the model MORE chars than the CC baseline would.
 
     Claude Code 2.1.247 already truncates any tool result larger than
     ~30KB down to a ~2.2KB "<persisted-output>" stub on its own, so the

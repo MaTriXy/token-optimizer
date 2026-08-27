@@ -10,7 +10,7 @@ Architecture:
   CC runs Bash tool → PostToolUse fires → this hook receives tool_response
   → pipeline_analyzer checks read-only eligibility → bash_compress.compress()
   compresses stdout → archive raw original → attach archive pointer →
-  enforce Unit C baseline invariant → updatedToolOutput replaces what
+  enforce the baseline-size invariant → updatedToolOutput replaces what
   Claude sees.
 
 The existing PreToolUse bash_hook.py continues to handle simple (metachar-free)
@@ -24,9 +24,9 @@ Safety (same stack as bash_hook.py):
   - Token preservation: credential scan runs BEFORE compression
   - Raw output archived: the full stdout is stored with a retrievable key;
     the compressed output carries an expand pointer.
-  - Unit C invariant: _enforce_baseline_invariant runs so the compressed
+  - Baseline-size invariant: _enforce_baseline_invariant runs so the compressed
     preview never exceeds what Claude Code would show as baseline.
-  - Error-on-stdout guard (B3): _ERROR_STDERR_PATTERNS checked against stdout
+  - Error-on-stdout guard: _ERROR_STDERR_PATTERNS checked against stdout
     when stderr was redirected (2>&1), so compressed output never swallows
     error lines that appear on stdout.
   - Exit behavior: no output = pass through; JSON output = compress
@@ -111,14 +111,14 @@ def main() -> None:
             _enforce_baseline_invariant,
         )
 
-        # --- B3 FIX: check stderr for failure patterns ---
+        # --- check stderr for failure patterns ---
         if _looks_like_failure(0, stderr):
             return  # Don't compress failure output
 
         # Clean ANSI escape codes before compression
         cleaned_stdout = _strip_ansi(stdout)
 
-        # --- B3 FIX: also scan stdout for error patterns ---
+        # --- also scan stdout for error patterns ---
         # When stderr is redirected to stdout (2>&1), error lines appear
         # on stdout. If the pipeline exits 0 but stdout contains error
         # patterns, pass through raw so the model sees the errors.
@@ -139,7 +139,7 @@ def main() -> None:
         if orig_tokens > 0 and (1.0 - comp_tokens / orig_tokens) < 0.10:
             return  # Not enough savings
 
-        # --- B2 FIX: archive raw stdout + attach retrieval pointer ---
+        # --- archive raw stdout + attach a retrieval pointer ---
         # Progressive disclosure: the full uncompressed original is stored
         # on disk so the model can retrieve it via `expand <key>`. Mirror
         # the exact archiving path from bash_compress.main().
@@ -168,7 +168,7 @@ def main() -> None:
             except Exception:
                 _archive_key = None
 
-        # --- B2 FIX: enforce Unit C baseline invariant ---
+        # --- enforce the baseline-size invariant ---
         # If our compressed preview + archive pointer would exceed what
         # Claude Code would show as a baseline stub, shrink to fit.
         try:
@@ -198,7 +198,7 @@ def main() -> None:
 
 
 def _stdout_has_error_patterns(stdout: str) -> bool:
-    """B3: check stdout for error patterns (covers 2>&1 redirect case).
+    """Check stdout for error patterns (covers 2>&1 redirect case).
 
     Uses the same _ERROR_STDERR_PATTERNS list as _looks_like_failure.
     Only triggers when stdout is large enough to make compression

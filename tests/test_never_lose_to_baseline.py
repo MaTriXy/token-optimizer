@@ -1,4 +1,4 @@
-"""UNIT C: Token Optimizer must never lose to baseline on huge outputs.
+"""Token Optimizer must never lose to baseline on huge outputs.
 
 Measured problem: Claude Code 2.1.247 already truncates any tool result
 larger than ~30KB down to a ~2.2KB "<persisted-output>" stub on its own.
@@ -53,7 +53,7 @@ def _run_main(monkeypatch, tmp_path, capsys, command: str, raw_stdout: str) -> s
     """Run the REAL bash_compress.main() with a stubbed subprocess.run.
 
     Archiving is real (tmp snapshot dir), so the archive+pointer path and
-    the UNIT C guard both execute exactly as in production. Returns the
+    the baseline-size guard both execute exactly as in production. Returns the
     exact text main() wrote to stdout.
     """
     monkeypatch.syspath_prepend(str(SCRIPTS))
@@ -103,7 +103,7 @@ def test_small_output_to_wins_big(monkeypatch, tmp_path, capsys):
     out = _run_main(monkeypatch, tmp_path, capsys, "some-unmatched-cmd", raw)
 
     assert len(out) <= _baseline(raw), (
-        f"UNIT C invariant violated on ~5KB output: TO={len(out)} "
+        f"baseline-size invariant violated on ~5KB output: TO={len(out)} "
         f"baseline={_baseline(raw)}"
     )
     assert len(out) < _baseline(raw) * 0.5, (
@@ -123,7 +123,7 @@ def test_40kb_output_lands_under_stub(monkeypatch, tmp_path, capsys):
     out = _run_main(monkeypatch, tmp_path, capsys, "ls -la /usr/bin", raw)
 
     assert len(out) <= _baseline(raw), (
-        f"UNIT C invariant violated: TO={len(out)} baseline={_baseline(raw)}"
+        f"baseline-size invariant violated: TO={len(out)} baseline={_baseline(raw)}"
     )
     assert len(out) <= bc.CC_PERSISTED_OUTPUT_STUB_CHARS, (
         f"TO output must fit under the ~2.2KB stub: {len(out)} > "
@@ -151,7 +151,7 @@ def test_200kb_output_lands_under_stub(monkeypatch, tmp_path, capsys):
     out = _run_main(monkeypatch, tmp_path, capsys, "ls -la /usr/bin", raw)
 
     assert len(out) <= _baseline(raw), (
-        f"UNIT C invariant violated: TO={len(out)} baseline={_baseline(raw)}"
+        f"baseline-size invariant violated: TO={len(out)} baseline={_baseline(raw)}"
     )
     assert len(out) <= bc.CC_PERSISTED_OUTPUT_STUB_CHARS, (
         f"TO output must fit under the ~2.2KB stub: {len(out)} > "

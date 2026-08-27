@@ -8,7 +8,7 @@ Tests empirically prove:
 4. Credential scan runs and preserves sensitive lines
 5. The hook doesn't double-compress already-compressed output
 6. **B2**: emitted compressed output carries a resolvable archive pointer
-7. **B2**: Unit C baseline invariant is enforced
+7. **Baseline invariant**: the baseline-size invariant is enforced
 8. **B3**: error-on-stdout (2>&1) passes through raw (no compression)
 """
 
@@ -295,7 +295,7 @@ class TestBoundaryConditions:
 
 
 # ============================================================================
-# B2: Archive pointer + Unit C invariant
+# Archive pointer + baseline-size invariant
 # ============================================================================
 
 class TestArchivePointerAndUnitC:
@@ -335,7 +335,7 @@ class TestArchivePointerAndUnitC:
             if compressed is not None:
                 assert len(compressed) <= len(output), (
                     f"Compressed ({len(compressed)}) > raw ({len(output)}) — "
-                    f"Unit C invariant violated!"
+                    f"baseline-size invariant violated!"
                 )
 
     def test_compression_never_inflates_output(self):

@@ -75,7 +75,7 @@ EXPECTED_ASYNC = {
     ("PostToolUse", "mcp__.*", "archive_result.py"): True,
     ("PostToolUse", "Bash|Read|Glob|Grep|Agent", "archive_result.py"): True,
     ("PostToolUse", "Bash|Read|Grep|Glob|mcp__.*", "context_intel.py"): True,
-    # UNIT B: PostToolUse Bash output compression. MUST be sync (not async):
+    # PostToolUse Bash output compression. MUST be sync (not async):
     # it returns updatedToolOutput to REPLACE the tool result before the model
     # reads it -- an async fire-and-forget hook cannot mutate output already
     # sent to context. Same reason archive_result stays async (it only records)
