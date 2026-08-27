@@ -41099,6 +41099,12 @@ if __name__ == "__main__":
                 print("Note: v5 welcome was shown; consent will be backfilled on next hook invocation")
         elif sub == "--reset":
             _write_config_flag("enterprise_consent_shown", False)
+            # Also clear v5_welcome_shown: run.py's backfill treats a present
+            # v5_welcome_shown as implied consent, so leaving it True would
+            # silently re-grant consent on the next hook (finding D1).
+            # Clearing it is also what re-triggers the data notice on the next
+            # session start, matching the message below.
+            _write_config_flag("v5_welcome_shown", False)
             print("Consent reset. Data notice will appear on next session start.")
         elif sub == "--grant":
             _write_config_flag("enterprise_consent_shown", True)

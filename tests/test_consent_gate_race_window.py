@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +31,7 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 HOOKS = REPO / "hooks"
 RUN_PY = HOOKS / "run.py"
+MEASURE_PY = REPO / "skills" / "token-optimizer" / "scripts" / "measure.py"
 
 # The exact argv the hooks.json PreToolUse "Bash" entry dispatches through
 # run.py (see hooks/hooks.json PreToolUse matcher "Bash").
@@ -180,12 +183,94 @@ def test_missing_config_still_fails_open(race_env):
     assert len(race_env.spawned["argv"]) == 1
 
 
-def test_v5_welcome_backfill_still_grants_consent(race_env):
-    """Pre-existing invariant: v5_welcome_shown present => consent True and
-    enterprise_consent_shown backfilled into config.json."""
+def test_v5_welcome_backfill_grants_when_enterprise_key_absent(race_env):
+    """Legacy path, kept: v5_welcome_shown true with NO enterprise_consent_shown
+    key => consent True and the enterprise flag is backfilled (pre-enterprise-
+    consent users who saw the v5 welcome implicitly consented)."""
     race_env.write_config({"v5_welcome_shown": True})
     assert race_env.run._check_consent(REPO) is True
     cfg = json.loads(race_env.cfg_path.read_text(encoding="utf-8"))
     assert cfg.get("enterprise_consent_shown") is True, (
         "v5 welcome backfill must persist enterprise_consent_shown: true"
     )
+
+
+def test_explicit_opt_out_wins_over_v5_backfill(race_env):
+    """Finding D1: enterprise_consent_shown PRESENT and False is an explicit
+    opt-out (`consent --reset`). The v5_welcome_shown backfill must NOT grant
+    over it: consent stays False across repeated hook invocations and the
+    backfill must not rewrite the flag to true."""
+    race_env.write_config({"enterprise_consent_shown": False, "v5_welcome_shown": True})
+    assert race_env.run._check_consent(REPO) is False, (
+        "explicit opt-out must survive the v5 welcome backfill (D1): "
+        "backfill may only fire when the enterprise key is ABSENT"
+    )
+    # Second hook invocation: still gated (the opt-out is stable).
+    assert race_env.run._check_consent(REPO) is False
+    cfg = json.loads(race_env.cfg_path.read_text(encoding="utf-8"))
+    assert cfg.get("enterprise_consent_shown") is False, (
+        "backfill must not rewrite an explicit opt-out to true"
+    )
+
+
+def test_consent_reset_stays_opted_out_end_to_end(monkeypatch, tmp_path):
+    """Finding D1, full flow through the REAL measure.py CLI: from the
+    post-bootstrap state (both flags true, exactly what the SessionStart
+    ensure-health bootstrap persists), run `consent --reset`. The pre-fix
+    --reset left v5_welcome_shown true, so the run.py backfill silently
+    re-granted consent on the next hook. After the fix: --reset clears BOTH
+    flags, and _check_consent returns False and STAYS False across repeated
+    hook invocations.
+
+    The granted state is seeded by direct file write (not a `consent --grant`
+    subprocess) on purpose: the config lease's post-release reuse window
+    (~10s) silently drops a second process's write that soon after another
+    writer, which would make a grant->reset subprocess pair flaky for reasons
+    unrelated to D1 (pre-existing lease anti-churn, reported separately)."""
+    claude_dir = tmp_path / "claude-e2e"
+    # CLAUDE_CONFIG_DIR is only honored when absolute, EXISTING, non-symlink.
+    claude_dir.mkdir(parents=True)
+    cfg_dir = claude_dir / "token-optimizer"
+    cfg_dir.mkdir(parents=True)
+    cfg_path = cfg_dir / "config.json"
+    cfg_path.write_text(
+        json.dumps({"enterprise_consent_shown": True, "v5_welcome_shown": True}),
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_dir),
+    }
+    for var in ("CLAUDE_PLUGIN_DATA", "CODEX_HOME", "TOKEN_OPTIMIZER_SNAPSHOT_DIR"):
+        env.pop(var, None)
+
+    reset = subprocess.run(
+        [sys.executable, str(MEASURE_PY), "consent", "--reset"],
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    assert reset.returncode == 0, reset.stderr
+
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert cfg.get("enterprise_consent_shown") is False, (
+        "consent --reset must persist enterprise_consent_shown: false"
+    )
+    assert cfg.get("v5_welcome_shown") is False, (
+        "consent --reset must ALSO clear v5_welcome_shown, or the run.py "
+        "backfill re-grants consent on the next hook (D1)"
+    )
+
+    # Drive the REAL in-process consent gate against the post-reset config,
+    # twice (two hook invocations). It must not flip back to True.
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    run = _load_run_py()
+    assert run._check_consent(REPO) is False, (
+        "after consent --reset the gate must read False"
+    )
+    assert run._check_consent(REPO) is False, (
+        "opt-out must survive repeated hook invocations (no silent re-grant)"
+    )
+    cfg_after = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert cfg_after.get("enterprise_consent_shown") is False

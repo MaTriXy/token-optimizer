@@ -193,8 +193,12 @@ def _check_consent(plugin_root: Path | None = None) -> bool:
         if config.get("enterprise_consent_shown"):
             return True
 
-        # Backward compat backfill: existing users who saw v5 welcome have implicitly consented
-        if config.get("v5_welcome_shown"):
+        # Backward compat backfill: existing users who saw v5 welcome have
+        # implicitly consented -- but ONLY when enterprise_consent_shown was
+        # never written. A present-and-False enterprise_consent_shown is an
+        # explicit opt-out (`consent --reset`); backfilling over it would
+        # silently re-enable a user who opted out (review finding D1).
+        if config.get("v5_welcome_shown") and "enterprise_consent_shown" not in config:
             config["enterprise_consent_shown"] = True
             # Atomic write (tempfile + os.replace)
             import tempfile
