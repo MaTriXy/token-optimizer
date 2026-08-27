@@ -32,6 +32,19 @@ from pathlib import Path
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # ---------------------------------------------------------------------------
+# Claude Code tool-output truncation baseline (UNIT C: never lose to baseline)
+# ---------------------------------------------------------------------------
+# Claude Code 2.1.247 (2026-08) replaces any tool result LARGER than
+# CC_PERSISTED_OUTPUT_THRESHOLD_CHARS with a ~2.2KB "<persisted-output>"
+# stub (measured: a 41.1KB `ls -la /usr/bin` result -> a 2,206-char stub).
+# Token Optimizer must NEVER make the model see more chars than that
+# baseline would, so these two numbers are the single tuning point: if a
+# future Claude Code version changes its truncation behavior, adjust them
+# together here (see _enforce_baseline_invariant).
+CC_PERSISTED_OUTPUT_THRESHOLD_CHARS = 30_000  # raw tool result size that triggers CC's stub
+CC_PERSISTED_OUTPUT_STUB_CHARS = 2_206        # size of the stub CC shows for such results
+
+# ---------------------------------------------------------------------------
 # Token/credential preservation patterns (scanned PRE-compression)
 # ---------------------------------------------------------------------------
 try:
@@ -1581,6 +1594,58 @@ def _compress_generic(text):
     return "\n".join(out)
 
 
+def _baseline_visible_chars(raw_chars):
+    """Chars Claude Code would show for a raw tool result of ``raw_chars`` chars.
+
+    UNIT C baseline: results at or under CC's persisted-output threshold are
+    shown in full; larger results are collapsed to the ~2.2KB stub (CC 2.1.247
+    behavior -- see the CC_PERSISTED_OUTPUT_* constants above).
+    """
+    if raw_chars <= CC_PERSISTED_OUTPUT_THRESHOLD_CHARS:
+        return raw_chars
+    return CC_PERSISTED_OUTPUT_STUB_CHARS
+
+
+def _enforce_baseline_invariant(text, raw_output, archive_key):
+    """UNIT C: never show the model MORE chars than the CC baseline would.
+
+    Claude Code 2.1.247 already truncates any tool result larger than
+    ~30KB down to a ~2.2KB "<persisted-output>" stub on its own, so the
+    baseline the model sees for such outputs is only the stub -- NOT the
+    raw result. When our compressed preview + archive pointer would exceed
+    that baseline, shrink the preview to fit UNDER the stub while keeping
+    the pointer intact, so the full original stays retrievable via
+    `expand <key>` and CC does not re-stub (and thereby swallow) our output.
+
+    Three branches:
+      * text already <= baseline -> unchanged (the common case).
+      * text IS the raw output -> left untouched: CC truncates raw output
+        at its own layer to the same stub it would show without Token
+        Optimizer, i.e. exactly the baseline (defer, fail-open, no data
+        loss beyond what CC itself does).
+      * lossy preview (pointer failed to build) -> keep the most useful
+        head of the preview, capped at the baseline.
+    """
+    cap = _baseline_visible_chars(len(raw_output))
+    if len(text) <= cap:
+        return text
+    if text == raw_output:
+        return text  # CC stubs raw output itself; that IS the baseline
+    if archive_key:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from archive_result import build_archive_pointer
+            pointer = build_archive_pointer("", len(raw_output), archive_key)
+            if pointer and len(pointer) <= cap:
+                # text is preview + "\n\n" + pointer; text > cap guarantees
+                # text[:cap - len(pointer)] cuts inside the preview, never
+                # into the pointer region, so no duplicated pointer bytes.
+                return text[:cap - len(pointer)] + pointer
+        except Exception:
+            pass  # fall through to plain head-cap
+    return text[:cap]
+
+
 def compress(command_str, raw_output, returncode=0, stderr=""):
     """Compress CLI output based on command pattern.
 
@@ -1770,6 +1835,16 @@ def main():
                         verified=True,
                         tier="measured",
                     )
+        except Exception:
+            pass
+
+        # UNIT C guard: the final gate on what the model sees. If our
+        # preview + archive pointer would exceed what Claude Code itself
+        # would show for this output (full raw below ~30KB, ~2.2KB stub
+        # above it), shrink it so Token Optimizer never loses to baseline.
+        # Fail-open: a guard failure must never break the pipeline.
+        try:
+            compressed = _enforce_baseline_invariant(compressed, raw_output, _archive_key)
         except Exception:
             pass
 
