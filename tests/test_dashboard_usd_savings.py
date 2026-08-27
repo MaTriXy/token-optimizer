@@ -85,11 +85,17 @@ def _fresh_meters():
 
 
 def _ledger(context_usd, routing_usd):
-    """A _get_merged_savings payload with known context + routing dollars."""
-    return lambda days=30: {
-        "total_cost_usd": context_usd,
-        "model_routing": {"realized_cost_usd": routing_usd},
-    }
+    """A _get_merged_savings payload with known context + routing dollars.
+
+    Accepts the *since* keyword (added for window alignment in Unit F) so the
+    mock is compatible with both the old days-only and new days+since call sites.
+    """
+    def _merged(days=30, since=None):
+        return {
+            "total_cost_usd": context_usd,
+            "model_routing": {"realized_cost_usd": routing_usd},
+        }
+    return _merged
 
 
 # ----- per-window saved_usd is the real-span overage, not a slice -----
