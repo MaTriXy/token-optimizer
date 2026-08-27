@@ -206,6 +206,63 @@ def _find_preserved_lines(text):
     return preserved
 
 
+# Identifier-shaped token: >=6 chars, contains a letter, not a bare
+# number/timestamp. Captures UUIDs, URLs, hashes, emails, dotted names, IDs --
+# the kinds of things a user greps a log FOR -- while ignoring counters,
+# timestamps, and short plain words.
+_DISTINCTIVE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@\-]{5,}")
+_BARE_NUMERIC_RE = re.compile(r"^[0-9][0-9:.\-T/]*$")
+
+
+def _find_distinctive_lines(text, rare_max=2, cap_frac=0.30, min_lines=8):
+    """Find lines carrying a token that is RARE within this output (the needle).
+
+    Aggressive summarizers (search/grep -> top-N + count, generic log -> head/
+    tail) drop the one line the user actually wants when it is not near the top.
+    The model then re-runs a narrower query to recover it, spending the tokens
+    the compression just saved. This scan flags lines whose distinctive token
+    (a UUID, URL, hash, email, id -- something with identifier shape) appears on
+    only a couple of lines, so the shared re-injection path keeps that needle.
+
+    Rarity, not type, is the signal. A token on EVERY line (a per-line request
+    id, a ubiquitous host) is boilerplate and is NOT preserved -- otherwise a
+    log where every line carries an id would preserve every line and defeat
+    compression. If more than ``cap_frac`` of lines look distinctive the output
+    is too varied to have a single needle, so we bail (return nothing) and let
+    normal compression run unhindered. Never raises: on any surprise the caller
+    still has the credential/error scan and progressive-disclosure archive.
+    """
+    try:
+        lines = text.splitlines()
+        n = len(lines)
+        if n < min_lines:
+            return set()  # too small to bother; full output likely survives
+        from collections import Counter
+        toksets = []
+        df = Counter()
+        for ln in lines:
+            toks = set()
+            for m in _DISTINCTIVE_TOKEN_RE.finditer(ln):
+                t = m.group(0)
+                if _BARE_NUMERIC_RE.match(t):
+                    continue  # counter / timestamp, not a needle
+                if not any(c.isalpha() for c in t):
+                    continue
+                toks.add(t)
+            toksets.append(toks)
+            for t in toks:
+                df[t] += 1
+        distinctive = {
+            i for i, toks in enumerate(toksets)
+            if any(df[t] <= rare_max for t in toks)
+        }
+        if len(distinctive) > n * cap_frac:
+            return set()  # too varied to needle-preserve; do not defeat compression
+        return distinctive
+    except Exception:
+        return set()  # fail open -- credential scan + archive still protect data
+
+
 # ---------------------------------------------------------------------------
 # Compression patterns (one per command family)
 # ---------------------------------------------------------------------------
@@ -1665,8 +1722,13 @@ def compress(command_str, raw_output, returncode=0, stderr=""):
     # Strip ANSI codes (always safe)
     cleaned = _strip_ansi(raw_output)
 
-    # PRE-compression token preservation scan
-    preserved_lines = _find_preserved_lines(cleaned)
+    # PRE-compression token preservation scan (credentials + errors), plus
+    # rarity-based needle preservation: a line carrying a distinctive token
+    # (UUID/URL/hash/id) that the user is likely grepping FOR must survive the
+    # summarizer, or the model re-runs a narrower query and spends back the
+    # tokens we just saved. Both feed the shared re-injection path below (capped
+    # at _MAX_REINJECTED_LINES, so a needle-dense log still compresses).
+    preserved_lines = _find_preserved_lines(cleaned) | _find_distinctive_lines(cleaned)
 
     # Detect pattern
     pattern = _detect_pattern(command_str)
