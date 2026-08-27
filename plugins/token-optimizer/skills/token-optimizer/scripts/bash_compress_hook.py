@@ -128,16 +128,25 @@ def main() -> None:
         # Run the standard compression pipeline
         compressed = compress(command, cleaned_stdout, returncode=0, stderr=stderr)
 
-        # If compression didn't help (same output returned), pass through
-        if compressed == cleaned_stdout or not compressed:
-            return
-
-        # Verify compression actually shrank the output.
+        # Best single-output representation: the compressed preview when it
+        # actually shrank the output by >=10%, else the raw output.
         from token_estimate import estimate_tokens as _est
         orig_tokens = _est(cleaned_stdout)
-        comp_tokens = _est(compressed)
-        if orig_tokens > 0 and (1.0 - comp_tokens / orig_tokens) < 0.10:
-            return  # Not enough savings
+        comp_helped = bool(compressed) and compressed != cleaned_stdout and (
+            orig_tokens == 0 or (1.0 - _est(compressed) / orig_tokens) >= 0.10)
+        best = compressed if comp_helped else cleaned_stdout
+
+        # Cross-turn dedup: if this command's output repeats a recent same-session
+        # run, emit a compact delta reference instead. Catches repeats even when
+        # single-output compression did not help (a small repeated `git status`),
+        # which per-command tools cannot do -- they have no session memory.
+        deduped = _crossturn_dedup(command, best)
+        if deduped is not None:
+            best, comp_helped = deduped, True
+
+        if not comp_helped:
+            return  # nothing shrank the output -> pass through raw
+        compressed = best
 
         # --- archive raw stdout + attach a retrieval pointer ---
         # Progressive disclosure: the full uncompressed original is stored
@@ -227,6 +236,59 @@ def _stdout_has_error_patterns(stdout: str) -> bool:
     except Exception:
         return False
     return False
+
+
+def _crossturn_dedup(command: str, output: str):
+    """Return a compact delta-reference when this command's output repeats a
+    recent same-session run, else None.
+
+    Per-command wrappers (e.g. Boost) compress each invocation in isolation and
+    so re-pay for every re-run of `git status`, `ls`, a test suite, etc. Token
+    Optimizer is a session-stateful hook, so it can collapse the repeat: the
+    identical case becomes a one-line note, a small change becomes just the diff.
+    Reuses the (previously dormant) command_outputs store + delta_diff. The
+    caller still attaches the progressive-disclosure pointer, so `expand`
+    recovers the full output even if the referenced run has scrolled out of
+    context -- the reference is self-sufficient, never a dangling pointer.
+    Never raises (fail-open): any trouble returns None and normal output stands.
+    """
+    try:
+        session_id = os.environ.get("CLAUDE_SESSION_ID", "")
+        if not session_id or len(output) < 200:
+            return None
+        from session_store import SessionStore
+        from delta_diff import content_hash, compute_delta
+
+        store = SessionStore(session_id)
+        try:
+            cmd_h = content_hash(command.strip())
+            out_h = content_hash(output)
+            prior = store.get_command_output(cmd_h)
+            # Record THIS run (full output) for the next comparison BEFORE we
+            # return a delta, so deltas always chain off full outputs, not refs.
+            store.insert_command_output(cmd_h, command[:500], out_h, len(output), output)
+            if not prior or not prior.get("compressed_output"):
+                return None
+            # Recency guard: only reference a run from the last hour, a rough
+            # proxy for "probably still in the agent's context".
+            if time.time() - float(prior.get("timestamp") or 0) > 3600:
+                return None
+            label = command.strip()[:60]
+            if prior.get("output_hash") == out_h:
+                ref = (f"[Token Optimizer: identical to your previous `{label}` "
+                       f"output this session; unchanged.]")
+            else:
+                delta, _stats = compute_delta(
+                    prior["compressed_output"], output, filename=label)
+                if not delta:
+                    return None
+                ref = (f"[Token Optimizer: same as your previous `{label}` output "
+                       f"this session, except:]\n{delta}")
+            return ref if len(ref) < len(output) * 0.85 else None
+        finally:
+            store.close()
+    except Exception:
+        return None
 
 
 def _log_event(command: str, original: str, compressed: str) -> None:
