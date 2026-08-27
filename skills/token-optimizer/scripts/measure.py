@@ -22468,9 +22468,13 @@ def _install_launchd_daemon(dry_run=False, soft_fail=False, effective_host=None)
     first so we never fight a stale PID.
     """
     def _fail(msg, hint=None):
-        print(msg)
+        # Under soft_fail we are inside a hook --
+        # stdout is session-visible context, so route errors to stderr instead
+        # of spamming "[Error] ..." into every SessionStart transcript.
+        out = sys.stderr if soft_fail else sys.stdout
+        print(msg, file=out)
         if hint:
-            print(hint)
+            print(hint, file=out)
         if soft_fail:
             return False
         sys.exit(1)
@@ -23656,9 +23660,13 @@ def _install_systemd_user_daemon(dry_run=False, soft_fail=False, effective_host=
     callers keep the default False for the hard-failure + actionable-hint UX.
     """
     def _fail(msg, *extra):
-        print(msg)
+        # Under soft_fail we are inside a hook --
+        # stdout is session-visible context, so route errors to stderr instead
+        # of spamming "[Error] ..." into every SessionStart transcript.
+        out = sys.stderr if soft_fail else sys.stdout
+        print(msg, file=out)
         for line in extra:
-            print(line)
+            print(line, file=out)
         if soft_fail:
             return False
         sys.exit(1)
@@ -39840,7 +39848,12 @@ def run_ensure_health():
                     heal_result = setup_all_hooks(dry_run=False, verbose=False)
                     added = heal_result.get("added", 0)
                     if added > 0:
-                        print(f"  [Token Optimizer] Self-healed {added} missing hook(s) in settings.json. Restart Claude Code to activate.")
+                        # Hook stdout is injected into agent context; route the
+                        # heal notice to stderr on the non-interactive path so a
+                        # human running `measure.py ensure-health` still sees it
+                        # but SessionStart context stays clean.
+                        _heal_out = sys.stderr if _running_under_hook() else sys.stdout
+                        print(f"  [Token Optimizer] Self-healed {added} missing hook(s) in settings.json. Restart Claude Code to activate.", file=_heal_out)
                     elif added == 0 and not heal_result.get("error"):
                         _write_config_flag("last_hook_heal_check", now)
         except Exception:
