@@ -210,7 +210,19 @@ def _check_consent(plugin_root: Path | None = None) -> bool:
                     pass
             return True
 
-        return False  # No consent and no v5_welcome_shown = skip data collection
+        # Flags ABSENT is the SessionStart race window (v5.11.93 silent
+        # no-op), NOT an opt-out: config.json can be created by a non-consent
+        # writer (ensure-health's last_hook_heal_check, a v5 feature toggle)
+        # before the consent bootstrap writes the flags. Fail OPEN so
+        # non-exempt hooks -- the PreToolUse Bash compression rewrite
+        # included -- keep working in that window; the exempt bootstrap
+        # (ensure-health/consent/v5) writes the flags shortly after. A
+        # consent key PRESENT and False is a genuine explicit opt-out
+        # (`measure.py consent --reset`) and stays gated.
+        if "enterprise_consent_shown" not in config and "v5_welcome_shown" not in config:
+            return True
+
+        return False  # Explicit opt-out (a consent key was written False)
     except Exception:
         return True  # Fail-open: never block on errors
 
