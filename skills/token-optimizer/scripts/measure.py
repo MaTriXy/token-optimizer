@@ -10222,8 +10222,13 @@ def _log_compression_event(feature, original_text="", compressed_text="",
         pass
 
 
-def _get_compression_summary(days=30):
+def _get_compression_summary(days=30, since=None):
     """Query compression events and return a summary dict.
+
+    When *since* is a non-empty ISO-8601 timestamp string, it is used directly
+    as the cutoff (``timestamp >= since``) instead of the rolling ``now - days``
+    cutoff. When *since* is None / empty, the rolling cutoff is computed from
+    *days* as before.
 
     If compression_events rows carry a stored model (written at event-time
     via the session join), compute cost_saved_usd from per-row token * model_rate
@@ -10234,7 +10239,10 @@ def _get_compression_summary(days=30):
     try:
         conn = _init_trends_db()
         try:
-            cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+            if since:
+                cutoff = since
+            else:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
             # Pull model alongside aggregates so we can reprice by event-time model.
             # NULLs land as None in Python; fallback handled below.
             # REALIZED tiers only: opportunity (shadow) and estimated rows are
@@ -15559,7 +15567,7 @@ def _keepwarm_read_meters(rate_limits_path=None, now=None):
     if rate_limits_path is None:
         rate_limits_path = _keepwarm_rate_limits_path()
     out = {"available": False, "five_hour_pct": None, "seven_day_pct": None,
-           "ts": None, "age_s": None, "stale": True}
+           "seven_day_resets_at": None, "ts": None, "age_s": None, "stale": True}
     try:
         data = json.loads(Path(rate_limits_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError):
@@ -15574,8 +15582,26 @@ def _keepwarm_read_meters(rate_limits_path=None, now=None):
                 return max(0.0, min(100.0, float(v)))
         return None
 
+    def _resets_at(win):
+        """Extract resets_at epoch seconds from a window dict. Accepts numeric
+        (epoch s) and ISO-8601 string (parsed). Returns None when absent/invalid."""
+        if not isinstance(win, dict):
+            return None
+        ra = win.get("resets_at")
+        if isinstance(ra, (int, float)) and ra > 0 and ra == ra:
+            return float(ra)
+        if isinstance(ra, str):
+            try:
+                from datetime import datetime as _dt
+                parsed = _dt.fromisoformat(ra.replace("Z", "+00:00"))
+                return parsed.timestamp()
+            except (ValueError, OSError):
+                return None
+        return None
+
     fh = _pct(data.get("five_hour"))
     sd = _pct(data.get("seven_day"))
+    sd_resets = _resets_at(data.get("seven_day"))
     ts = data.get("timestamp")
     if isinstance(ts, (int, float)) and ts > 1e12:  # ms epoch -> s
         ts = ts / 1000.0
@@ -15587,6 +15613,7 @@ def _keepwarm_read_meters(rate_limits_path=None, now=None):
     out.update({
         "available": (fh is not None or sd is not None),
         "five_hour_pct": fh, "seven_day_pct": sd,
+        "seven_day_resets_at": sd_resets,
         "ts": (float(ts) if isinstance(ts, (int, float)) else None),
         "age_s": age, "stale": stale,
     })
@@ -16533,12 +16560,22 @@ def _cache_coverage_gaps(runtime):
     ]
 
 
-def _get_savings_summary(days=30):
-    """Query savings events and return a summary dict."""
+def _get_savings_summary(days=30, since=None):
+    """Query savings events and return a summary dict.
+
+    When *since* is a non-empty ISO-8601 timestamp string, it is used directly
+    as the cutoff (``timestamp >= since``) instead of the rolling ``now - days``
+    cutoff. This allows callers to align the lookback window to an external
+    boundary (e.g. the subscription limit reset). When *since* is None / empty,
+    the rolling cutoff is computed from *days* as before.
+    """
     try:
         conn = _init_trends_db()
         try:
-            cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+            if since:
+                cutoff = since
+            else:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
             rows = conn.execute(
                 "SELECT event_type, COUNT(*) as cnt, SUM(tokens_saved) as tok, SUM(cost_saved_usd) as cost "
                 "FROM savings_events WHERE timestamp >= ? GROUP BY event_type ORDER BY tok DESC",
@@ -35884,11 +35921,11 @@ def runway_snapshot(days=30, now=None):
         # --- USD-per-window: API-credit OVERAGE over each window's OWN real span ---
         # The dollar answers the user's question directly: "if I had kept working
         # WITHOUT Token Optimizer and hit my limits, what would the SAME work cost
-        # me in API-credit overage?" So each window is priced over ITS OWN span --
-        # the weekly window over the last 7 days, not a time-slice of a longer
-        # ledger. The old code prorated a 30-day ledger by span (168/720), which is
-        # not "what you saved this week", just 7/30 of a month. Now we ask the
-        # metered savings ledger for exactly the window's span.
+        # me in API-credit overage?" So each window is priced over ITS OWN span —
+        # the weekly window since your current subscription limit period RESET
+        # (aligned to the meter's resets_at boundary), not a rolling 7-day lookback
+        # that drifts down as heavy days age out. When the meter is unavailable the
+        # rolling 7-day fallback is used.
         #
         # The figure reuses _get_merged_savings for that span: context tokens_saved
         # priced at input rate (total_cost_usd, metered) + realized model-routing
@@ -35904,22 +35941,45 @@ def runway_snapshot(days=30, now=None):
         # and show only their headroom bars.
         _overage_cache = {}
 
-        def _window_overage_usd(span_h):
+        def _window_overage_usd(span_h, resets_at=None):
             """(usd, tier) of API-credit overage avoided over this window's span,
-            or (None, None) when the span is sub-day or the ledger is empty."""
+            or (None, None) when the span is sub-day or the ledger is empty.
+
+            When *resets_at* is provided AND the window is the weekly (7d) span,
+            the savings ledger is summed from ``resets_at - 7 * 24 * 3600``
+            (the true limit-period start) to now instead of a rolling ``now - 7
+            days``. This aligns the dollar figure with the actual subscription
+            limit window so it does not drift down as heavy days age out of a
+            simple rolling lookback. When *resets_at* is None/unavailable, the
+            call falls back to the rolling *days* cutoff (unchanged behaviour
+            for the 5h window, which never receives a resets_at).
+            """
             if span_h < 24:
                 return None, None
             wdays = max(1, int(round(span_h / 24.0)))
-            if wdays not in _overage_cache:
+            # --- weekly window alignment ---
+            # When the meter supplies a resets_at for the 7d window, compute
+            # the true limit-period start and sum savings from that boundary.
+            # Otherwise fall back to the rolling *wdays* cutoff (legacy path).
+            since_iso = None
+            if resets_at is not None and wdays == 7:
+                window_start = float(resets_at) - (7 * 24 * 3600)
+                try:
+                    since_iso = datetime.fromtimestamp(window_start).isoformat()
+                except (ValueError, OSError):
+                    since_iso = None  # fall back to rolling
+
+            cache_key = (wdays, since_iso) if since_iso else wdays
+            if cache_key not in _overage_cache:
                 ctx = rt = 0.0
                 try:
-                    wm = _get_merged_savings(days=wdays)
+                    wm = _get_merged_savings(days=wdays, since=since_iso)
                     ctx = float(wm.get("total_cost_usd", 0.0) or 0.0)
                     rt = float((wm.get("model_routing") or {}).get("realized_cost_usd", 0.0) or 0.0)
                 except Exception:
                     pass
-                _overage_cache[wdays] = (ctx, rt)
-            ctx, rt = _overage_cache[wdays]
+                _overage_cache[cache_key] = (ctx, rt)
+            ctx, rt = _overage_cache[cache_key]
             total = ctx + rt
             if total <= 0:
                 return None, None
@@ -35931,6 +35991,10 @@ def runway_snapshot(days=30, now=None):
 
         windows = []
         meter_age_s = meters.get("age_s")
+        # Per-window resets_at: only meaningful for the 7d window (aligns the
+        # weekly dollar figure to the subscription limit period). The 5h window
+        # has no dollar line and skips alignment (resets_at=None).
+        _sd_resets = meters.get("seven_day_resets_at")
         for key, label, span_h in (("five_hour", "5h", 5), ("seven_day", "7d", 168)):
             used = meters.get("five_hour_pct" if key == "five_hour" else "seven_day_pct")
             if used is None:
@@ -35945,7 +36009,11 @@ def runway_snapshot(days=30, now=None):
             counterfactual = min(100.0, used * mult)
             head_now = max(0.0, 100.0 - used)
             head_cf = max(0.0, 100.0 - counterfactual)
-            window_saved_usd, window_usd_tier = _window_overage_usd(span_h)
+            # Pass resets_at for the 7d window so the dollar figure aligns to the
+            # true subscription limit period start (resets_at - 7d). Pass None for
+            # 5h (no dollar line, uses rolling days as before).
+            window_resets = _sd_resets if key == "seven_day" else None
+            window_saved_usd, window_usd_tier = _window_overage_usd(span_h, resets_at=window_resets)
             windows.append({
                 "key": key, "label": label, "span_hours": span_h,
                 "used_pct": round(used, 1),
@@ -35969,14 +36037,25 @@ def runway_snapshot(days=30, now=None):
         # the card alive with empty windows so the headline + savings still show;
         # the renderer omits the per-window bars and shows a "meter refreshing"
         # note. Populate the weekly $ spine directly since the 7d window that
-        # normally fills _overage_cache[7] may have been dropped above.
-        if not windows and 7 not in _overage_cache:
-            _window_overage_usd(168)
+        # normally fills _overage_cache[...] may have been dropped above.
+        #
+        # Compute the aligned weekly cache key (same logic as _window_overage_usd)
+        # so the fallback and spine read use the same entry.
+        _wk_since = None
+        if _sd_resets is not None:
+            _wk_start = float(_sd_resets) - (7 * 24 * 3600)
+            try:
+                _wk_since = datetime.fromtimestamp(_wk_start).isoformat()
+            except (ValueError, OSError):
+                _wk_since = None
+        _wk_cache_key = (7, _wk_since) if _wk_since else 7
+        if not windows and _wk_cache_key not in _overage_cache:
+            _window_overage_usd(168, resets_at=_sd_resets)
 
         # Top-level spine reflects the WEEKLY (7d) ledger -- the dollar the card
         # actually shows -- so the tier chip matches the number beside it. The 7d
         # merged call is already cached above; re-read the same components.
-        _wk_ctx, _wk_rt = _overage_cache.get(7, (0.0, 0.0))
+        _wk_ctx, _wk_rt = _overage_cache.get(_wk_cache_key, (0.0, 0.0))
         saved_context_usd = _wk_ctx
         saved_routing_usd = _wk_rt
         saved_usd_tier = ("estimated" if saved_routing_usd > 0
@@ -38722,16 +38801,23 @@ def _progressive_disclosure_summary(days=30):
     return out
 
 
-def _get_merged_savings(days=30):
+def _get_merged_savings(days=30, since=None):
     """Merge savings_events and compression_events into one unified savings view.
+
+    When *since* is a non-empty ISO-8601 timestamp string, it is forwarded to
+    the underlying savings/compression queries as the cutoff (``timestamp >=
+    since``) instead of the rolling ``now - days`` cutoff. This lets callers
+    align the lookback window to an external boundary (e.g. the subscription
+    limit reset). When *since* is None / empty, the rolling *days* cutoff is
+    used as before.
 
     Dedup rule: legacy categories stay authoritative in savings_events.
     v5 categories (delta_read, quality_nudge, loop_prevention, bash_compress_*)
     come from compression_events. If a key somehow appears in both, savings_events
     wins — compression_events rows are skipped for that key.
     """
-    savings = _get_savings_summary(days=days)
-    compression = _get_compression_summary(days=days)
+    savings = _get_savings_summary(days=days, since=since)
+    compression = _get_compression_summary(days=days, since=since)
 
     by_category = dict(savings.get("by_category", {}))
     total_tokens = int(savings.get("total_tokens", 0) or 0)

@@ -4077,9 +4077,10 @@ var DB = (function() {
         var v = Number(w.saved_usd);
         if (!isFinite(v) || v <= 0) return;
         // Honest label -- API-credit overage over the window's own real span, not
-        // a slice of a longer ledger. Sub-day windows carry no dollar, so in
-        // practice only the weekly figure appears here.
-        var span = w.key === 'five_hour' ? 'past 5h' : 'this week';
+        // a slice of a longer ledger. The weekly dollar is aligned to the
+        // subscription limit reset boundary (not a rolling 7-day lookback), so
+        // it does not drift down as heavy days age out.
+        var span = w.key === 'five_hour' ? 'past 5h' : 'since your limit reset';
         usdParts.push('<em style="font-style:normal;color:var(--c-accent-cyan);">' + rwMoney(v) + '</em> ' + span);
       });
       var usdHeadline = usdParts.join(' &middot; ');
