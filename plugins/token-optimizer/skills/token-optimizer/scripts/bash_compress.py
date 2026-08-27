@@ -993,6 +993,26 @@ def _detect_pattern(command_str):
     if not tokens:
         return None
 
+    # Pipelines: dispatch on the stage that DEFINES the output shape. The last
+    # stage usually does -- `cat f | grep X` produces grep output and must get
+    # the aggressive search summarizer, exactly like a bare `grep X f`, not the
+    # timid generic path. But a terminal TRIMMER (`head`/`tail`/`sort`) has no
+    # handler of its own; there we fall back to the FIRST stage, which still
+    # defines the shape (`du | sort | head` -> du). So: try the last stage, then
+    # the first. shlex keeps a quoted pipe (`grep 'a|b'`) inside its token, so
+    # only a real stage-separator `|` splits here. Only reached for read-only
+    # pipelines (the PostToolUse hook gates on is_read_only_pipeline first).
+    if "|" in tokens:
+        pipes = [i for i, t in enumerate(tokens) if t == "|"]
+        last_stage = tokens[pipes[-1] + 1:]
+        first_stage = tokens[:pipes[0]]
+        for stage in (last_stage, first_stage):
+            if stage:
+                p = _detect_pattern(" ".join(shlex.quote(t) for t in stage))
+                if p is not None:
+                    return p
+        return None
+
     # Strip leading env vars
     cmd_start = 0
     while cmd_start < len(tokens) and "=" in tokens[cmd_start]:

@@ -701,12 +701,16 @@ def test_bash_compress_post_prune_serves_full_result_not_lossy(monkeypatch, tmp_
     monkeypatch.setenv("CLAUDE_SESSION_ID", "test-session-bash-prune")
 
     # Fake command output: > 2000 chars (clears the GENERIC compressor's
-    # floor) with a unique marker line in the MIDDLE, which the head+tail
-    # generic compressor drops -- present in raw_output, absent from the
-    # lossy `compressed` preview. That makes a regression (serving
-    # `compressed`) and the fix (serving raw_output) trivially distinguishable.
+    # floor). Every line shares the same vocabulary and differs only by a
+    # numeric (therefore non-distinctive) index, so NO line carries a rare
+    # identifier-shaped token. That matters: the rarity-based needle
+    # preservation re-injects any line with a distinctive token, so a flashy
+    # unique marker line would SURVIVE compression and defeat this fixture. A
+    # plain middle filler line is dropped by the head+tail generic compressor
+    # and NOT rescued, so serving the lossy preview vs. the raw output stays
+    # trivially distinguishable.
     body_lines = [f"line {i:04d} of unique filler content padded out further" for i in range(150)]
-    body_lines[75] = "MIDDLE_MARKER_UNIQUE_LINE_NOT_IN_HEAD_OR_TAIL"
+    middle_line = body_lines[75]  # a middle line the head+tail compressor drops
     raw_stdout = "\n".join(body_lines) + "\n"
     assert len(raw_stdout) > 2000
 
@@ -714,8 +718,8 @@ def test_bash_compress_post_prune_serves_full_result_not_lossy(monkeypatch, tmp_
     # compress() main() calls, so the test doesn't pass vacuously.
     compressed_preview = bc.compress("someunknowncmd", raw_stdout, returncode=0, stderr="")
     assert compressed_preview != raw_stdout
-    assert "MIDDLE_MARKER_UNIQUE_LINE_NOT_IN_HEAD_OR_TAIL" not in compressed_preview, (
-        "test fixture's compressed preview unexpectedly kept the marker line"
+    assert middle_line not in compressed_preview, (
+        "test fixture's compressed preview unexpectedly kept the middle line"
     )
 
     class _FakeResult:
@@ -747,7 +751,7 @@ def test_bash_compress_post_prune_serves_full_result_not_lossy(monkeypatch, tmp_
 
     out = capsys.readouterr().out
     assert pruned["done"], "test setup never triggered the prune path"
-    assert "MIDDLE_MARKER_UNIQUE_LINE_NOT_IN_HEAD_OR_TAIL" in out, (
+    assert middle_line in out, (
         "post-prune fallback served the lossy compressed preview instead of "
         "the full raw command output -- silent, unrecoverable data loss"
     )
