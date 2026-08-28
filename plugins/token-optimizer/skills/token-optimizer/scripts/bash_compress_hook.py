@@ -141,8 +141,10 @@ def main() -> None:
         # single-output compression did not help (a small repeated `git status`),
         # which per-command tools cannot do -- they have no session memory.
         deduped = _crossturn_dedup(command, best)
+        _log_feature = "bash_compress_pipeline"
         if deduped is not None:
             best, comp_helped = deduped, True
+            _log_feature = "crossturn_dedup"
 
         if not comp_helped:
             return  # nothing shrank the output -> pass through raw
@@ -186,7 +188,7 @@ def main() -> None:
             pass
 
         # Log compression event to trends.db
-        _log_event(command, cleaned_stdout, compressed)
+        _log_event(command, cleaned_stdout, compressed, feature=_log_feature)
 
         # Emit updatedToolOutput to replace what Claude sees
         response = {
@@ -291,13 +293,19 @@ def _crossturn_dedup(command: str, output: str):
         return None
 
 
-def _log_event(command: str, original: str, compressed: str) -> None:
-    """Log a compression event to trends.db. Fail-open, never raises."""
+def _log_event(command: str, original: str, compressed: str,
+               feature: str = "bash_compress_pipeline") -> None:
+    """Log a compression event to trends.db. Fail-open, never raises.
+
+    ``feature`` distinguishes the plain pipeline path ("bash_compress_pipeline")
+    from the session-stateful cross-turn dedup ("crossturn_dedup") so each shows
+    in its own dashboard bucket. Both are headline-eligible categories.
+    """
     try:
         from compression_log import log_compression_event
         session_id = os.environ.get("CLAUDE_SESSION_ID", "")
         log_compression_event(
-            feature="bash_compress_pipeline",
+            feature=feature,
             original_text=original,
             compressed_text=compressed,
             session_id=session_id,

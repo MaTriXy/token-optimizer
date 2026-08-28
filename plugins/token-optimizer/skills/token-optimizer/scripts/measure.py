@@ -35717,6 +35717,16 @@ _V5_COMPRESSION_LABELS = {
     # tier=opportunity and filtered out in _get_compression_summary.
     "bash_generic": "Bash compress (other commands)",
     "first_read_skeleton": "First-read code skeleton",
+    # Unit B PostToolUse path: pipelines/metachar commands that PreToolUse
+    # rejects. bash_compress_hook.py logs these (tier=measured, verified) but
+    # the label key was missing, so the whole path was silently excluded from
+    # the headline. Adding the key here re-admits it (categories derive from
+    # these keys), correcting an UNDER-count.
+    "bash_compress_pipeline": "Bash compress (pipelines)",
+    # Session-stateful cross-turn dedup: a repeated read-only command collapses
+    # to a one-line note or a delta. A per-command tool (no session memory)
+    # cannot do this, so it is TO's own bucket, not folded into pipelines.
+    "crossturn_dedup": "Cross-turn dedup",
 }
 
 # Unified label dict used by the savings-report renderer. Legacy entries
