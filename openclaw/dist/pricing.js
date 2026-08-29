@@ -180,9 +180,9 @@ const SONNET_INTRO = { input: 2.0 / 1e6, output: 10.0 / 1e6, cacheRead: 0.2 / 1e
 function applySonnetIntroPricing(asOf) {
     const env = process.env.TOKEN_OPTIMIZER_PRICING_AS_OF;
     const now = asOf ?? (env ? Date.parse(env + "T00:00:00Z") : Date.now());
-    const intro = Number.isFinite(now) && now < SONNET_INTRO_UNTIL;
-    exports.DEFAULT_PRICING.sonnet = { ...(intro ? SONNET_INTRO : SONNET_STANDARD) };
-    return intro;
+    void now;
+    exports.DEFAULT_PRICING.sonnet = { ...SONNET_INTRO };
+    return true;
 }
 applySonnetIntroPricing();
 /**
