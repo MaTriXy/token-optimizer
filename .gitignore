@@ -40,3 +40,7 @@ decisions.md
 
 # Devin CLI session artifacts
 .devin/
+
+# Internal working dirs — never ship (Alex Mode hard rule)
+handoff/
+scratchpad/

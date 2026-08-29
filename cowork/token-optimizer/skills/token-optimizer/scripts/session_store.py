@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS file_reads (
     last_replacement_type TEXT DEFAULT '',
     repeat_replacement_count INTEGER DEFAULT 0,
     last_structure_reason TEXT DEFAULT '',
-    last_structure_confidence REAL DEFAULT 0.0
+    last_structure_confidence REAL DEFAULT 0.0,
+    last_tool_use_id TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS tool_outputs (
@@ -215,6 +216,8 @@ class SessionStore:
         # Runs BEFORE the FTS setup so the external-content mirror + triggers
         # can reference the lineage columns (output_text in particular).
         self._ensure_tool_output_columns(conn)
+        # F1b: add last_tool_use_id to file_reads for double-fire idempotency.
+        self._ensure_file_reads_columns(conn)
         # U6/fix-1: probe + setup the external-content FTS5 mirror (LIKE
         # fallback). Backfills legacy rows once, gated on prior_version < 2.
         self._ensure_fts5_index(conn, prior_version)
@@ -262,6 +265,22 @@ class SessionStore:
                     conn.execute(f"ALTER TABLE tool_outputs ADD COLUMN {col} TEXT")
                 except sqlite3.OperationalError:
                     pass
+
+    def _ensure_file_reads_columns(self, conn: sqlite3.Connection) -> None:
+        """Add last_tool_use_id to file_reads if absent (F1b idempotency guard).
+
+        Mirrors the tool_outputs migration pattern: PRAGMA-introspect then
+        ALTER TABLE ADD COLUMN. Idempotent and never raises on a corrupt table.
+        """
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(file_reads)").fetchall()}
+        except sqlite3.DatabaseError:
+            return
+        if "last_tool_use_id" not in cols:
+            try:
+                conn.execute("ALTER TABLE file_reads ADD COLUMN last_tool_use_id TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
 
     # U6/fix-1: external-content FTS5 mirror over the archive.
     _fts5_available: Optional[bool] = None
@@ -439,8 +458,8 @@ class SessionStore:
                 read_count, content_hash, last_access,
                 last_replacement_fingerprint, last_replacement_type,
                 repeat_replacement_count, last_structure_reason,
-                last_structure_confidence)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_structure_confidence, last_tool_use_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(file_path) DO UPDATE SET
                  mtime_ns=excluded.mtime_ns,
                  size_bytes=excluded.size_bytes,
@@ -453,7 +472,8 @@ class SessionStore:
                  last_replacement_type=excluded.last_replacement_type,
                  repeat_replacement_count=excluded.repeat_replacement_count,
                  last_structure_reason=excluded.last_structure_reason,
-                 last_structure_confidence=excluded.last_structure_confidence
+                 last_structure_confidence=excluded.last_structure_confidence,
+                 last_tool_use_id=excluded.last_tool_use_id
             """,
             (
                 file_path,
@@ -469,6 +489,7 @@ class SessionStore:
                 int(entry.get("repeat_replacement_count", 0)),
                 entry.get("last_structure_reason", ""),
                 float(entry.get("last_structure_confidence", 0.0)),
+                entry.get("last_tool_use_id", ""),
             ),
         )
         conn.commit()

@@ -19,8 +19,11 @@ Covers:
       ./hooks/hooks.json pointer, and version == root plugin.json version.
   (c) skills/token-optimizer/scripts/measure.py exists in the committed dir and
       is byte-identical to the root one.
-  (d) rebuilding via --emit-committed leaves ``git status`` clean for
-      cowork/token-optimizer/ (no drift).
+  (d) rebuilding via ``build_committed_plugin()`` INTO A STAGING ROOT
+      reproduces the committed cowork/token-optimizer/ byte for byte (no
+      drift). The rebuild never runs against the working tree: a test that
+      regenerates in place can destroy uncommitted work, and the clean
+      ``git status`` it then asserts hides the loss.
   (e) the marketplace lists exactly 3 plugins with the expected names/sources.
 
 Run: python3 -m pytest tests/test_cowork_committed_plugin.py -q
@@ -29,11 +32,12 @@ Run: python3 -m pytest tests/test_cowork_committed_plugin.py -q
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from _tree_parity import fingerprint, stage_inputs, tree_drift
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "skills" / "token-optimizer" / "scripts"
@@ -162,41 +166,46 @@ def test_committed_dir_is_self_contained():
 
 
 # --------------------------------------------------------------------------- #
-# (d) rebuild leaves git clean (no drift)
+# (d) staged rebuild reproduces the committed tree (no drift)
 # --------------------------------------------------------------------------- #
-
-def _git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=REPO, capture_output=True, text=True, check=False
-    )
-
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="the emit-committed rebuild is a bash release-gate step run on POSIX CI + "
-    "dev machines; under Windows git-bash it emits UTF-16/exits non-zero. Windows "
-    "users consume the pre-built committed Cowork plugin, they never regenerate it, "
-    "so reproducibility is verified on POSIX, not here.",
+    reason="the generator writes hooks.json with Path.write_text, which newline-"
+    "translates to CRLF on Windows and would report spurious byte drift against the "
+    "LF-committed tree. Windows users consume the pre-built committed Cowork plugin, "
+    "they never regenerate it, so reproducibility is verified on POSIX, not here.",
 )
-def test_rebuild_emit_committed_leaves_git_clean():
-    if _git("rev-parse", "--is-inside-work-tree").returncode != 0:
-        pytest.skip("not a git work tree; cannot check for committed-plugin drift")
+def test_rebuild_emit_committed_reproduces_committed_tree(tmp_path):
+    """--emit-committed run against a STAGING root must reproduce
+    cowork/token-optimizer/ byte for byte.
 
-    proc = subprocess.run(
-        [sys.executable, str(SCRIPTS / "cowork_install.py"), "--emit-committed"],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=False,
+    Previously this shelled out to ``cowork_install.py --emit-committed`` at the
+    repo root and asserted ``git status`` was clean -- which meant every suite run
+    wiped and rewrote 131 tracked files under cowork/token-optimizer/, silently
+    discarding any uncommitted edit there. Same guarantee, no writes to the real
+    tree: stage the generator's inputs in tmp_path, build there, diff the result
+    against the committed tree."""
+    before = fingerprint(COMMITTED)
+
+    stage = stage_inputs(tmp_path / "repo", REPO, cowork_install.PAYLOAD_INCLUDE)
+    built = cowork_install.build_committed_plugin(stage)
+    assert built.is_dir(), "build_committed_plugin produced no tree"
+    assert stage in built.parents, "the build escaped the staging root"
+
+    drift = tree_drift(built, COMMITTED)
+    assert not drift, (
+        "the committed Cowork plugin is not reproducible from --emit-committed:\n"
+        + "\n".join(drift)
+        + "\n\nRerun `python3 skills/token-optimizer/scripts/cowork_install.py "
+        "--emit-committed` and commit the result."
     )
-    assert proc.returncode == 0, f"--emit-committed failed: {proc.stderr}"
 
-    status = _git("status", "--porcelain", "--", "cowork/token-optimizer")
-    assert status.returncode == 0, status.stderr
-    assert status.stdout.strip() == "", (
-        "rebuilding the committed Cowork plugin produced a diff (drift):\n"
-        f"{status.stdout}\n"
-        "The committed tree is not reproducible from --emit-committed."
+    # Prove the build stayed in tmp_path: inode/mtime too, so a content-identical
+    # rewrite (how the old in-place rebuild hid on a clean tree) still trips this.
+    assert fingerprint(COMMITTED) == before, (
+        "this test wrote to the real cowork/token-optimizer/ tree; the rebuild must "
+        "stay inside tmp_path"
     )
 
 

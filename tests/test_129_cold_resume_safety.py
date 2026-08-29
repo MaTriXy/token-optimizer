@@ -88,8 +88,8 @@ def _write_checkpoint(cp_dir, sid, sidecar, age_minutes=0):
 # Fix 1 — footer_mode wording
 # ---------------------------------------------------------------------------
 
-_CONFIDENT = "Tell the user you reopened the cold session"
-_CONDITIONAL = "Use this only if it matches the user's current request"
+_CONFIDENT = "Use to re-orient on prior work"
+_CONDITIONAL = "Use only if it matches the current request"
 
 
 def test_footer_default_is_confident(measure):

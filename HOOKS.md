@@ -30,10 +30,7 @@ Host platform tool call
 | **PreCompact** (x3) | `measure.py dynamic-compact-instructions` | Generate context-aware compaction instructions | Session transcript, trends.db | Compact instructions (stdout) |
 | | `measure.py compact-capture --trigger auto` | Capture checkpoint before compaction | Session transcript | Checkpoint markdown + events JSONL |
 | | `read_cache.py --clear` | Clear read cache (context is about to compact) | None | Session store (cleared) |
-| **SessionStart** (x4) | `measure.py ensure-health` (async) | Verify hooks, daemon, consent, config | settings.json, config.json | settings.json (cleanupPeriodDays), config.json (consent backfill) |
-| | `measure.py quality-cache --force` | Warm quality score cache | Session transcript | quality-cache-*.json |
-| | `measure.py compact-restore --compact` | Restore checkpoint after compaction | Checkpoint files | None (stdout injection) |
-| | `measure.py compact-restore --new-session-only` | Restore checkpoint on new session | Checkpoint files, config.json | None (stdout injection) |
+| **SessionStart** (x1) | `sessionstart_runner.py` | Consolidated dispatcher: ensure-health, forced quality-cache warm, and (on a `compact` start) compact-restore + read-cache clear, then the new-session checkpoint pointer | Session transcript, checkpoint files, settings.json, config.json, session store | settings.json (cleanupPeriodDays), config.json (consent backfill), quality-cache-*.json, session store (file_reads cleared), stdout injection |
 | **Stop** (x2) | `measure.py compact-capture --trigger stop` | Checkpoint on session stop | Session transcript | Checkpoint markdown + events JSONL |
 | | `measure.py session-end-flush --trigger stop --defer` | Deferred session metrics flush | Session transcript, trends.db | trends.db (session metrics) |
 | **SessionEnd** | `measure.py session-end-flush` (async, 60s) | Full session flush: metrics + dashboard + checkpoint | Session transcript, trends.db | trends.db, dashboard.html, checkpoint |

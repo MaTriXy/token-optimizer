@@ -353,10 +353,17 @@ def test_compression_reprice_and_runway_use_same_complete_mix_ratio(measure):
     runway = mod.runway_snapshot(days=30)
 
     rates = mod.PRICING_TIERS[mod._load_pricing_tier()]["claude_models"]
-    expected = ((0.95 * rates["opus"]["input"] + 0.05 * rates["sonnet"]["input"])
-                / (0.20 * rates["opus"]["input"] + 0.80 * rates["sonnet"]["input"]))
-    main_only = ((0.95 * rates["opus"]["input"] + 0.05 * rates["sonnet"]["input"])
-                 / (0.60 * rates["opus"]["input"] + 0.40 * rates["sonnet"]["input"]))
+    # The BASELINE mix is keyed by the generic family name "sonnet" (current card, $2/MTok);
+    # the CURRENT mixes are keyed by the concrete id `claude-sonnet-4-6`, which since
+    # 2026-08-29 resolves to the `sonnet_legacy` card ($3/MTok) because Sonnet 4.6 and
+    # Sonnet 5 do not share a price. Each side of the ratio must use the card its own
+    # model ids actually resolve to, or this test asserts against a rate nothing is billed at.
+    base_sonnet = rates[mod._normalize_model_name("sonnet")]["input"]
+    cur_sonnet = rates[mod._normalize_model_name(SONNET)]["input"]
+    expected = ((0.95 * rates["opus"]["input"] + 0.05 * base_sonnet)
+                / (0.20 * rates["opus"]["input"] + 0.80 * cur_sonnet))
+    main_only = ((0.95 * rates["opus"]["input"] + 0.05 * base_sonnet)
+                 / (0.60 * rates["opus"]["input"] + 0.40 * cur_sonnet))
     assert transformation["compression_reprice_ratio"] == pytest.approx(expected, rel=1e-4)
     assert runway["routing_multiplier"] == pytest.approx(expected, abs=0.001)
     assert transformation["compression_reprice_ratio"] != pytest.approx(main_only, rel=1e-4)

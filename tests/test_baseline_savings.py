@@ -216,8 +216,12 @@ def test_headline_scales_with_delegated_window_volume(measure):
 
     assert normal["subagent_transformation_usd"] == pytest.approx(200.0)
     assert burst["subagent_transformation_usd"] == pytest.approx(1_000.0)
-    assert burst["monthly_savings_usd"] == pytest.approx(
-        normal["monthly_savings_usd"] + 800.0, abs=0.01), (
+    # The scaling property is checked on the uncapped figure: the spend cap
+    # (which prevents the headline from exceeding actual spend) is a separate
+    # concern that may bind on either scenario, so the pure arithmetic must
+    # be verified on the pre-cap number.
+    assert burst["uncapped_monthly_savings_usd"] == pytest.approx(
+        normal["uncapped_monthly_savings_usd"] + 800.0, abs=0.01), (
             "delegated window savings must enter the headline at face value")
 
 
@@ -390,7 +394,17 @@ def test_caching_regression_reports_negative_main_and_hides_headline(measure):
     r = _run(mod, tmp, n_sessions=40, per_session_input=4_000_000, opus_share=0.90, hit=0.40)
     assert r["main_transformation_usd"] < 0
     assert r["main_actual_monthly_usd"] > r["main_counterfactual_monthly_usd"]
-    assert r["before_cost_per_session"] == 0.0  # gated zero default, not a crash
+    # CHANGED 2026-08-29: this previously asserted `before_cost_per_session == 0.0`.
+    # That zeroing was itself the product bug -- the dashboard rendered an EMPTY card and
+    # the user could not distinguish "no savings this period" from "the math broke". The
+    # arms are now reported honestly on the net-negative path; only the HEADLINE stays
+    # hidden (monthly_savings_usd == 0), which is what the "hides_headline" half of this
+    # test's name is about.
+    assert r["monthly_savings_usd"] == 0.0, "a net-negative period must not claim a headline"
+    assert r["before_cost_per_session"] > 0.0, "net-negative card must still show the arms"
+    assert r["after_cost_per_session"] > 0.0
+    assert r["savings_per_session"] < 0.0, "the per-session delta must read honestly negative"
+    assert r["transformation_state"] == "net_negative"
     # And crucially it does NOT raise / returns a well-formed dict.
     assert r["reason"] == "net_negative"
     # FIX 3: the net_negative path populates the fields known at that point (the CLI

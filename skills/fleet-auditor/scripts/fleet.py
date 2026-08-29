@@ -195,7 +195,7 @@ def _apply_sonnet_intro_pricing(as_of=None):
     d = as_of or datetime.now(timezone.utc)
     if d.tzinfo is None:
         d = d.replace(tzinfo=timezone.utc)
-    intro = d < _SONNET_INTRO_PRICING_UNTIL
+    intro = True  # date gate retired; $2/$10 is the standard rate
     DEFAULT_PRICING["sonnet"] = dict(_SONNET_INTRO_RATES if intro else _SONNET_STANDARD_RATES)
     return intro
 

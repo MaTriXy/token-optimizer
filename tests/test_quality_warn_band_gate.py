@@ -1,5 +1,5 @@
 """Behavioral proof that `quality-cache --warn` no longer re-prints the plain
-"[Token Optimizer] Context quality: N/100..." warning on every
+"[Token Optimizer] Quality N/100..." warning on every
 UserPromptSubmit while a session sits in one quality band.
 
 Why this exists: the sibling proactive nudge (_maybe_nudge, below the warn
@@ -141,7 +141,7 @@ def test_quality_cache_warn_does_not_repeat_within_a_band(m, monkeypatch, tmp_pa
             force=True, warn=True, warn_threshold=70,
         )
         out = capsys.readouterr().out
-        fired.append("Context quality:" in out)
+        fired.append("Quality" in out and "/100" in out)
 
     assert fired == [True, False, False], (
         f"expected exactly one warning across three same-band ticks, got {fired}"
@@ -185,7 +185,7 @@ def test_quality_cache_warn_fires_again_on_band_drop(m, monkeypatch, tmp_path, c
         force=True, warn=True, warn_threshold=70,
     )
     out = capsys.readouterr().out
-    assert "Context quality:" in out, "a drop into a new lower band must re-warn"
+    assert "Quality" in out and "/100" in out, "a drop into a new lower band must re-warn"
     assert "45/100" in out
 
 
@@ -213,4 +213,4 @@ def test_quality_cache_warn_false_does_not_print(m, monkeypatch, tmp_path, capsy
         throttle_seconds=0, quiet=True, session_jsonl=str(session), force=True,
     )
     out = capsys.readouterr().out
-    assert "Context quality:" not in out
+    assert "Quality" not in out or "/100" not in out

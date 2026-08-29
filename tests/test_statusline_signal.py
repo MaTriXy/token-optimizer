@@ -174,7 +174,7 @@ def test_signal_never_in_hook_additional_context(m, tmp_path, monkeypatch, capsy
                           new_session_only=True)
     out = buf.getvalue()
     # The pointer fires (relevant) but must NOT carry the UI-only signal.
-    assert "DIFFERENT session" in out, "fixture sanity: pointer should fire"
+    assert "Cross-session checkpoint" in out, "fixture sanity: pointer should fire"
     assert _SIGNAL not in out, (
         f"the resumable signal must never appear in additionalContext (billed); got: {out!r}")
 

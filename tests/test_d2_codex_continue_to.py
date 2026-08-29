@@ -31,8 +31,8 @@ SCRIPTS = REPO / "skills" / "token-optimizer" / "scripts"
 _UUID_A = "aaaa1111-2222-4333-8444-aaaaaaaaaaaa"
 
 # Footer strings emitted ONLY by the full lean-resume block (build_lean_resume_context).
-_CONFIDENT = "Tell the user you reopened the cold session"
-_CONDITIONAL = "Use this only if it matches the user's current request"
+_CONFIDENT = "Use to re-orient on prior work"
+_CONDITIONAL = "Use only if it matches the current request"
 
 
 @pytest.fixture

@@ -83,7 +83,7 @@ COMMITTED_PLUGIN_DESCRIPTION = (
     "Claude Code."
 )
 
-_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "benchmark.py")
 
 
 def _repo_root() -> Path:

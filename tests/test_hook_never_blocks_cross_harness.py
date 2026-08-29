@@ -41,14 +41,32 @@ SCRIPTS = REPO / "skills" / "token-optimizer" / "scripts"
 # marketplace mirror plugins/token-optimizer/hooks/. A user's Codex froze because
 # ONE copy exited 127; a mirror that can drift is itself the bug, so the
 # non-blocking invariant is asserted on all copies.
-ALL_LAUNCHERS = sorted(REPO.rglob("python-launcher.sh"))
+#
+# scratchpad/ is excluded: it holds throwaway repro fixtures (fake home dirs,
+# third-party plugin copies) that are NOT shipped Token Optimizer code. Scanning
+# them produces phantom failures on hooks.json files that belong to other
+# plugins (e.g. figma) or test harnesses, not our invariant.
+_EXCLUDE_DIRS = {"scratchpad", ".git", "node_modules", "__pycache__", ".pytest_cache"}
+
+
+def _rglob_excluding(root: Path, pattern: str) -> list[Path]:
+    """rglob that skips throwaway / non-shipped directories."""
+    results = []
+    for p in root.rglob(pattern):
+        if any(part in _EXCLUDE_DIRS for part in p.parts):
+            continue
+        results.append(p)
+    return sorted(results)
+
+
+ALL_LAUNCHERS = _rglob_excluding(REPO, "python-launcher.sh")
 
 posix_only = pytest.mark.skipif(
     sys.platform == "win32", reason="bash launcher path is POSIX; Windows covered by CI matrix"
 )
 
 # All hooks.json shipped in the repo (each maps to one or more harnesses).
-HOOKS_JSONS = sorted(REPO.rglob("hooks.json"))
+HOOKS_JSONS = _rglob_excluding(REPO, "hooks.json")
 
 
 def _run_chain(target_script: Path, env_extra=None, args=("--quiet",)):

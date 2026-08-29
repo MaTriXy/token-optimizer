@@ -63,13 +63,13 @@ def test_matching_filename_uses_labeled_warning(m, tmp_path, monkeypatch, capsys
     monkeypatch.setattr(m, "_checkpoint_work_paths", lambda p: [str(tmp_path / "src" / "file.py")])
     m.compact_restore(session_id="different-session-id", cwd=str(tmp_path), new_session_only=True)
     out = capsys.readouterr().out
-    assert "DIFFERENT session" in out
+    assert "Cross-session checkpoint" in out
     assert "a1b2c3d4" in out
 
 
 def test_non_matching_filename_still_labels_cross_session(m, tmp_path, monkeypatch, capsys):
     """A filename that does NOT match the regex must still get the
-    cross-session 'DIFFERENT session' label, NOT the old unlabeled message."""
+    cross-session label, NOT the old unlabeled message."""
     cp = _fake_checkpoint(tmp_path, "new-format-checkpoint-2026.md")
     monkeypatch.setattr(m, "CHECKPOINT_DIR", tmp_path)
     monkeypatch.setattr(m, "list_checkpoints", lambda: [cp])
@@ -77,7 +77,7 @@ def test_non_matching_filename_still_labels_cross_session(m, tmp_path, monkeypat
     monkeypatch.setattr(m, "_checkpoint_work_paths", lambda p: [str(tmp_path / "src" / "file.py")])
     m.compact_restore(session_id="different-session-id", cwd=str(tmp_path), new_session_only=True)
     captured = capsys.readouterr()
-    assert "DIFFERENT session" in captured.out, (
+    assert "Cross-session checkpoint" in captured.out, (
         "non-matching filename must still get the cross-session label (F10)"
     )
     assert "A recent checkpoint is available" not in captured.out, (

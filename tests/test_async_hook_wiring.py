@@ -50,20 +50,39 @@ EXPECTED_ASYNC = {
     ("PreCompact", None, "dynamic-compact-instructions"): False,
     ("PreCompact", None, "compact-capture --trigger auto"): True,
     ("PreCompact", None, "read_cache.py --clear"): False,
-    ("SessionStart", None, "ensure-health"): True,
-    ("SessionStart", None, "quality-cache --force"): False,
-    ("SessionStart", "compact", "compact-restore --compact"): False,
-    # #101: SessionStart(compact) clears the live session's file_reads after a
-    # compaction succeeds. Sync (not async): same read_cache.py --clear family
-    # as PreCompact/CwdChanged, and must run deterministically before the next
-    # PreToolUse/Read judges redundancy -- an async fire-and-forget could lose
-    # the clear against a racing reader.
-    ("SessionStart", "compact", "read_cache.py --clear-compacted"): False,
-    ("SessionStart", None, "compact-restore --new-session-only"): False,
-    ("Stop", None, "compact-capture --trigger stop --quiet"): False,
-    ("Stop", None, "session-end-flush --trigger stop"): False,
-    ("Stop", None, "keepwarm-arm"): False,
-    ("SessionEnd", None, "session-end-flush"): True,
+    # The five SessionStart subcommands are consolidated into a single
+    # dispatcher (hooks/sessionstart_runner.py) that imports measure.py once
+    # and runs all five in-process under one shared deadline. Codex enforces a
+    # hard 25s SessionStart ceiling and killed the five-entry group (declared
+    # 15 + 20 + 20 + 10 + 20 = 85s).
+    #
+    # It is sync (not async): SessionStart injects additionalContext via stdout,
+    # which an async hook would discard entirely -- compact-restore's recovery
+    # context and the ensure-health notices both ride that stream, and #101's
+    # read_cache --clear-compacted must run deterministically before the next
+    # PreToolUse/Read judges redundancy.
+    #
+    # KNOWN CHANGE: the former `ensure-health --once-mark` entry carried
+    # "async": true. A group cannot be half-async, and four of the five
+    # subcommands must stay sync, so ensure-health is now synchronous too. Its
+    # cost is bounded by the runner's shared 18s deadline (vs. the 70s the four
+    # sync entries declared between them), and its stdout -- previously
+    # discarded on Claude Code, emitted on Codex where the mirror strips async
+    # -- is now emitted on both.
+    ("SessionStart", None, "sessionstart_runner.py"): False,
+    # The three Stop subcommands (compact-capture --trigger stop, session-end-flush
+    # --trigger stop --defer, keepwarm-arm) are consolidated into a single
+    # dispatcher (hooks/stop_runner.py) that imports measure.py once and runs all
+    # three in-process under one shared deadline. It is sync (not async): Stop
+    # fires on every turn end and an async hook's fire-and-forget semantics would
+    # discard any diagnostic stdout and race with the process exit that follows
+    # the Stop event. Same reasoning as the three legacy sync entries.
+    ("Stop", None, "stop_runner.py"): False,
+    # SessionEnd joins the stop_runner (same file, different hooks.json entry).
+    # It keeps async=true (host fire-and-forget): session-end-flush --trigger end
+    # --defer spawns a detached worker and returns immediately; the hook's stdout
+    # is never consumed and the work outlives the process.
+    ("SessionEnd", None, "stop_runner.py"): True,
     ("StopFailure", None, "compact-capture --trigger stop-failure"): False,
     # Issue #139: the six UserPromptSubmit subcommands are consolidated into a
     # single dispatcher (hooks/userpromptsubmit_runner.py) that imports measure.py
@@ -72,20 +91,45 @@ EXPECTED_ASYNC = {
     # The six former subcommand substrings no longer appear in hooks.json; the
     # runner reproduces them internally with per-subcommand failure isolation.
     ("UserPromptSubmit", None, "userpromptsubmit_runner.py"): False,
-    ("PostToolUse", "mcp__.*", "archive_result.py"): True,
-    ("PostToolUse", "Bash|Read|Glob|Grep|Agent", "archive_result.py"): True,
-    ("PostToolUse", "Bash|Read|Grep|Glob|mcp__.*", "context_intel.py"): True,
-    # PostToolUse Bash output compression. MUST be sync (not async):
-    # it returns updatedToolOutput to REPLACE the tool result before the model
-    # reads it -- an async fire-and-forget hook cannot mutate output already
-    # sent to context. Same reason archive_result stays async (it only records)
-    # while this one, which rewrites what the model sees, cannot.
-    ("PostToolUse", "Bash", "bash_compress_hook.py"): False,
-    ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit", "read_cache.py --invalidate"): False,
+    # The six PostToolUse subcommands are consolidated into a single dispatcher
+    # (hooks/posttooluse_runner.py) that runs all five in-process under one
+    # shared deadline. PostToolUse fires on EVERY tool call, so six entries meant
+    # six process spawns, 80s of combined declared budget, and six dispatch
+    # chains on the hottest path in the product. A sustained container workload
+    # CANCELLED PostToolUse:Bash 372 times and completed it 9 times.
+    #
+    # It is sync (not async), and it HAD to be: three of the six could never be
+    # async and a hook group cannot be half-async.
+    #   - bash_compress_hook returns updatedToolOutput to REPLACE the tool result
+    #     before the model reads it; an async fire-and-forget hook cannot mutate
+    #     output already sent to context.
+    #   - read_cache.py --invalidate races the sync PreToolUse/Read cache reader
+    #     in the same session (read-after-write).
+    #   - quality-cache has an UNCONDITIONAL systemMessage print path not gated
+    #     by --quiet/--warn, and it persists one-shot dedup flags.
+    #
+    # KNOWN CHANGE: the two `archive_result.py` entries and the `context_intel.py`
+    # entry carried "async": true and are now synchronous.
+    #   - context_intel emits NOTHING on stdout, so nothing is discarded either
+    #     way; the turn now waits for its session-store write (~96ms in-process).
+    #   - archive_result's mcp__.* registration prints updatedMCPToolOutput to
+    #     replace an oversized MCP result with a preview plus an archive pointer.
+    #     As an ASYNC hook that stdout was DISCARDED on Claude Code, so the
+    #     replacement never happened there -- while it already happened on Codex,
+    #     whose mirror strips every async flag. Going sync makes Claude Code match
+    #     the Codex mirror and the code's documented intent. That is a real,
+    #     user-visible behaviour change and it is deliberate.
+    #   - What could NOT be preserved: fire-and-forget. A stalled archive/intel
+    #     write can now delay the turn, bounded by the runner's shared deadline
+    #     (2.5s, under hook_runtime's silent 4.5s BUDGET_POSTTOOL_RUNNER backstop).
+    #
+    # The five former subcommand substrings no longer appear in hooks.json; the
+    # runner reproduces each one internally, re-checking its ORIGINAL tool matcher
+    # in-process. See tests/test_posttooluse_runner.py.
     (
         "PostToolUse",
         "Bash|Read|Glob|Grep|Agent|Edit|Write|MultiEdit|NotebookEdit|mcp__.*",
-        "quality-cache --quiet --throttle-only",
+        "posttooluse_runner.py",
     ): False,
     ("PostCompact", None, "quality-cache --force"): False,
     ("CwdChanged", None, "read_cache.py --clear"): False,
@@ -130,10 +174,24 @@ def test_every_expected_hook_has_the_right_async_value():
     assert not missing, f"hooks.json no longer contains expected entries: {missing}"
 
 
-def test_total_async_count_is_seven():
+def test_total_async_count_is_three():
+    """Was seven, then six, now three.
+
+    The SessionStart consolidation dropped the `ensure-health --once-mark` async
+    entry: its five subcommands now share ONE sync dispatcher and four of them
+    need their stdout.
+
+    The PostToolUse consolidation dropped three more (two `archive_result.py`
+    registrations and `context_intel.py`): its six subcommands now share ONE
+    dispatcher, and three of the six can never be async, so the group is sync.
+    See the PostToolUse note in EXPECTED_ASYNC for what that changes.
+
+    The three that remain are all genuinely output-free and race-free:
+    PreToolUse `checkpoint-trigger`, PreCompact `compact-capture --trigger auto`,
+    and SessionEnd `session-end-flush`."""
     count = sum(1 for *_, is_async in _flatten(HOOKS_JSON) if is_async)
-    assert count == 7, (
-        f"expected exactly 7 async hook entries, found {count}. "
+    assert count == 3, (
+        f"expected exactly 3 async hook entries, found {count}. "
         "If you added or removed one intentionally, update this test and "
         "EXPECTED_ASYNC together."
     )

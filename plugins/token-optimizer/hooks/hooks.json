@@ -76,40 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py ensure-health --once-mark; done; exit 0",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py quality-cache --force --quiet --once-mark; done; exit 0",
-            "timeout": 20
-          }
-        ]
-      },
-      {
-        "matcher": "compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py compact-restore --compact; done; exit 0",
-            "timeout": 20
-          },
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/read_cache.py --clear-compacted --quiet; done; exit 0",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py compact-restore --new-session-only --once-mark; done; exit 0",
+            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" hooks/sessionstart_runner.py; done; exit 0",
             "timeout": 20
           }
         ]
@@ -120,18 +87,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py compact-capture --trigger stop --quiet; done; exit 0",
-            "timeout": 12
-          },
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py session-end-flush --trigger stop --quiet --defer; done; exit 0",
-            "timeout": 8
-          },
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py keepwarm-arm --quiet; done; exit 0",
-            "timeout": 5
+            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" hooks/stop_runner.py; done; exit 0",
+            "timeout": 15
           }
         ]
       }
@@ -141,7 +98,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py session-end-flush --trigger end --defer; done; exit 0",
+            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" hooks/stop_runner.py; done; exit 0",
             "timeout": 3
           }
         ]
@@ -171,61 +128,11 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/bash_compress_hook.py --quiet; done; exit 0",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/archive_result.py --quiet; done; exit 0",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Read|Glob|Grep|Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/archive_result.py --quiet; done; exit 0",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Read|Grep|Glob|mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/context_intel.py --quiet; done; exit 0",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/read_cache.py --invalidate --quiet; done; exit 0",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "Bash|Read|Glob|Grep|Agent|Edit|Write|MultiEdit|NotebookEdit|mcp__.*",
         "hooks": [
           {
             "type": "command",
-            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" skills/token-optimizer/scripts/measure.py quality-cache --quiet --throttle-only; done; exit 0",
+            "command": "for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; do command -v \"$b\" >/dev/null 2>&1 || continue; D=\"${CLAUDE_PLUGIN_ROOT}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || D=\"$(ls -d \"${D%/*}\"/*/ 2>/dev/null | grep -E \"/[0-9]+[.][0-9]+[.][0-9]+/$\" | sort -V | tail -n1)\"; D=\"${D%/}\"; [ -r \"$D/hooks/python-launcher.sh\" ] || exit 0; exec \"$b\" \"$D/hooks/python-launcher.sh\" \"$D/hooks/run.py\" hooks/posttooluse_runner.py; done; exit 0",
             "timeout": 10
           }
         ]

@@ -80,6 +80,14 @@ def main() -> int:
     sys.path.insert(0, scripts_dir)
     sys.argv = [module_name, *script_args]
 
+    # Per-event entry budget first (PreToolUse / PostToolUse / Stop). These are
+    # self-imposed deadlines that land far under the host's hooks.json timeout,
+    # so an over-budget hook exits 0 with NO output instead of being killed
+    # mid-write by the host. hook_runtime.resolve_entry_budget owns the table
+    # and the evidence behind each number. When the entry point isn't budgeted
+    # (consolidated Claude runners, or entries with no precise argv rule) we
+    # fall back to the 110s orphan backstop described below.
+    #
     # Generic Windows orphan-grandchild backstop, NOT a #114 fossil bound.
     #
     # When the host TerminateProcess-es run.py on Windows it bypasses run.py's
@@ -100,8 +108,10 @@ def main() -> int:
     # Fail-open if hook_runtime is missing (unit-test dummy plugin trees).
     deadline = None
     try:
-        from hook_runtime import HookDeadline
-        deadline = HookDeadline(110).start()
+        from hook_runtime import HookDeadline, arm_entry_budget
+        deadline = arm_entry_budget(module_name, script_args)
+        if deadline is None:
+            deadline = HookDeadline(110).start()
     except Exception:
         deadline = None
     try:

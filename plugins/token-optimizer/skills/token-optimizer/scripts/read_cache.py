@@ -63,6 +63,14 @@ except ImportError:  # pragma: no cover - fallback keeps the hook resilient
         return max(1, len(text) // 4) if text else 0
 
 
+def _read_text_with_stat(file_path: str) -> tuple[str, os.stat_result]:
+    """Read one file snapshot and return metadata for that same open file."""
+    with open(file_path, "r", encoding="utf-8", errors="replace") as handle:
+        content = handle.read()
+        stat = os.fstat(handle.fileno())
+    return content, stat
+
+
 def _is_v5_delta_enabled():
     """Check if delta mode is enabled. Default ON in v5.1."""
     return is_v5_flag_enabled("v5_delta_mode", "TOKEN_OPTIMIZER_READ_CACHE_DELTA", default=True)
@@ -1246,6 +1254,16 @@ def handle_read(hook_input: dict[str, Any], mode: str, quiet: bool) -> None:
     except Exception:
         return
 
+    # F1b: tool_use_id idempotency. The host does not expose the merged hook
+    # set, so double-registration from another settings layer can make the same
+    # PreToolUse/Read fire twice. Without this guard, fire #1 creates the
+    # file_reads entry and fire #2 denies the read as "redundant" -- even though
+    # it is the same tool call and the user has never actually read the file.
+    # The fix: store the tool_use_id on the entry and, on a subsequent fire with
+    # the SAME tool_use_id, allow the read (it is the same call, not a reread).
+    # A genuine reread has a DIFFERENT tool_use_id and is still blocked.
+    current_tool_use_id = str(hook_input.get("tool_use_id", "") or "")
+
     if entry is None:
         try:
             stat = os.stat(file_path)
@@ -1260,19 +1278,24 @@ def handle_read(hook_input: dict[str, Any], mode: str, quiet: bool) -> None:
             "tokens_est": tokens_est,
             "read_count": 1,
             "last_access": time.time(),
+            "last_tool_use_id": current_tool_use_id,
         }
         delta_content = None
         if _is_v5_delta_enabled() and offset == 0 and limit == 0:
             try:
                 from delta_diff import is_delta_eligible, content_hash, MAX_CONTENT_CACHE_BYTES
                 if is_delta_eligible(file_path):
-                    fc = Path(file_path).read_text(encoding="utf-8", errors="replace")
+                    fc, stat = _read_text_with_stat(file_path)
+                    tokens_est = estimate_tokens_from_bytes(stat.st_size)
+                    entry["mtime_ns"] = stat.st_mtime_ns
+                    entry["size_bytes"] = stat.st_size
                     delta_content = fc  # reusable in-process even if too big to persist
                     if len(fc.encode("utf-8", errors="replace")) <= MAX_CONTENT_CACHE_BYTES:
                         safe_fc = _redact_creds(fc) if _redact_creds else fc
                         entry["cached_content"] = safe_fc
-                        entry["content_hash"] = content_hash(fc)
-                        store.upsert_cached_content(file_path, safe_fc, content_hash(fc))
+                        safe_hash = content_hash(safe_fc)
+                        entry["content_hash"] = safe_hash
+                        store.upsert_cached_content(file_path, safe_fc, safe_hash)
             except Exception:
                 pass
         _reset_replacement_state(entry)
@@ -1311,6 +1334,41 @@ def handle_read(hook_input: dict[str, Any], mode: str, quiet: bool) -> None:
         return
 
     _ensure_entry_defaults(entry)
+
+    # F1b: tool_use_id idempotency guard. If the current tool_use_id matches
+    # the one stored on the entry, this is the same PreToolUse/Read firing again
+    # (double-registration from another settings layer). Allow the read -- it is
+    # NOT a genuine reread, and denying it would block a first-ever read as
+    # "redundant" (the damage from the double-hook bug). A genuine reread has a
+    # different tool_use_id and falls through to the normal redundant check.
+    stored_tool_use_id = str(entry.get("last_tool_use_id", "") or "")
+    if current_tool_use_id and stored_tool_use_id == current_tool_use_id:
+        _log_decision(
+            "allow",
+            file_path,
+            "same_tool_use_id",
+            session_id,
+            mode=mode,
+            actual_substitution=False,
+            eligible=False,
+            language=language,
+            reason_code="same_tool_use_id",
+            offset=offset,
+            limit=limit,
+            replacement_type=None,
+            file_tokens_est=int(entry.get("tokens_est", 0) or 0),
+            replacement_tokens_est=0,
+            net_saved_tokens_est=0,
+            replacement_fingerprint=None,
+            repeat_replacement_count=0,
+            save_hook_additional_context_enabled=save_hook_context_enabled,
+        )
+        return
+
+    # Update the stored tool_use_id so a subsequent double-fire of THIS call
+    # is also caught. This is done after the idempotency check and before the
+    # redundant-read evaluation, so the entry always reflects the latest call.
+    entry["last_tool_use_id"] = current_tool_use_id
 
     try:
         current_stat = os.stat(file_path)
@@ -1363,6 +1421,9 @@ def handle_read(hook_input: dict[str, Any], mode: str, quiet: bool) -> None:
     if not (mtime_match and size_match and range_covered):
         # v5.0: Delta mode -- return diff instead of allowing full re-read
         delta_enabled = _is_v5_delta_enabled()
+        cached_content_after_read = None
+        cached_hash_after_read = None
+        cache_needs_clear_after_read = False
         cached = store.get_cached_content(file_path) if delta_enabled else None
         old_content = cached.get("content") if cached else entry.get("cached_content")
         old_hash = cached.get("content_hash") if cached else entry.get("content_hash")
@@ -1377,10 +1438,42 @@ def handle_read(hook_input: dict[str, Any], mode: str, quiet: bool) -> None:
             try:
                 from delta_diff import compute_delta, content_hash, is_delta_eligible, MAX_CONTENT_CACHE_BYTES
                 if is_delta_eligible(file_path):
-                    new_content = Path(file_path).read_text(encoding="utf-8", errors="replace")
-                    new_hash = content_hash(new_content)
+                    new_content, current_stat = _read_text_with_stat(file_path)
+                    safe_new_content = _redact_creds(new_content) if _redact_creds else new_content
+                    new_hash = content_hash(safe_new_content)
                     if new_hash != old_hash:
-                        delta_text, delta_stats = compute_delta(old_content, new_content, Path(file_path).name)
+                        if len(safe_new_content.encode("utf-8", errors="replace")) <= MAX_CONTENT_CACHE_BYTES:
+                            cached_content_after_read = safe_new_content
+                            cached_hash_after_read = new_hash
+                        else:
+                            cache_needs_clear_after_read = True
+                        # A redacted snapshot cannot safely describe a raw file
+                        # change. Let the host perform the full read instead.
+                        if (
+                            safe_new_content != new_content
+                            or "[CREDENTIAL REDACTED:" in old_content
+                        ):
+                            delta_text, delta_stats = None, None
+                        else:
+                            delta_text, delta_stats = compute_delta(
+                                old_content, safe_new_content, Path(file_path).name
+                            )
+                        # Guard: if the diff is no smaller than the file, serving
+                        # it would cost MORE tokens or bytes than a full re-read.
+                        # Skip delta and fall through to the normal allow path.
+                        # Compute both counts once here; reuse the token count below.
+                        # Use estimate_tokens(new_content) (char-based, same units
+                        # as delta_tokens) rather than estimate_tokens_from_bytes
+                        # (byte-based) to avoid non-ASCII misfires and the
+                        # stat-vs-read race (current_stat was sampled before
+                        # new_content was read).
+                        old_tokens = estimate_tokens(new_content)
+                        if delta_text is not None:
+                            delta_tokens = estimate_tokens(delta_text)
+                            delta_bytes = len(delta_text.encode("utf-8", errors="replace"))
+                            new_bytes = len(new_content.encode("utf-8", errors="replace"))
+                            if delta_tokens >= old_tokens or delta_bytes >= new_bytes:
+                                delta_text = None  # diff too large, fall through
                         if delta_text is not None:
                             entry["mtime_ns"] = current_stat.st_mtime_ns
                             entry["size_bytes"] = current_stat.st_size
@@ -1388,12 +1481,17 @@ def handle_read(hook_input: dict[str, Any], mode: str, quiet: bool) -> None:
                             entry["read_count"] = int(entry.get("read_count", 0) or 0) + 1
                             entry["last_access"] = time.time()
                             _reset_replacement_state(entry)
+                            if len(safe_new_content.encode("utf-8", errors="replace")) <= MAX_CONTENT_CACHE_BYTES:
+                                store.upsert_cached_content(file_path, safe_new_content, new_hash)
+                                cached = store.get_cached_content(file_path)
+                                if not cached or cached.get("content_hash") != new_hash:
+                                    entry["content_hash"] = None
+                                    store.delete_cached_content(file_path)
+                            else:
+                                entry["content_hash"] = None
+                                store.delete_cached_content(file_path)
                             store.upsert_file_entry(file_path, entry)
-                            if len(new_content.encode("utf-8", errors="replace")) <= MAX_CONTENT_CACHE_BYTES:
-                                store.upsert_cached_content(file_path, new_content, new_hash)
 
-                            old_tokens = estimate_tokens_from_bytes(current_stat.st_size)
-                            delta_tokens = estimate_tokens(delta_text)
                             net_saved = max(0, old_tokens - delta_tokens)
 
                             _log_decision(
@@ -1468,16 +1566,36 @@ def handle_read(hook_input: dict[str, Any], mode: str, quiet: bool) -> None:
         entry["tokens_est"] = estimate_tokens_from_bytes(current_stat.st_size)
         entry["read_count"] = int(entry.get("read_count", 0) or 0) + 1
         entry["last_access"] = time.time()
-        if delta_enabled and offset == 0 and limit == 0 and not entry.get("cached_content"):
+        if (
+            delta_enabled
+            and offset == 0
+            and limit == 0
+            and cached_content_after_read is not None
+            and cached_hash_after_read is not None
+        ):
+            entry["cached_content"] = cached_content_after_read
+            entry["content_hash"] = cached_hash_after_read
+            store.upsert_cached_content(
+                file_path, cached_content_after_read, cached_hash_after_read
+            )
+            cached = store.get_cached_content(file_path)
+            if not cached or cached.get("content_hash") != cached_hash_after_read:
+                entry["content_hash"] = None
+                store.delete_cached_content(file_path)
+        elif delta_enabled and offset == 0 and limit == 0 and cache_needs_clear_after_read:
+            entry["content_hash"] = None
+            store.delete_cached_content(file_path)
+        elif delta_enabled and offset == 0 and limit == 0 and not entry.get("cached_content"):
             try:
                 from delta_diff import is_delta_eligible, content_hash, MAX_CONTENT_CACHE_BYTES
                 if is_delta_eligible(file_path):
-                    fc = Path(file_path).read_text(encoding="utf-8", errors="replace")
+                    fc, current_stat = _read_text_with_stat(file_path)
                     if len(fc.encode("utf-8", errors="replace")) <= MAX_CONTENT_CACHE_BYTES:
                         safe_fc = _redact_creds(fc) if _redact_creds else fc
                         entry["cached_content"] = safe_fc
-                        entry["content_hash"] = content_hash(fc)
-                        store.upsert_cached_content(file_path, safe_fc, content_hash(fc))
+                        safe_hash = content_hash(safe_fc)
+                        entry["content_hash"] = safe_hash
+                        store.upsert_cached_content(file_path, safe_fc, safe_hash)
             except Exception:
                 pass
         _reset_replacement_state(entry)
@@ -1836,15 +1954,106 @@ def handle_invalidate(hook_input: dict[str, Any], quiet: bool) -> None:
         file_path, detect_structure_language(file_path), session_id, store
     )
 
+    # Instead of deleting the cache entry on edit, UPDATE it with the
+    # post-edit file state. Deleting the entry forces the next read into the
+    # first-read path (full re-read, no savings) and starves delta mode of its
+    # primary trigger (read -> edit -> re-read). By refreshing the entry with
+    # the new mtime/size/content, the next read of an unchanged file hits the
+    # structure-map path (saves tokens), and a subsequent external modification
+    # triggers delta (saves tokens). Falls back to delete on any error.
     try:
         existing = store.get_file_entry(file_path)
-        if existing is not None:
+    except Exception:
+        # Storage failure: purge rather than risk serving a stale entry.
+        try:
             store.delete_file_entry(file_path)
             store.delete_cached_content(file_path)
-            if not quiet:
-                print(f"[Read Cache] Invalidated: {file_path}", file=sys.stderr)
+        except Exception:
+            pass
+        return
+
+    try:
+        stat = os.stat(file_path)
+    except OSError:
+        # File removed by the edit (e.g., git checkout reverting). Purge stale.
+        try:
+            store.delete_file_entry(file_path)
+            store.delete_cached_content(file_path)
+        except Exception:
+            pass
+        return
+
+    if existing is None:
+        return  # never read before; first-read path will cache it
+
+    try:
+        # Read the file content and stat the same open file, so the stored
+        # metadata describes the bytes that were actually cached.
+        new_fc = None
+        new_hash = None
+        if _is_v5_delta_enabled():
+            cached = store.get_cached_content(file_path)
+            if cached:
+                try:
+                    from delta_diff import is_delta_eligible, content_hash, MAX_CONTENT_CACHE_BYTES
+                    if is_delta_eligible(file_path):
+                        fc, stat = _read_text_with_stat(file_path)
+                        if len(fc.encode("utf-8", errors="replace")) <= MAX_CONTENT_CACHE_BYTES:
+                            safe_fc = _redact_creds(fc) if _redact_creds else fc
+                            # Hash the SAME bytes that are persisted so a later
+                            # delta diff is consistent (redacted old vs new).
+                            new_hash = content_hash(safe_fc)
+                            new_fc = safe_fc
+                        else:
+                            # File grew too large to cache; drop cached content
+                            # but keep the metadata entry (mtime/size still
+                            # useful for structure-map hits on unchanged re-reads).
+                            existing["content_hash"] = None
+                            store.delete_cached_content(file_path)
+                    else:
+                        existing["content_hash"] = None
+                        store.delete_cached_content(file_path)
+                except OSError:
+                    # File vanished between the first stat and the read. Purge.
+                    try:
+                        store.delete_file_entry(file_path)
+                        store.delete_cached_content(file_path)
+                    except Exception:
+                        pass
+                    return
+                except Exception:
+                    pass
+
+        existing["mtime_ns"] = stat.st_mtime_ns
+        existing["size_bytes"] = stat.st_size
+        existing["tokens_est"] = estimate_tokens_from_bytes(stat.st_size)
+        existing["ranges_seen"] = []  # content changed; old ranges are stale
+        existing["last_access"] = time.time()
+        _reset_replacement_state(existing)
+
+        if new_fc is not None and new_hash is not None:
+            existing["content_hash"] = new_hash
+            store.upsert_cached_content(file_path, new_fc, new_hash)
+            # Verify the upsert actually persisted (it is a no-op when the
+            # session DB is over its size cap). If the stored hash does not
+            # match, the cached_content row is stale — drop it so a future
+            # delta does not diff against the pre-edit version.
+            verify = store.get_cached_content(file_path)
+            if not verify or verify.get("content_hash") != new_hash:
+                existing["content_hash"] = None
+                store.delete_cached_content(file_path)
+
+        store.upsert_file_entry(file_path, existing)
+        if not quiet:
+            print(f"[Read Cache] Refreshed after edit: {file_path}", file=sys.stderr)
     except Exception:
-        pass
+        # Fallback: purge on any unexpected error so a stale entry is never
+        # served.
+        try:
+            store.delete_file_entry(file_path)
+            store.delete_cached_content(file_path)
+        except Exception:
+            pass
 
 
 def handle_stats(session_id: str) -> None:

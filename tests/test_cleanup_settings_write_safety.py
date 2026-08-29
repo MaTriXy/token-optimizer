@@ -76,7 +76,7 @@ def _read(settings_path: Path) -> dict:
 
 def test_lease_miss_is_reported_not_silent(measure, capsys, monkeypatch):
     mod, settings = measure
-    monkeypatch.setattr(mod, "_write_settings_atomic", lambda data: False)
+    monkeypatch.setattr(mod, "_write_settings_atomic", lambda data, **kw: False)
 
     mod.cleanup(dry_run=False)
     out = capsys.readouterr().out
@@ -107,9 +107,25 @@ def test_write_atomic_returns_false_on_lease_miss(measure, monkeypatch):
 
 
 def test_write_atomic_returns_true_on_success(measure):
+    """A landing write still returns True.
+
+    The payload must be a SUPERSET of what is on disk. Writing a bare
+    ``{"a": 1}`` over the populated fixture is now refused by the
+    ``_settings_write_guard`` choke point -- that refusal is the whole point of
+    the fix (see tests/test_settings_never_clobbered.py), so this test asserts
+    the return contract with a non-destructive payload instead.
+    """
     mod, settings = measure
-    assert mod._write_settings_atomic({"a": 1}) is True
-    assert _read(settings) == {"a": 1}
+    payload = dict(USER_SETTINGS, a=1)
+    assert mod._write_settings_atomic(payload) is True
+    assert _read(settings) == payload
+
+
+def test_write_atomic_refuses_a_key_dropping_payload(measure):
+    """Companion to the above: the destructive shape must NOT land."""
+    mod, settings = measure
+    assert mod._write_settings_atomic({"a": 1}) is False
+    assert _read(settings) == USER_SETTINGS
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +137,7 @@ def test_failed_reread_never_clobbers_settings(measure, capsys, monkeypatch):
     original = settings.read_text(encoding="utf-8")
     wrote: list = []
     monkeypatch.setattr(
-        mod, "_write_settings_atomic", lambda data: (wrote.append(data), True)[1]
+        mod, "_write_settings_atomic", lambda data, **kw: (wrote.append(data), True)[1]
     )
 
     # First read (entry detection) succeeds; the re-read after backup fails.

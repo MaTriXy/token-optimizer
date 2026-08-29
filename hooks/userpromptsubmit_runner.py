@@ -26,15 +26,15 @@ Key properties:
     JSON, raw text).
   - One subcommand throwing/aborting never aborts the others (each is wrapped in
     ``_run_safely``); the hook always exits 0.
-  - ensure-health's run-once marker is unlinked on failure (FIX 2) so a single
+  - ensure-health's run-once marker is unlinked on failure so a single
     transient failure never permanently deadlocks the consent gate for the
     session.
-  - ``run._check_consent`` is imported by explicit path (FIX 4) so a future
+  - ``run._check_consent`` is imported by explicit path so a future
     ``skills/.../run.py`` on ``sys.path`` cannot shadow the real gate.
 
-No ``measure.py`` edit: every call uses the real, verified module-level
-entrypoints the ``__main__`` dispatch itself calls (signatures confirmed against
-source before this file was written). The runner only re-orchestrates them.
+The runner calls the same module-level entrypoints used by the ``__main__``
+dispatch, preserving their arguments and behavior while only changing how
+they are scheduled.
 
 Run: ``hooks/userpromptsubmit_runner.py`` (via run.py -> module_runner.py).
 """
@@ -122,6 +122,21 @@ def _harness_only_context() -> bool:
     return ("harness" in combined) or ("/plugins/synced/" in combined)
 
 
+def _quality_cache_is_missing(hook_input: dict) -> bool:
+    """True when this session has NO quality cache yet (one stat, no parsing).
+
+    Deliberately cheap and deliberately narrow: it answers "does the file
+    exist", nothing more. Any error resolving the path returns False so the
+    recovery branch stays opt-in and a broken resolution can never turn every
+    UserPromptSubmit into a full transcript parse.
+    """
+    try:
+        path = measure._quality_cache_path_for(hook_input.get("transcript_path"))
+        return path is not None and not Path(path).exists()
+    except Exception:
+        return False
+
+
 def _run_safely(name: str, fn, *args, **kwargs) -> None:
     """Run fn, swallow any failure to stderr, never propagate.
 
@@ -143,7 +158,7 @@ def _run_safely(name: str, fn, *args, **kwargs) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Shared deadline (issue #139 FIX 1): ONE HookDeadline for the whole runner
+# Shared deadline for issue #139: ONE HookDeadline for the whole runner
 # replaces the six independent 8s per-subcommand deadlines.  The shared
 # deadline fires os._exit(0) only when the TOTAL time runs out, and the
 # remaining time is budgeted across subcommands so an early subcommand cannot
@@ -302,7 +317,7 @@ def _sub_verbosity_steer(hook_input: dict) -> None:
 def _sub_ensure_health(hook_input: dict) -> None:
     """``ensure-health --once-per-session`` (harness-gated). Mirrors __main__ L41138.
 
-    FIX 2 (issue #139): the run-once marker is set BEFORE the work by
+    For issue #139, the run-once marker is set BEFORE the work by
     ``_ran_once_this_session``.  If the first call throws (caught by
     ``_run_safely``), the marker is already on disk but the consent flags
     were never written, so ensure-health no-ops for the rest of the session
@@ -327,8 +342,8 @@ def _sub_ensure_health(hook_input: dict) -> None:
             "ensure-health bootstrap; will retry next prompt\n"
         )
         return
-    # FIX C: the daemon ensure/revive runs FIRST, under its own short guard,
-    # BEFORE any health budget is consumed (mirrors __main__ L41167).
+    # The daemon ensure/revive runs FIRST, under its own short guard, BEFORE
+    # any health budget is consumed (mirrors __main__ L41167).
     measure._ensure_health_daemon_revive_first()
     try:
         measure.run_ensure_health()
@@ -356,6 +371,16 @@ def _sub_quality_cache_force(hook_input: dict) -> None:
     Mirrors __main__ L40696 with --force --quiet --once-per-session: the daemon
     pulse + self-heal run unconditionally (as in the dispatch), THEN the
     once-per-session gate, THEN quality_cache() with force=True.
+
+    The gate is CHECK-ONLY, never CHECK+SET.
+    ``_ran_once_this_session`` atomically creates the marker BEFORE the work,
+    so a hard ``os._exit(0)`` timeout during ``quality_cache()`` leaves it on
+    disk and latches the recovery dead for the whole session. The unlink-on-
+    failure for ``score is None`` only helps for normal failures, not hard
+    kills. Instead, check the marker's existence without creating it, run the
+    work, and only write the marker after success. A double-run from a TOCTOU
+    race is harmless (quality_cache with force=True is idempotent), and far
+    better than a permanently dead recovery.
     """
     budget = _runner_budget(8)
     if budget < 0.1:
@@ -373,9 +398,13 @@ def _sub_quality_cache_force(hook_input: dict) -> None:
     except Exception:
         pass
     _quality_cache_self_heal()
-    if measure._ran_once_this_session("quality-cache-force", session_id):
+    # CHECK-ONLY: do not create the marker yet. A hard os._exit(0) during
+    # quality_cache() would leave a pre-written marker on disk and latch the
+    # recovery dead for the whole session.
+    marker = measure._once_per_session_marker("quality-cache-force", session_id)
+    if marker is not None and marker.exists():
         return
-    measure.quality_cache(
+    score = measure.quality_cache(
         throttle_seconds=throttle,
         warn_threshold=warn_threshold,
         quiet=quiet,
@@ -385,6 +414,11 @@ def _sub_quality_cache_force(hook_input: dict) -> None:
         session_id=session_id,
         warn=warn,
     )
+    # Write the marker only after the cache work produced a result. A timeout,
+    # missing transcript, busy lease, failed write, or hard os._exit(0) leaves
+    # no marker so the next prompt can retry.
+    if score is not None:
+        measure._mark_ran_this_session("quality-cache-force", session_id)
 
 
 def _sub_compact_restore(hook_input: dict) -> None:
@@ -437,7 +471,13 @@ def _quality_cache_self_heal() -> None:
             ):
                 _sh_settings = json.loads(measure.SETTINGS_PATH.read_text(encoding="utf-8"))
                 _sh_hooks = _sh_settings.get("hooks", {}).get("UserPromptSubmit", [])
-                if not any("quality-cache" in str(h) for h in _sh_hooks):
+                # Use _quality_cache_hook_present
+                # (the #155 fix in sessionstart_runner.py:448) instead of the
+                # naive substring check. The naive check cannot see the
+                # consolidated UPS runner dispatcher as a quality-cache
+                # provider, so on a script (non-plugin) install it re-appends
+                # a duplicate legacy hook -- exactly the #155 bug.
+                if not measure._quality_cache_hook_present(_sh_hooks):
                     measure.setup_quality_bar(quiet=True)
         except Exception:
             pass
@@ -454,7 +494,7 @@ def _check_consent() -> bool:
     contains the ensure-health bootstrap itself). The per-subcommand consent
     decision therefore lives HERE.
 
-    FIX 4 (issue #139): imports ``run._check_consent`` by explicit path via
+    Issue #139 requires importing ``run._check_consent`` by explicit path via
     ``importlib.util.spec_from_file_location`` so a future ``skills/.../run.py``
     on ``sys.path`` cannot shadow the real ``hooks/run.py`` and silently
     disable the consent gate (``import run`` fails-open on any AttributeError).
@@ -474,7 +514,7 @@ def _check_consent() -> bool:
 def main() -> int:
     hook_input = _read_hook_input()
 
-    # Consent gate (issue #139 P0 fix). Pre-consolidation, the six
+    # Consent gate for issue #139. Before consolidation, the six
     # UserPromptSubmit hooks.json entries each passed distinguishing args, so
     # the ensure-health entry was consent-exempt (it bootstraps the
     # v5_welcome_shown / enterprise_consent_shown flags) and the other five
@@ -498,14 +538,14 @@ def main() -> int:
             _clear_runner_deadline()
         return 0
 
-    # FIX 1 (issue #139): install ONE shared HookDeadline for the entire
+    # For issue #139, install ONE shared HookDeadline for the entire
     # runner (18s, 2s margin under hooks.json timeout=20).  The per-subcommand
     # _runner_budget calls divide the remaining time fairly.  The shared
     # deadline is the ONLY os._exit(0) in the process -- no individual
     # subcommand deadline can kill later subcommands.
     _install_runner_deadline()
 
-    # FIX 3 (issue #139): capture each subcommand's stdout through ONE
+    # For issue #139, capture each subcommand's stdout through ONE
     # buffered emitter, then emit at the end in a controlled, host-consumable
     # way.  Pre-consolidation each subcommand was its own hooks.json entry and
     # the host parsed their stdout independently; now all six share one stdout
@@ -539,6 +579,18 @@ def main() -> int:
         _capture("ensure-health", _sub_ensure_health, hook_input)
         _capture("quality-cache --force", _sub_quality_cache_force, hook_input)
         _capture("compact-restore", _sub_compact_restore, hook_input)
+    elif _quality_cache_is_missing(hook_input):
+        # RECOVERY. Non-harness sessions reach this ONLY when no cache exists.
+        # SessionStart is normally the sole creator (`quality-cache --force
+        # --quiet --once-mark`, timeout 20s). When it times out -- a busy
+        # machine, a boot storm, or heavy workload, exactly when someone
+        # looks at the statusline -- nothing else ever created it, and
+        # PostToolUse deliberately refuses to (a latency invariant: it fires on
+        # every tool call). The session was stuck on `ContextQ:--` with no path
+        # back. Bounded: one stat() in the common case; the full computation
+        # only when the file is genuinely absent, after which the normal
+        # throttle governs and this branch is never taken again.
+        _capture("quality-cache --force (bootstrap)", _sub_quality_cache_force, hook_input)
 
     # Emit all buffered stdout in order (preserves per-shape contract:
     # hookSpecificOutput JSON objects, systemMessage JSON, raw text -- each

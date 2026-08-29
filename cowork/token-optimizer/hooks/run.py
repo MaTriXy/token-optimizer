@@ -405,7 +405,15 @@ def main() -> int:
     # never written -> consent False FOREVER -> all six subcommands permanently
     # dead. Latent on native Claude Code (SessionStart bootstraps consent
     # out-of-band), FATAL on Cowork (no SessionStart hook).
-    if script_rel == "hooks/userpromptsubmit_runner.py":
+    # Same reasoning for the consolidated SessionStart dispatcher. Before
+    # consolidation the `ensure-health --once-mark` SessionStart entry matched
+    # exempt_commands on its literal arg and bootstrapped the consent flags;
+    # the runner is dispatched as `run.py hooks/sessionstart_runner.py` with no
+    # args, so it must be let through here and makes the per-subcommand consent
+    # decision internally (ensure-health bootstraps, the other four skip until
+    # consent is True).
+    if script_rel in ("hooks/userpromptsubmit_runner.py",
+                      "hooks/sessionstart_runner.py"):
         is_exempt = True
     if not is_exempt and not _check_consent(root_resolved):
         return 0

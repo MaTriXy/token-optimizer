@@ -103,10 +103,10 @@ def test_relevant_topic_match_fires_with_cross_session_label(m, tmp_path, monkey
              active_task="fix checkpoint injection in token optimizer",
              work_paths=["/Users/alex/projects/other/token-optimizer/measure.py"])
     out = _run(m, monkeypatch, tmp_path, [cp], cwd=proj)
-    assert "DIFFERENT session" in out, (
+    assert "Cross-session checkpoint" in out, (
         f"relevant checkpoint must fire with the cross-session label; got: {out!r}")
     assert "a1b2c3d4" in out, "source-session label must be preserved"
-    assert "NOT your own session" in out or "NOT your own" in out, (
+    assert "Not your session" in out, (
         "the 'not your own prior work' framing must be preserved")
 
 

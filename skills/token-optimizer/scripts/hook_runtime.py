@@ -28,8 +28,10 @@ class HookDeadline:
     def __init__(self, seconds: float, message: bytes | None = None):
         self.seconds = max(0.0, float(seconds))
         self.end = time.monotonic() + self.seconds
-        self.message = message or (
+        self.message = (
             b"[Token Optimizer] hook budget exceeded; skipping\n"
+            if message is None
+            else message
         )
         self._cancelled = threading.Event()
         self._thread = threading.Thread(
@@ -99,6 +101,111 @@ def current_deadline() -> HookDeadline | None:
     if deadline is not None and deadline.remaining() > 0:
         return deadline
     return None
+
+
+# --- Per-event hook entry budgets --------------------------------------------
+# The host timeout is a kill, not a usable budget. These self-imposed limits
+# let run.py fail open before a host kills a process mid-write. The Codex
+# values were measured in an isolated HOME: 0.10-0.23s over five runs per
+# entry point, then given a generous margin under each host ceiling.
+
+BUDGET_PRETOOL = 0.75
+BUDGET_POSTTOOL = 0.75
+BUDGET_PRETOOL_MEASURE = 2.0
+BUDGET_POSTTOOL_MEASURE = 2.0
+BUDGET_STOP = 2.5
+BUDGET_CODEX_SESSION_START = 4.5
+BUDGET_CODEX_USER_PROMPT = 4.5
+BUDGET_CODEX_SUBAGENT = 2.5
+BUDGET_POSTTOOL_RUNNER = 4.5
+
+
+def _entry_budget_rules():
+    """Return precise (module, argv predicate, seconds, label) rules."""
+
+    def _flags_exactly(*expected):
+        want = frozenset(expected)
+        return lambda argv: frozenset(argv) == want
+
+    def _has(*needed):
+        return lambda argv: all(n in argv for n in needed)
+
+    def _subcommand(name, *needed):
+        return lambda argv: bool(argv) and argv[0] == name and all(
+            n in argv for n in needed
+        )
+
+    def _trigger(name, *triggers):
+        allowed = frozenset(triggers)
+
+        def _match(argv):
+            if not argv or argv[0] != name:
+                return False
+            for i, arg in enumerate(argv):
+                if arg == "--trigger" and i + 1 < len(argv):
+                    return argv[i + 1] in allowed
+            return False
+
+        return _match
+
+    return (
+        ("read_cache", _flags_exactly("--quiet"), BUDGET_PRETOOL, "PreToolUse:Read"),
+        ("bash_hook", _flags_exactly("--quiet"), BUDGET_PRETOOL, "PreToolUse:Bash"),
+        ("refetch_guard", _flags_exactly("--quiet"), BUDGET_PRETOOL, "PreToolUse:mcp"),
+        ("measure", _subcommand("checkpoint-trigger"), BUDGET_PRETOOL_MEASURE, "PreToolUse:Agent"),
+        ("bash_compress_hook", _has("--quiet"), BUDGET_POSTTOOL, "PostToolUse:Bash"),
+        ("archive_result", _has("--quiet"), BUDGET_POSTTOOL, "PostToolUse:archive"),
+        ("context_intel", _has("--quiet"), BUDGET_POSTTOOL, "PostToolUse:intel"),
+        ("read_cache", _has("--invalidate"), BUDGET_POSTTOOL, "PostToolUse:invalidate"),
+        ("measure", _subcommand("quality-cache", "--throttle-only"), BUDGET_POSTTOOL_MEASURE, "PostToolUse:quality-cache"),
+        ("posttooluse_runner", _flags_exactly(), BUDGET_POSTTOOL_RUNNER, "PostToolUse:runner"),
+        ("measure", _trigger("compact-capture", "stop", "stop-failure"), BUDGET_STOP, "Stop:compact-capture"),
+        ("measure", _trigger("session-end-flush", "stop"), BUDGET_STOP, "Stop:session-end-flush"),
+        ("measure", _subcommand("keepwarm-arm"), BUDGET_STOP, "Stop:keepwarm-arm"),
+        ("codex_hook_bridge", _flags_exactly("session-start"), BUDGET_CODEX_SESSION_START, "Codex:SessionStart"),
+        ("codex_hook_bridge", _flags_exactly("user-prompt-submit"), BUDGET_CODEX_USER_PROMPT, "Codex:UserPromptSubmit"),
+        ("codex_hook_bridge", _flags_exactly("subagent-start"), BUDGET_CODEX_SUBAGENT, "Codex:SubagentStart"),
+        ("codex_hook_bridge", _flags_exactly("subagent-stop"), BUDGET_CODEX_SUBAGENT, "Codex:SubagentStop"),
+        ("measure", _subcommand("dynamic-compact-instructions", "--quiet"), BUDGET_POSTTOOL_MEASURE, "PreCompact:dynamic-compact-instructions"),
+        ("measure", _trigger("compact-capture", "auto"), BUDGET_STOP, "PreCompact:compact-capture"),
+        ("measure", _flags_exactly("quality-cache", "--force", "--quiet"), BUDGET_POSTTOOL_MEASURE, "PostCompact:quality-cache"),
+        # PreCompact and CwdChanged intentionally share this exact argv shape;
+        # the resolver has no event parameter, so the label stays event-neutral.
+        ("read_cache", _flags_exactly("--clear", "--quiet"), BUDGET_POSTTOOL_MEASURE, "cache-clear"),
+    )
+
+
+def resolve_entry_budget(module_name, script_args):
+    """Return (seconds, label), or (None, None) for an unbudgeted entry."""
+    try:
+        argv = list(script_args or ())
+        for module, predicate, seconds, label in _entry_budget_rules():
+            if module != module_name or not predicate(argv):
+                continue
+            override = os.environ.get("TOKEN_OPTIMIZER_HOOK_BUDGET_MS", "").strip()
+            if override:
+                try:
+                    milliseconds = int(override)
+                except ValueError:
+                    return seconds, label
+                if milliseconds <= 0:
+                    return None, None
+                return milliseconds / 1000.0, label
+            return seconds, label
+    except Exception:
+        pass
+    return None, None
+
+
+def arm_entry_budget(module_name, script_args):
+    """Start a silent deadline for a mapped entry, if one exists."""
+    seconds, _label = resolve_entry_budget(module_name, script_args)
+    if not seconds:
+        return None
+    try:
+        return HookDeadline(seconds, message=b"").start()
+    except Exception:
+        return None
 
 
 class LeaseLock:

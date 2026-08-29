@@ -4306,11 +4306,15 @@ var DB = (function() {
     // routing + sub-agents), grounded in your own earliest-vs-recent sessions. ----
     var ba = s.before_after || {};
     if (Number(ba.monthly_savings_usd) > 0) {
-      function baCol(title, cost, toks, mix, accent, dim, cache) {
+      function baCol(title, cost, toks, mix, accent, dim, cache, unit) {
+        // `cost`/`toks` arrive pre-formatted; `unit` is the per-what label
+        // ('session' for the frozen-anchor arms, 'API call'/'message' when the
+        // work-normalized session-weight pool built the headline).
+        var u = unit || 'session';
         return '<div>' +
           '<div class="label" style="margin-bottom:6px;">' + esc(title) + '</div>' +
-          '<div style="font-family:var(--font-mono);font-weight:300;font-size:34px;line-height:1;color:' + accent + ';' + (dim ? '' : 'text-shadow:0 0 12px var(--c-accent-glow);') + '">' + esc(cost) + '<span style="font-size:14px;color:var(--c-text-dim);">/session</span></div>' +
-          '<div style="margin-top:var(--s-2);font-size:14px;color:var(--c-text-dim);font-family:var(--font-mono);line-height:1.95;">' + esc(toks) + ' tokens/session' + (mix ? '<br>' + esc(mix) : '') + (cache ? '<br>' + esc(cache) : '') + '</div>' +
+          '<div style="font-family:var(--font-mono);font-weight:300;font-size:34px;line-height:1;color:' + accent + ';' + (dim ? '' : 'text-shadow:0 0 12px var(--c-accent-glow);') + '">' + esc(cost) + '<span style="font-size:14px;color:var(--c-text-dim);">/' + esc(u) + '</span></div>' +
+          '<div style="margin-top:var(--s-2);font-size:14px;color:var(--c-text-dim);font-family:var(--font-mono);line-height:1.95;">' + esc(toks) + ' tokens/' + esc(u) + (mix ? '<br>' + esc(mix) : '') + (cache ? '<br>' + esc(cache) : '') + '</div>' +
         '</div>';
       }
       // "Where it comes from": waterfall attribution of the $/mo headline. Each lever's
@@ -4364,6 +4368,17 @@ var DB = (function() {
       var afterCachePct = Math.round((Number(ba.after_cache_hit) || 0) * 100);
       var beforeCache = (haveCache && beforeCachePct !== afterCachePct) ? beforeCachePct + '% cache reuse' : '';
       var afterCache = (haveCache && beforeCachePct !== afterCachePct) ? afterCachePct + '% cache reuse' : '';
+      // Session-weight pool present => the headline is the VOLUME lever (tokens per
+      // session), not routing/caching, and it is measured over every parent session
+      // rather than the quality-gated subset. The prose below must describe the lever
+      // the number was actually built from.
+      var wp = ba.session_weight_pool || null;
+      var wpUnit = (wp && wp.work_unit === 'message') ? 'message' : 'API call';
+      var wpUnits = wp ? (Number(wp.now_units) || 0) : 0;
+      // Per-unit token intensity, derived from per-session tokens x sessions / units.
+      var wpTokPerUnit = function (tokPerSess, sess, units) {
+        return (units > 0) ? fmtTok((Number(tokPerSess) || 0) * (Number(sess) || 0) / units) : '0';
+      };
       var baExplicit = ba.baseline_source === 'pretool_baseline';  // stable flag, not display prose
       html += '<div class="card wide" style="padding:var(--s-5) var(--s-4);margin-bottom:var(--s-3);">' +
         '<div class="label" style="margin-bottom:var(--s-2);">The big picture &middot; estimated</div>' +
@@ -4376,8 +4391,13 @@ var DB = (function() {
         // The claim and the method are two different reads. Run together they form
         // a block most people skip; split, the number lands first and the
         // methodology stays available to anyone who wants it.
-        '<div class="lede">Your old-way baseline is a <strong>fixed typical main-work session</strong>, captured once from your own history and never re-measured. Delegated-session costs are averaged per delegated session and scaled by the same main-session count, so a burst of delegation volume cannot swing the result, and costlier delegation reduces the total.</div>' +
-        '<div class="lede" style="margin-top:var(--s-2);">A typical main-work session costs about <strong>' + money(ba.after_cost_per_session) + '/session</strong> now vs <strong>' + money(ba.before_cost_per_session) + '/session</strong> the old way; ' + (Number(ba.savings_per_session) >= 0 ? 'the main-work routing and caching gain is multiplied across your <strong>' + (Number(ba.sessions_per_month) || 0).toLocaleString() + ' sessions</strong>. The delegated-session rate and context savings complete the total above.' : 'main-work sessions ran a touch heavier this period, so the signed delegated-session rate and context savings determine whether the combined estimate remains positive.') + '</div>' +
+        (wp
+          ? '<div class="lede">Your old-way baseline is <strong>' + esc(wp.anchor_month) + '</strong>, your earliest complete month on record. The unit of comparison is the <strong>' + wpUnit + '</strong>, not the session: your work now arrives in more, smaller sessions, and counting sessions would credit that extra capacity as money saved. Each ' + wpUnit + ' carried about <strong>' + wpTokPerUnit(wp.before_tokens_per_session, wp.before_sessions, wp.before_units) + '</strong> of billed context then vs <strong>' + wpTokPerUnit(wp.after_tokens_per_session, wp.sessions, wp.now_units) + '</strong> now &mdash; that gap, at constant token prices, times the <strong>' + wpUnits.toLocaleString() + '</strong> ' + wpUnit + 's you actually ran this period, is the number above.</div>'
+            + '<div class="lede" style="margin-top:var(--s-2);"><strong>What this counts &mdash; and what it declines to count.</strong> ' + esc(wp.capacity_assumption || '') + '</div>'
+          : '<div class="lede">Your old-way baseline is a <strong>fixed typical main-work session</strong>, captured once from your own history and never re-measured. Delegated-session costs are averaged per delegated session and scaled by the same main-session count, so a burst of delegation volume cannot swing the result, and costlier delegation reduces the total.</div>') +
+        (wp
+          ? '<div class="lede" style="margin-top:var(--s-2);">One ' + wpUnit + ' of work costs about <strong>' + money(Number(wp.after_cost_per_unit) || 0) + '</strong> now vs <strong>' + money(Number(wp.before_cost_per_unit) || 0) + '</strong> at the anchor month\'s intensity (constant prices). Capacity gained, not counted: <strong>' + (Number(wp.sessions) || 0).toLocaleString() + ' sessions</strong> this period vs ' + (Number(wp.before_sessions) || 0).toLocaleString() + ' in ' + esc(wp.anchor_month) + ', at about the same total spend. Model price/mix drift worth about <strong>' + money(Number(wp.price_mix_drift_usd) || 0) + '/mo</strong> is also excluded &mdash; it would have happened without Token Optimizer.</div>'
+          : '<div class="lede" style="margin-top:var(--s-2);">A typical main-work session costs about <strong>' + money(ba.after_cost_per_session) + '/session</strong> now vs <strong>' + money(ba.before_cost_per_session) + '/session</strong> the old way; ' + (Number(ba.savings_per_session) >= 0 ? 'the main-work routing and caching gain is multiplied across your <strong>' + (Number(ba.sessions_per_month) || 0).toLocaleString() + ' sessions</strong>. The delegated-session rate and context savings complete the total above.' : 'main-work sessions ran a touch heavier this period, so the signed delegated-session rate and context savings determine whether the combined estimate remains positive.') + '</div>') +
         fold('What changed',
           '<p>Your earliest sessions ran heavier' + (beforeMix ? ', mostly ' + esc(beforeMix) : '') + '. Now sessions are lighter, sub-agents are lighter, and routine work runs on cheaper models. That compounds across every session you run.</p>' +
           '<p>Most of the old cost was long sessions re-reading their cached context, turn after turn. Shorter sessions cut that, and Token Optimizer flags when it is happening so you know to start fresh.</p>') +
@@ -4386,16 +4406,29 @@ var DB = (function() {
           ? '<div class="note" style="margin-top:var(--s-2);">Costlier delegation: ' + money(ba.premium_delegation_cost_usd) + '/mo at the normalized rate. Included in the sidechain net above.</div>'
           : '') +
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:var(--s-4) var(--s-5);margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid rgba(255,255,255,0.06);">' +
-          baCol('The old way', money(ba.before_cost_per_session), fmtTok(ba.before_tokens), beforeMix, 'var(--c-text-main)', true, beforeCache) +
-          baCol('Now', money(ba.after_cost_per_session), fmtTok(ba.after_tokens), afterMix, 'var(--c-accent-cyan)', false, afterCache) +
-          '<div><div class="label" style="margin-bottom:6px;">' + (Number(ba.savings_per_session) >= 0 ? 'Cut per session' : 'Added per session') + '</div>' +
-            '<div style="font-family:var(--font-mono);font-weight:300;font-size:34px;line-height:1;color:' + (Number(ba.savings_per_session) >= 0 ? 'var(--c-accent-cyan);text-shadow:0 0 12px var(--c-accent-glow);' : 'var(--c-warning);') + '">' + (Number(ba.savings_per_session) >= 0 ? '' : '+') + money(Math.abs(Number(ba.savings_per_session) || 0)) + '</div>' +
-          '<div style="margin-top:var(--s-2);font-size:14px;color:var(--c-text-dim);font-family:var(--font-mono);line-height:1.95;">main-work routing &amp; caching &middot; ' + (Number(ba.sessions_per_month) || 0).toLocaleString() + ' main-work sessions this period</div></div>' +
+          (wp
+            ? baCol('The old way (' + esc(wp.anchor_month) + ')', money(Number(wp.before_cost_per_unit) || 0), wpTokPerUnit(wp.before_tokens_per_session, wp.before_sessions, wp.before_units), beforeMix, 'var(--c-text-main)', true, beforeCache, wpUnit) +
+              baCol('Now', money(Number(wp.after_cost_per_unit) || 0), wpTokPerUnit(wp.after_tokens_per_session, wp.sessions, wp.now_units), afterMix, 'var(--c-accent-cyan)', false, afterCache, wpUnit) +
+              '<div><div class="label" style="margin-bottom:6px;">Cut per ' + wpUnit + '</div>' +
+                '<div style="font-family:var(--font-mono);font-weight:300;font-size:34px;line-height:1;color:' + (Number(ba.savings_per_session) >= 0 ? 'var(--c-accent-cyan);text-shadow:0 0 12px var(--c-accent-glow);' : 'var(--c-warning);') + '">' + (Number(ba.savings_per_session) >= 0 ? '' : '+') + money(Math.abs((Number(wp.before_cost_per_unit) || 0) - (Number(wp.after_cost_per_unit) || 0))) + '</div>' +
+              '<div style="margin-top:var(--s-2);font-size:14px;color:var(--c-text-dim);font-family:var(--font-mono);line-height:1.95;">constant prices &middot; ' + wpUnits.toLocaleString() + ' ' + wpUnit + 's this period</div></div>'
+            : baCol('The old way', money(ba.before_cost_per_session), fmtTok(ba.before_tokens), beforeMix, 'var(--c-text-main)', true, beforeCache) +
+              baCol('Now', money(ba.after_cost_per_session), fmtTok(ba.after_tokens), afterMix, 'var(--c-accent-cyan)', false, afterCache) +
+              '<div><div class="label" style="margin-bottom:6px;">' + (Number(ba.savings_per_session) >= 0 ? 'Cut per session' : 'Added per session') + '</div>' +
+                '<div style="font-family:var(--font-mono);font-weight:300;font-size:34px;line-height:1;color:' + (Number(ba.savings_per_session) >= 0 ? 'var(--c-accent-cyan);text-shadow:0 0 12px var(--c-accent-glow);' : 'var(--c-warning);') + '">' + (Number(ba.savings_per_session) >= 0 ? '' : '+') + money(Math.abs(Number(ba.savings_per_session) || 0)) + '</div>' +
+              '<div style="margin-top:var(--s-2);font-size:14px;color:var(--c-text-dim);font-family:var(--font-mono);line-height:1.95;">main-work routing &amp; caching &middot; ' + (Number(ba.sessions_per_month) || 0).toLocaleString() + ' main-work sessions this period</div></div>') +
         '</div>' +
         fold('How we work this number out',
-          '<p>We take a <strong>fixed typical session</strong>, captured once from your own pre-install history and frozen, and price it two ways: the way you work now, and the way you worked before Token Optimizer (~95% Opus, with your old caching pattern). The per-session gap is then scaled by how many sessions you ran this period. The session footprint is identical on both sides and never re-measured, so the old-way baseline stays put and only efficiency (and your session count) moves the total.</p>' +
+          (wp ?
+          '<p>We measure <strong>cost per ' + esc(wpUnit) + '</strong>: every ' + esc(wpUnit) + ' you dispatched in your earliest complete month on record (' + esc(wp.anchor_month) + ') vs every one this period, each side priced at <strong>one constant rate card</strong>. The gap per ' + esc(wpUnit) + ' is multiplied by the ' + wpUnits.toLocaleString() + ' ' + esc(wpUnit) + 's you actually ran this period. Constant prices mean a cheaper model generation or a vendor price cut cannot inflate the figure &mdash; only carrying less billed context per unit of work moves it.</p>' +
+          '<p>We deliberately do <strong>not</strong> multiply by session count: the lighter workflow splits the same work into more, smaller sessions, so a per-session gap would mostly measure that repartitioning and count the extra capacity as money saved. The capacity gain is real &mdash; it is shown above as counts, not dollars. The figure also cannot separate Token Optimizer&rsquo;s effect from your own behaviour drift; the action-by-action metered floor is the &ldquo;Counted directly&rdquo; card below. Your anchor month already had partial Token Optimizer coverage, so if anything this understates the full pre-tool gap.</p>'
+          :
+          '<p>We take a <strong>fixed typical session</strong>, captured once from your own pre-install history and frozen, and price it two ways: the way you work now, and the way you worked before Token Optimizer (~95% Opus, with your old caching pattern). The per-session gap is then scaled by how many sessions you ran this period. The session footprint is identical on both sides and never re-measured, so the old-way baseline stays put and only efficiency (and your session count) moves the total.</p>') +
+          (wp ?
+          '<p>Delegated (sub-agent) work is excluded from this figure and measured in its own pool. The headline already contains every volume mechanism at once (context compression, lean output, loop prevention, continuity handovers), so the metered and estimated lines are not added on top &mdash; adding them would count the same removed tokens twice.</p>'
+          :
           '<p>For sidechains, we divide actual and old-way costs by the number of delegated sessions, then multiply both rates by that same main-session count. The signed difference moves when delegated-session economics change, but not when identical delegated sessions merely arrive in a burst.</p>' +
-          '<p>The pre-tool mix is conservative by design: ~95% Opus is your confirmed starting point, and your earliest recorded sessions were already partly optimized, so this understates the full gap rather than inflating it.</p>' +
+          '<p>The pre-tool mix is conservative by design: ~95% Opus is your confirmed starting point, and your earliest recorded sessions were already partly optimized, so this understates the full gap rather than inflating it.</p>') +
           // Offer the set-baseline tip only when the user has not pinned one AND their
           // mix is Opus-based (the --opus flag is Anthropic-specific; hide it for Codex).
           (baExplicit || !(Number(ba.before_opus) > 0)
@@ -4477,6 +4510,14 @@ var DB = (function() {
           '<span style="color:var(--c-text-dim);"><span style="color:var(--c-text-main);">' + money(measuredMo) + per + '</span> counted</span>' +
           '<span style="color:var(--c-text-dim);">+ <span style="color:var(--c-text-main);">' + money(estimatedMo) + per + '</span> estimated from your habits</span>' +
         '</div>' +
+        // Rate-allocation disclosure. Some savings were logged with the wrong model
+        // stamp (sub-agent and still-open sessions resolve to Sonnet, older rows to
+        // a flat fallback). measure.py re-prices those rows at the model mix each
+        // event's OWN session actually recorded. The token counts stay metered; the
+        // rate is an allocation, so the number is estimated, not measured.
+        ((s.reprice_detail && Number(s.reprice_detail.delta_usd) !== 0)
+          ? '<div class="note" style="margin-top:var(--s-2);">Includes a model-rate correction of ' + money(Number(s.reprice_detail.delta_usd)) + ' over ' + (Number(s.reprice_detail.repriced_tokens) || 0).toLocaleString() + ' tokens whose logged model did not match their session. Repriced at each session&rsquo;s own recorded mix &mdash; an estimate, not a meter.' + ((Number(s.reprice_detail.unmeasured_tokens) || 0) > 0 ? ' ' + Number(s.reprice_detail.unmeasured_tokens).toLocaleString() + ' tokens could not be matched to a session and were left at their logged rate (not measured).' : '') + '</div>'
+          : '') +
         // What makes it up: the three mechanisms folded in (they sum to this number).
         '<div style="margin-top:var(--s-3);padding-top:var(--s-3);border-top:1px solid rgba(255,255,255,0.06);">' +
           '<div class="label" style="margin-bottom:var(--s-2);">What makes it up</div>' +
@@ -4498,7 +4539,10 @@ var DB = (function() {
       '</div>';
     if (si && (Number(si.measured_usd) > 0 || Number(si.estimated_usd) > 0)) {
       html += '<div class="card" style="flex:1;min-width:210px;padding:var(--s-5) var(--s-4);">' +
-          '<div class="label" style="margin-bottom:var(--s-2);">Measured to date</div>' +
+          // Once the model-mix repair has moved a rate (measure.py
+          // _session_model_reprice), this figure is a rate ALLOCATION, not a pure
+          // event-time meter, so the card must not keep calling itself "Measured".
+          '<div class="label" style="margin-bottom:var(--s-2);">' + (si.repriced_to_session_mix ? 'Counted to date &middot; estimated' : 'Measured to date') + '</div>' +
           '<div style="font-family:var(--font-mono);font-weight:300;font-size:52px;line-height:0.9;color:var(--c-text-main);letter-spacing:-0.02em;">' + money(Number(si.measured_usd)) + '</div>' +
           (Number(si.estimated_usd) > 0 ? '<div style="margin-top:var(--s-1);font-family:var(--font-mono);font-size:14px;color:var(--c-text-dim);">+ ' + money(Number(si.estimated_usd)) + ' estimated</div>' : '') +
           '<div class="note" style="margin-top:var(--s-1);">' + billingCaption + '</div>' +

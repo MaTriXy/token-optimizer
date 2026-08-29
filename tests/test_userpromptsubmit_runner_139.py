@@ -288,11 +288,21 @@ def test_userpromptsubmit_runner_session_marker_gate(monkeypatch, tmp_path):
     calls = _install_call_recorder(monkeypatch, runner)
 
     # Simulate "already ran this session" for EVERY gated tag. The runner calls
-    # _ran_once_this_session(tag, sid) for ensure-health, quality-cache-force,
-    # and compact-restore-new-session.
+    # _ran_once_this_session(tag, sid) for ensure-health and
+    # compact-restore-new-session. quality-cache-force uses a CHECK-ONLY gate
+    # so we must create the actual marker file for it.
     monkeypatch.setattr(runner.measure, "_ran_once_this_session", lambda tag, sid: True)
+    # Create the quality-cache-force marker so the CHECK-ONLY gate sees it.
+    qcd = tmp_path / "quality-cache"
+    qcd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(runner.measure, "QUALITY_CACHE_DIR", qcd)
+    sid = "sess-latched-139"
+    qc_marker = runner.measure._once_per_session_marker("quality-cache-force", sid)
+    if qc_marker is not None:
+        qc_marker.parent.mkdir(parents=True, exist_ok=True)
+        qc_marker.write_text('{"ts": 0}', encoding="utf-8")
     monkeypatch.setattr(runner, "_read_hook_input",
-                        lambda: {"session_id": "sess-latched-139", "prompt": "x"})
+                        lambda: {"session_id": sid, "prompt": "x"})
     monkeypatch.setattr(runner, "_harness_only_context", lambda: True)
 
     rc = runner.main()

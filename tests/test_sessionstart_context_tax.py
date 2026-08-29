@@ -182,9 +182,22 @@ def test_self_healed_notice_routes_to_stderr_under_hook(m, monkeypatch, capsys):
     """When ensure-health runs as a non-interactive hook and heals missing
     hooks, the 'Self-healed N hooks' notice must go to stderr (not stdout),
     so it never inflates SessionStart context. An interactive run keeps it on
-    stdout."""
+    stdout.
+
+    Two sub-paths exist under the hook:
+      - HEAL path: settings.json has some of our hooks (genuine drift) →
+        setup_all_hooks runs, 'Self-healed N' goes to stderr.
+      - SKIP path: settings.json has ZERO of our hooks (hooks from another
+        settings layer) → heal is skipped to avoid double-registration, and a
+        short skip reason goes to stderr instead.
+
+    Both paths must write their diagnostic to stderr. Neither may write the
+    diagnostic to stdout (SessionStart context). A silent skip is a failure
+    mode, not a fix: when we decline to heal we say we declined and why."""
+    # --- HEAL path: settings.json has our hooks, heal runs ---
     _stub_ensure_health_to_heal(m, monkeypatch, added=1)
     monkeypatch.setattr(m, "_running_under_hook", lambda: True)
+    monkeypatch.setattr(m, "_should_skip_self_heal_hooks", lambda: (False, True))
 
     m.run_ensure_health()
 
@@ -194,6 +207,25 @@ def test_self_healed_notice_routes_to_stderr_under_hook(m, monkeypatch, capsys):
     )
     assert "Self-healed" in err, (
         "Self-healed notice must still reach stderr for diagnostics"
+    )
+    assert len(out) < 150, (
+        f"headless stdout is {len(out)} chars, must be < 150; got: {out!r}"
+    )
+
+    # --- SKIP path: settings.json has zero of our hooks, heal is skipped ---
+    _stub_ensure_health_to_heal(m, monkeypatch, added=1)
+    monkeypatch.setattr(m, "_running_under_hook", lambda: True)
+    monkeypatch.setattr(m, "_should_skip_self_heal_hooks", lambda: (True, True))
+
+    m.run_ensure_health()
+
+    out, err = capsys.readouterr()
+    assert "Self-healed" not in out, (
+        "heal was skipped but 'Self-healed' leaked into stdout"
+    )
+    assert "skipping heal" in err, (
+        "skip path must emit a stderr diagnostic explaining why heal was skipped; "
+        "a silent skip is the failure mode, not the fix"
     )
     assert len(out) < 150, (
         f"headless stdout is {len(out)} chars, must be < 150; got: {out!r}"

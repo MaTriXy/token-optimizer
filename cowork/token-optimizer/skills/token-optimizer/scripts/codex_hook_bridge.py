@@ -21,6 +21,7 @@ from typing import Any, Callable
 import codex_session
 import measure
 from hook_io import read_stdin_hook_input
+from hook_runtime import BUDGET_CODEX_SESSION_START
 
 # Emit a sprawl nudge once this many subagents are open concurrently.
 _SUBAGENT_SPRAWL_THRESHOLD = 8
@@ -111,8 +112,16 @@ def handle_session_start() -> None:
     session_id = hook_input.get("session_id")
     source = str(hook_input.get("source", "")).strip().lower()
 
-    # Keep existing self-healing behavior even when no context is injected.
-    _capture_stdout(measure.run_ensure_health)
+    # Keep existing self-healing behavior even when no context is injected,
+    # but do not let the standalone bridge outrun Codex's 15s SessionStart
+    # ceiling. module_runner also applies this budget to the whole bridge;
+    # this inner guard covers direct bridge calls and the health phase itself.
+    health_deadline = None
+    try:
+        health_deadline = measure._install_hook_budget(BUDGET_CODEX_SESSION_START)
+        _capture_stdout(measure.run_ensure_health)
+    finally:
+        measure._clear_hook_budget(health_deadline)
 
     if source == "resume" and _has_matching_checkpoint(session_id):
         context = _capture_stdout(

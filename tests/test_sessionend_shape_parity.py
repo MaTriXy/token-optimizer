@@ -101,7 +101,12 @@ def _load_posix_hook_command() -> str:
 
 
 def _assert_current_shape(label: str, cmd: str) -> None:
-    assert "session-end-flush" in cmd, f"{label} must invoke session-end-flush: {cmd!r}"
+    # The consolidated stop_runner.py dispatcher internally calls
+    # session-end-flush; the hooks.json command points at the runner, not at
+    # measure.py session-end-flush directly. Accept either shape.
+    assert "session-end-flush" in cmd or "stop_runner.py" in cmd, (
+        f"{label} must invoke session-end-flush (directly or via stop_runner.py): {cmd!r}"
+    )
     assert _FOSSIL_CHAIN.search(cmd) is None, (
         f"{label} still ships the collect --quiet && fossil: {cmd!r}"
     )
@@ -114,12 +119,13 @@ def _assert_current_shape(label: str, cmd: str) -> None:
 def _assert_stop_shape(label: str, cmd: str) -> None:
     """Assert a Stop-event command carries no fossil and uses the flush shape.
 
-    Stop hooks legitimately run ``compact-capture --trigger stop`` and
-    ``keepwarm-arm`` alongside the flush; those are NOT SessionEnd flush
-    commands and are left untouched. The #114 fossil is the
-    ``collect --quiet && dashboard --quiet`` chain, which must never appear on
-    Stop (it is the inline heavy flush that wedges Windows stop-hooks at 3/4).
-    A token-optimizer flush hook on Stop must use ``--trigger stop``.
+    The consolidated stop_runner.py dispatcher internally calls
+    compact-capture --trigger stop, session-end-flush --trigger stop --defer,
+    and keepwarm-arm; the hooks.json command points at the runner. The #114
+    fossil is the ``collect --quiet && dashboard --quiet`` chain, which must
+    never appear on Stop (it is the inline heavy flush that wedges Windows
+    stop-hooks at 3/4). A direct session-end-flush hook on Stop must use
+    ``--trigger stop``.
     """
     assert _FOSSIL_CHAIN.search(cmd) is None, (
         f"{label} Stop ships the collect --quiet && fossil: {cmd!r}"
@@ -127,7 +133,7 @@ def _assert_stop_shape(label: str, cmd: str) -> None:
     assert "dashboard --quiet" not in cmd, (
         f"{label} Stop ships a dashboard chain: {cmd!r}"
     )
-    if "session-end-flush" in cmd:
+    if "session-end-flush" in cmd and "stop_runner.py" not in cmd:
         assert "--trigger stop" in cmd, (
             f"{label} Stop flush must use --trigger stop, not the end/legacy shape: {cmd!r}"
         )
@@ -171,8 +177,9 @@ def test_root_hooks_json_stop_is_flush_not_collect():
     for i, cmd in enumerate(cmds):
         _assert_stop_shape(f"root hooks.json Stop[{i}]", cmd)
     assert any(
-        "session-end-flush" in c and "--trigger stop" in c for c in cmds
-    ), "root hooks.json Stop must include a session-end-flush --trigger stop hook"
+        "stop_runner.py" in c or ("session-end-flush" in c and "--trigger stop" in c)
+        for c in cmds
+    ), "root hooks.json Stop must include a session-end-flush --trigger stop hook (directly or via stop_runner.py)"
 
 
 def test_codex_mirror_hooks_json_stop_is_flush_not_collect():
@@ -182,8 +189,9 @@ def test_codex_mirror_hooks_json_stop_is_flush_not_collect():
     for i, cmd in enumerate(cmds):
         _assert_stop_shape(f"codex-mirror hooks.json Stop[{i}]", cmd)
     assert any(
-        "session-end-flush" in c and "--trigger stop" in c for c in cmds
-    ), "codex-mirror hooks.json Stop must include a session-end-flush --trigger stop hook"
+        "stop_runner.py" in c or ("session-end-flush" in c and "--trigger stop" in c)
+        for c in cmds
+    ), "codex-mirror hooks.json Stop must include a session-end-flush --trigger stop hook (directly or via stop_runner.py)"
 
 
 def test_cowork_hooks_json_stop_is_current_flush():
@@ -201,8 +209,9 @@ def test_cowork_hooks_json_stop_is_current_flush():
     for i, cmd in enumerate(cmds):
         _assert_stop_shape(f"cowork hooks.json Stop[{i}]", cmd)
     assert any(
-        "session-end-flush" in c and "--trigger stop" in c for c in cmds
-    ), "cowork hooks.json Stop must include a session-end-flush --trigger stop hook"
+        "stop_runner.py" in c or ("session-end-flush" in c and "--trigger stop" in c)
+        for c in cmds
+    ), "cowork hooks.json Stop must include a session-end-flush --trigger stop hook (directly or via stop_runner.py)"
     # cowork has no SessionEnd event at all -- confirm that explicitly so a
     # future SessionEnd addition does not slip past the SessionEnd parity check.
     se_cmds = _session_end_commands_from_hooks_json(path)
