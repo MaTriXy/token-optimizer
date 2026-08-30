@@ -148,7 +148,9 @@ def test_null_model_rows_are_repriced_from_the_flat_fallback(m, tmp_path, monkey
     opus = _rate(m, "opus")
     tokens = 5_000_000
     _ledger_db(m, tmp_path, monkeypatch,
-               events=[("resume_lean", tokens, None, tokens * 3.0 / 1e6, "S1")],
+               # structure_map, not resume_lean: resume_lean is estimated-tier
+               # and reprice-exempt since v5.13.1 (see test_resume_lean_savings).
+               events=[("structure_map", tokens, None, tokens * 3.0 / 1e6, "S1")],
                sessions=[("S1", {"claude-opus-5": 9_000_000})])
 
     s = m._get_savings_summary(days=30)
@@ -232,7 +234,7 @@ def test_no_double_count_with_routing(m, tmp_path, monkeypatch):
     _ledger_db(
         m, tmp_path, monkeypatch,
         events=[("tool_archive", tokens, "sonnet", tokens * sonnet / 1e6, "ROUTED"),
-                ("resume_lean", tokens, "sonnet", tokens * sonnet / 1e6, "OPUS")],
+                ("checkpoint_restore", tokens, "sonnet", tokens * sonnet / 1e6, "OPUS")],
         sessions=[("ROUTED", {"claude-sonnet-5": 8_000_000}),
                   ("OPUS", {"claude-opus-5": 8_000_000})])
 
@@ -242,7 +244,7 @@ def test_no_double_count_with_routing(m, tmp_path, monkeypatch):
         tokens * sonnet / 1e6, rel=1e-6)
     # ...while the Opus session in the SAME window IS corrected. Both assertions
     # must hold together: only the second one fails pre-change.
-    assert s["by_category"]["resume_lean"]["cost_saved_usd"] == pytest.approx(
+    assert s["by_category"]["checkpoint_restore"]["cost_saved_usd"] == pytest.approx(
         tokens * opus / 1e6, rel=1e-6)
 
 

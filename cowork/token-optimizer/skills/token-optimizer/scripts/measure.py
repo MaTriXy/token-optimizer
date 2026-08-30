@@ -5113,6 +5113,7 @@ def generate_dashboard(coord_path):
     try:
         savings_data = _get_merged_savings(days=30)
         savings_data["since_install"] = _savings_since_install()
+        savings_data["counted_cumulative"] = _counted_cumulative_summary()
     except Exception:
         savings_data = _get_savings_summary(days=30)
 
@@ -6545,6 +6546,7 @@ def generate_standalone_dashboard(days=30, quiet=False, force=False):
     try:
         savings_data = _get_merged_savings(days=30)
         savings_data["since_install"] = _savings_since_install()
+        savings_data["counted_cumulative"] = _counted_cumulative_summary()
         # Billing-mode transparency: the dashboard captions the savings heroes
         # differently for flat-plan vs API-billed users ("capacity freed" vs
         # "spend not incurred"). Conservative default is 'subscription'.
@@ -9145,6 +9147,34 @@ def _resolve_installed_skill(name):
     return None
 
 
+def _sidechain_path_reason(filepath):
+    """Return the structural sidechain reason for a nested agent transcript."""
+    path = Path(filepath)
+    if "subagents" in path.parts or (path.name.startswith("agent-") and path.suffix == ".jsonl"):
+        return "nested_path"
+    return None
+
+
+def _osrc_prompt_text(record):
+    """Extract only human-authored text from one user record."""
+    if record.get("type") != "user":
+        return ""
+    message = record.get("message") or {}
+    content = message.get("content") if isinstance(message, dict) else message
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            block.get("text") or ""
+            if isinstance(block, dict) and block.get("type") == "text"
+            else block
+            if isinstance(block, str)
+            else ""
+            for block in content
+        )
+    return ""
+
+
 def _parse_session_jsonl(filepath):
     """Parse a single JSONL session file in one streaming pass.
 
@@ -9182,6 +9212,9 @@ def _parse_session_jsonl(filepath):
     total_cache_create_5m = 0
     model_usage = {}              # v5.4.8: billable tokens (fresh_input + cache_create + output)
     model_usage_breakdown = {}    # v5.4.8: per-model {fresh_input, cache_read, cache_create, output}
+    reported_input = 0             # official /stats-compatible, no streaming dedup
+    reported_output = 0
+    reported_model_usage = {}
     version = None
     slug = None
     topic = None
@@ -9192,7 +9225,9 @@ def _parse_session_jsonl(filepath):
     _counted_message_ids = set()  # dedup streamed assistant chunks -> one reply
     _conversation_records = 0     # RAW user/assistant records seen (transcript-is-real test)
     api_calls = 0
-    is_sidechain = False          # subagent sidechain transcript (isSidechain:true)
+    sidechain_reason = _sidechain_path_reason(filepath)
+    is_sidechain = sidechain_reason is not None
+    first_user_record_seen = False
 
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
@@ -9207,6 +9242,7 @@ def _parse_session_jsonl(filepath):
                 # working session) so the cost comparison can exclude it.
                 if record.get("isSidechain") is True:
                     is_sidechain = True
+                    sidechain_reason = "isSidechain"
 
                 # Detect outsourcerer delegation sessions by content marker.
                 # The outsourcerer skill injects an OSRC::PROGRESS protocol
@@ -9226,23 +9262,14 @@ def _parse_session_jsonl(filepath):
                 # prompt text: a user record whose content blocks are tool_result
                 # is the transport for a tool's output, not something a human
                 # typed.
-                if not is_sidechain and record.get("type") == "user":
-                    _msg = record.get("message") or {}
-                    _c = _msg.get("content")
-                    if isinstance(_c, str):
-                        _prompt = _c
-                    elif isinstance(_c, list):
-                        # Keep text blocks only; tool_result blocks carry the
-                        # delegate's echoed output and must not mark the parent.
-                        _prompt = "\n".join(
-                            b.get("text") or ""
-                            for b in _c
-                            if isinstance(b, dict) and b.get("type") == "text"
-                        )
-                    else:
-                        _prompt = ""
-                    if "OSRC::PROGRESS" in _prompt or "OSRC::DONE" in _prompt:
-                        is_sidechain = True
+                if record.get("type") == "user" and not first_user_record_seen:
+                    _prompt = _osrc_prompt_text(record)
+                    if _prompt:
+                        first_user_record_seen = True
+                    if _prompt and not is_sidechain:
+                        if "OSRC::PROGRESS" in _prompt or "OSRC::DONE" in _prompt:
+                            is_sidechain = True
+                            sidechain_reason = "osrc_prompt"
 
                 # Extract version (take the first non-None we see)
                 if version is None:
@@ -9405,6 +9432,17 @@ def _parse_session_jsonl(filepath):
                         )
                         cc = usage.get("cache_creation_input_tokens", 0) or (cc_1h + cc_5m)
                         model = msg.get("model", "unknown")
+                        # Claude Code's /stats basis sums every assistant usage
+                        # record, including streamed chunks, and excludes cache
+                        # read/write classes. Keep it beside the deduped billed
+                        # basis used for pricing and cost analysis.
+                        reported_input += int(inp_tok)
+                        reported_output += int(out_tok)
+                        reported_model_usage[model] = (
+                            reported_model_usage.get(model, 0)
+                            + int(inp_tok)
+                            + int(out_tok)
+                        )
                         # Records without requestId must never collapse with
                         # each other — use the map's own size as a monotonic
                         # per-session counter.
@@ -9508,6 +9546,9 @@ def _parse_session_jsonl(filepath):
         "p95_call_gap_seconds": gap_stats["p95"],
         "model_usage": model_usage,
         "model_usage_breakdown": model_usage_breakdown,
+        "reported_input_tokens": reported_input,
+        "reported_output_tokens": reported_output,
+        "reported_model_usage": reported_model_usage,
         "skills_used": skills_used,
         "subagents_used": subagents_used,
         "tool_calls": tool_calls,
@@ -9515,6 +9556,7 @@ def _parse_session_jsonl(filepath):
         "api_calls": api_calls,
         "first_ts": first_ts.isoformat() if first_ts else None,
         "is_sidechain": is_sidechain,
+        "sidechain_reason": sidechain_reason,
     }
     if cache_key is not None:
         if len(_parse_session_jsonl_cache) >= _PARSE_CACHE_MAX:
@@ -9797,6 +9839,29 @@ def _load_overhead_snapshots():
 TRENDS_DB = SNAPSHOT_DIR / "trends.db"
 
 _SCHEMA = """
+-- Counted-cumulative ledger: per-removal prevented-re-read records. One row per
+-- counted removal event (savings_events 'se:<id>', measured compression_events
+-- 'ce:<id>', or pre-ledger transcript marker 'mk:<sid>:<line>'). reread_* is
+-- the removal's tokens x the deduped API turns from the event to the next real
+-- compact_boundary in ITS OWN session, priced per-turn at that turn's model
+-- cache-read rate. Computed incrementally in the collect pass; dashboard regen
+-- only ever SUMs this table (never walks transcripts).
+CREATE TABLE IF NOT EXISTS counted_reread (
+    event_key TEXT PRIMARY KEY,
+    source TEXT,
+    session_uuid TEXT,
+    event_ts TEXT,
+    event_month TEXT,
+    tokens INTEGER DEFAULT 0,
+    oneshot_usd REAL DEFAULT 0.0,
+    reread_tokens INTEGER DEFAULT 0,
+    reread_usd REAL DEFAULT 0.0,
+    turns_counted INTEGER DEFAULT 0,
+    transcript_mtime REAL,
+    computed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_counted_reread_session ON counted_reread (session_uuid);
+
 CREATE TABLE IF NOT EXISTS session_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     jsonl_path TEXT UNIQUE,
@@ -9828,7 +9893,11 @@ CREATE TABLE IF NOT EXISTS session_log (
     quality_grade TEXT,
     stale_waste_tokens INTEGER DEFAULT 0,
     session_uuid TEXT,
-    is_sidechain INTEGER DEFAULT 0
+    is_sidechain INTEGER DEFAULT 0,
+    sidechain_reason TEXT,
+    reported_input_tokens INTEGER,
+    reported_output_tokens INTEGER,
+    reported_model_usage_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS daily_stats (
@@ -9896,24 +9965,18 @@ CREATE TABLE IF NOT EXISTS compression_events (
 """
 
 
-def _scan_jsonl_is_sidechain(filepath, max_lines=200):
-    """Return True if the transcript at `filepath` is a subagent sidechain.
-
-    isSidechain:true is stamped on every record of a sidechain transcript, so a
-    short head-scan is conclusive. Also detects outsourcerer delegation
-    sessions by content marker (OSRC::PROGRESS protocol block injected by the
-    outsourcerer skill into every delegation prompt). These are not flagged
-    isSidechain:true in their JSONL but are delegation calls, not human work.
-    Reads at most `max_lines` lines to keep the one-time backfill fast over
-    thousands of files. Missing/unreadable → None (caller leaves the row
-    unclassified rather than guessing).
-    """
+def _classify_jsonl_is_sidechain(filepath, max_lines=200):
+    """Return ``(is_sidechain, reason)`` using only authoritative signals."""
+    path_reason = _sidechain_path_reason(filepath)
+    if path_reason:
+        return (True, path_reason)
     try:
         parsed = 0
+        first_user_record_seen = False
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
-                # Cap on PARSED records, not raw lines -- blank/garbage lines must not
-                # eat the scan budget before a real record is examined.
+                # Cap on parsed records, not raw lines, so blank/garbage lines
+                # do not consume the scan budget before a real record is seen.
                 if parsed >= max_lines:
                     break
                 line = line.strip()
@@ -9925,61 +9988,115 @@ def _scan_jsonl_is_sidechain(filepath, max_lines=200):
                     continue
                 parsed += 1
                 if rec.get("isSidechain") is True:
-                    return True
-                # Content-based outsourcerer delegation detection.
-                # Must mirror _parse_session_jsonl exactly: the marker only
-                # proves delegation when a HUMAN typed it, i.e. in a `user`
-                # record's real text. Testing the raw line matched the marker
-                # inside tool RESULTS too, so an orchestrator session that ran
-                # `outsourcerer.sh status` (whose output echoes OSRC::PROGRESS)
-                # classified itself as the delegation it was watching.
-                if rec.get("type") == "user":
-                    _c = (rec.get("message") or {}).get("content")
-                    if isinstance(_c, str):
-                        _prompt = _c
-                    elif isinstance(_c, list):
-                        _prompt = "\n".join(
-                            b.get("text") or ""
-                            for b in _c
-                            if isinstance(b, dict) and b.get("type") == "text"
-                        )
-                    else:
-                        _prompt = ""
-                    if "OSRC::PROGRESS" in _prompt or "OSRC::DONE" in _prompt:
-                        return True
-        return False
+                    return (True, "isSidechain")
+                # The OSRC protocol is meaningful only in the first real user
+                # prompt. Tool-result transport and later assistant/user echoes
+                # are orchestrator activity, not proof of a delegated worker.
+                if rec.get("type") == "user" and not first_user_record_seen:
+                    prompt = _osrc_prompt_text(rec)
+                    if prompt:
+                        first_user_record_seen = True
+                    if prompt and ("OSRC::PROGRESS" in prompt or "OSRC::DONE" in prompt):
+                        return (True, "osrc_prompt")
+        return (False, None)
     except (OSError, ValueError):
-        return None
+        return (None, None)
+
+
+def _scan_jsonl_is_sidechain(filepath, max_lines=200):
+    """Return True/False for a readable transcript, otherwise None."""
+    verdict, _reason = _classify_jsonl_is_sidechain(filepath, max_lines=max_lines)
+    return verdict
 
 
 def _backfill_is_sidechain(conn):
-    """Classify is_sidechain for rows the migration left NULL (one-time).
+    """Reclassify legacy rows once with the corrected classifier.
 
-    Idempotent: targets only `is_sidechain IS NULL`, so re-running is a no-op
-    once every row is classified. Rows whose transcript is gone stay NULL (treated
-    as human downstream) and are retried on a later init if the file reappears.
-    Returns (classified, missing) counts.
+    The persistent gate is required because ``sidechain_reason`` is NULL for a
+    legitimate human row after repair, so NULL alone cannot be a durable
+    unclassified sentinel. Missing transcripts remain unchanged and are counted
+    rather than guessed.
     """
-    rows = conn.execute(
-        "SELECT id, jsonl_path FROM session_log "
-        "WHERE is_sidechain IS NULL AND jsonl_path IS NOT NULL"
-    ).fetchall()
-    if not rows:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS token_optimizer_meta "
+        "(key TEXT PRIMARY KEY, value TEXT)"
+    )
+    if conn.execute(
+        "SELECT 1 FROM token_optimizer_meta WHERE key = 'sidechain_classifier_v2_done'"
+    ).fetchone() is not None:
         return (0, 0)
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(session_log)").fetchall()}
+    has_reason = "sidechain_reason" in cols
+    rows = conn.execute(
+        "SELECT id, jsonl_path FROM session_log WHERE jsonl_path IS NOT NULL"
+    ).fetchall()
     updates = []
     missing = 0
     for row_id, jpath in rows:
-        verdict = _scan_jsonl_is_sidechain(jpath)
+        verdict, reason = _classify_jsonl_is_sidechain(jpath)
         if verdict is None:
             missing += 1
             continue
-        updates.append((1 if verdict else 0, row_id))
+        if has_reason:
+            updates.append((1 if verdict else 0, reason, row_id))
+        else:
+            updates.append((1 if verdict else 0, row_id))
+    if updates:
+        if has_reason:
+            conn.executemany(
+                "UPDATE session_log SET is_sidechain = ?, sidechain_reason = ? WHERE id = ?",
+                updates,
+            )
+        else:
+            conn.executemany(
+                "UPDATE session_log SET is_sidechain = ? WHERE id = ?", updates
+            )
+    conn.execute(
+        "INSERT OR REPLACE INTO token_optimizer_meta (key, value) "
+        "VALUES ('sidechain_classifier_v2_done', datetime('now'))"
+    )
+    conn.commit()
+    return (len(updates), missing)
+
+
+def _backfill_reported_token_usage(conn):
+    """Persist the official-compatible, non-deduped usage basis for old rows."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS token_optimizer_meta "
+        "(key TEXT PRIMARY KEY, value TEXT)"
+    )
+    if conn.execute(
+        "SELECT 1 FROM token_optimizer_meta WHERE key = 'reported_token_backfill_done'"
+    ).fetchone() is not None:
+        return 0
+
+    rows = conn.execute(
+        "SELECT id, jsonl_path FROM session_log WHERE jsonl_path IS NOT NULL"
+    ).fetchall()
+    updates = []
+    for row_id, jpath in rows:
+        parsed = _parse_session_jsonl(jpath)
+        if not parsed:
+            continue
+        updates.append((
+            int(parsed.get("reported_input_tokens", 0) or 0),
+            int(parsed.get("reported_output_tokens", 0) or 0),
+            json.dumps(parsed.get("reported_model_usage", {})),
+            row_id,
+        ))
     if updates:
         conn.executemany(
-            "UPDATE session_log SET is_sidechain = ? WHERE id = ?", updates
+            "UPDATE session_log SET reported_input_tokens = ?, "
+            "reported_output_tokens = ?, reported_model_usage_json = ? WHERE id = ?",
+            updates,
         )
-        conn.commit()
-    return (len(updates), missing)
+    conn.execute(
+        "INSERT OR REPLACE INTO token_optimizer_meta (key, value) "
+        "VALUES ('reported_token_backfill_done', datetime('now'))"
+    )
+    conn.commit()
+    return len(updates)
 
 
 def _backfill_outsourcerer_sidechain(conn):
@@ -10240,6 +10357,16 @@ def _init_trends_db():
         # collection always writes an explicit 0/1. Queries treat NULL as human.
         if "is_sidechain" not in cols:
             conn.execute("ALTER TABLE session_log ADD COLUMN is_sidechain INTEGER")
+        if "sidechain_reason" not in cols:
+            conn.execute("ALTER TABLE session_log ADD COLUMN sidechain_reason TEXT")
+        # Official /stats-compatible usage is captured without streaming dedup
+        # and without cache classes. Legacy rows are filled by a one-time scan.
+        if "reported_input_tokens" not in cols:
+            conn.execute("ALTER TABLE session_log ADD COLUMN reported_input_tokens INTEGER")
+        if "reported_output_tokens" not in cols:
+            conn.execute("ALTER TABLE session_log ADD COLUMN reported_output_tokens INTEGER")
+        if "reported_model_usage_json" not in cols:
+            conn.execute("ALTER TABLE session_log ADD COLUMN reported_model_usage_json TEXT")
         conn.commit()
     except sqlite3.Error:
         pass
@@ -10268,30 +10395,25 @@ def _init_trends_db():
         conn.commit()
     except (sqlite3.Error, OSError, ValueError):
         pass
-    # One-time backfill of is_sidechain for rows the migration left NULL.
-    # Gated by the NULL sentinel, so it scans transcripts only on the first init
-    # after upgrade; once every row is classified there is nothing to do.
+    # One-time backfill of the corrected sidechain classifier. It revisits old
+    # rows, including the 1-valued rows the broad marker test misclassified.
+    sidechain_changed = 0
     try:
-        _backfill_is_sidechain(conn)
+        sidechain_changed, _sidechain_missing = _backfill_is_sidechain(conn)
     except (sqlite3.Error, OSError):
         pass
-    # One-time backfill of outsourcerer sessions collected before the
-    # path-based detection was added. Reclassifies them as is_sidechain=1 so
-    # they stop inflating the human-session pool. Idempotent.
+    # One-time backfill of official-compatible usage for existing rows. New
+    # collection writes these fields directly from every assistant record.
     try:
-        _backfill_outsourcerer_sidechain(conn)
+        _backfill_reported_token_usage(conn)
     except (sqlite3.Error, OSError):
         pass
-    # One-time REPAIR of rows the old over-broad marker test wrongly flagged
-    # (it matched OSRC::PROGRESS inside tool RESULTS, so a session that merely
-    # watched a delegate filed itself as the delegation). Must run AFTER the
-    # backfill above: that pass is gated as complete, so without this the
-    # corrected classifier never revisits the rows the buggy one wrote. One-way
-    # (1 -> 0 only) and separately gated. Idempotent.
-    try:
-        _repair_osrc_sidechain_misflag(conn)
-    except (sqlite3.Error, OSError):
-        pass
+    if sidechain_changed:
+        try:
+            _rebuild_aggregate_tables(conn)
+            conn.commit()
+        except sqlite3.Error:
+            pass
     # Backfill platform for rows collected before the column was wired into the
     # INSERT paths. The jsonl_path discriminator is definitive: Claude sessions
     # live under ~/.claude/projects/, Codex under ~/.codex/sessions/, Hermes
@@ -10667,12 +10789,18 @@ def _log_spawn_failure(msg):
         pass
 
 
-def _log_savings_event(event_type, tokens_saved, session_id=None, detail=None, model=None):
+def _log_savings_event(event_type, tokens_saved, session_id=None, detail=None, model=None,
+                       cost_per_mtok=None):
     """Log a savings event to the trends database.
 
     Cost is calculated at the session's actual model rate. Resolution order:
     explicit `model` arg → session JSONL (via session_id) → CLAUDE_MODEL env →
     trends DB dominant → Sonnet fallback. See `_resolve_session_model`.
+
+    `cost_per_mtok` overrides the default input-rate pricing for event classes
+    whose avoided token is NOT an input-class token (e.g. resume_lean prices at
+    the cache-read / 1h cache-write rate of the avoided reload). When given, the
+    stored cost is tokens_saved * cost_per_mtok / 1e6 at the caller's rate.
 
     Also writes session_uuid (the Claude UUID = JSONL stem) so aggregation
     joins directly on session_log.session_uuid rather than LIKE-scanning
@@ -10694,7 +10822,8 @@ def _log_savings_event(event_type, tokens_saved, session_id=None, detail=None, m
         else:
             normalized = _resolve_session_model(session_id)
         rates = tier_data["claude_models"].get(normalized, tier_data["claude_models"].get("sonnet", {}))
-        cost_per_mtok = rates.get("input", 3.0)
+        if cost_per_mtok is None:
+            cost_per_mtok = rates.get("input", 3.0)
         cost_saved = tokens_saved * cost_per_mtok / 1e6
 
         conn = _init_trends_db()
@@ -17162,6 +17291,14 @@ def _session_mix_input_terms(*model_usage_blobs):
     return terms or None
 
 
+# Event classes whose stored cost is NOT an input-class rate and must never be
+# re-anchored to a session's input mix. resume_lean prices at the cache-read /
+# 1h cache-write rate of the avoided reload (v5.13.1 resume_lean rework); it is
+# estimated-tier and never reaches the counted headline, so the reprice leaves
+# its rows exactly as logged.
+_REPRICE_SKIP_EVENT_TYPES = frozenset({"resume_lean"})
+
+
 def _session_model_reprice(conn, cutoff):
     """Per-event_type USD correction from repricing savings_events at each event's
     OWN session model mix. Returns (deltas_by_event_type, repriced_tokens,
@@ -17219,6 +17356,8 @@ def _session_model_reprice(conn, cutoff):
     except (sqlite3.Error, TypeError, ValueError):
         return {}, 0, 0
     for event_type, tok, cost, mu_json, amu_json in rows:
+        if event_type in _REPRICE_SKIP_EVENT_TYPES:
+            continue  # non-input-rate class; keep the event-time price verbatim
         try:
             tok = int(tok or 0)
         except (TypeError, ValueError):
@@ -17238,6 +17377,468 @@ def _session_model_reprice(conn, cutoff):
             deltas[event_type] = deltas.get(event_type, 0.0) + delta
         repriced_tokens += tok
     return deltas, repriced_tokens, unmeasured_tokens
+
+
+# ---------------------------------------------------------------------------
+# The cumulative COUNTED number for the "Counted to date" card.
+# Method: context REMOVALS only, trajectory held fixed -- each removal's
+# prevented re-reads are the deduped API turns from the event to the next REAL
+# compact_boundary in its own session, priced at that turn's model cache-read
+# rate. resume_lean (counterfactual lever) and opportunity/unapplied rows are
+# excluded; the one-shot floor prices each removal once at the input rate of
+# the first call after it. Pre-ledger months (before _COUNTED_LEDGER_ERA_START)
+# are represented by the transcripts' own "Full result archived" markers so
+# thin early logging cannot zero the period out.
+# ---------------------------------------------------------------------------
+
+# Removal event classes that ride the context until compaction -- METERED
+# magnitudes only: the counted card may only
+# compound removals whose token count was measured. Deliberately absent:
+#   * resume_lean -- estimated tier; the avoided reload is a counterfactual;
+#   * mcp_cap / hint_followed -- estimated-MAGNITUDE (fixed 5,000/event and
+#     conservative-guess sizes; _get_savings_summary relocates both to the
+#     estimated tier, so a counted annuity here would cross tiers);
+#   * verbosity_* -- output trims: generated once, never re-read.
+_COUNTED_SE_EVENT_TYPES = (
+    "tool_archive", "tool_archive_reexpand", "tool_archive_refetch_block",
+    "structure_map", "checkpoint_restore", "delta_read",
+)
+# compression_events features that are bookkeeping, not removals.
+_COUNTED_CE_EXCLUDED_FEATURES = (
+    "quality_nudge", "loop_detection", "cohort_demoted", "fresh_session_nudge",
+    "cache_drop_warning", "first_read_edit_followup",
+)
+# Ledger events count from here; earlier months use transcript markers instead
+# (the Mar-Apr ledger logged 4+13 events against 73+232 physical markers).
+_COUNTED_LEDGER_ERA_START = "2026-05-01"
+# Old-format markers carry no size; median of the 33 sized Mar-May markers.
+_COUNTED_MARKER_MEDIAN_TOKENS = 3100
+_COUNTED_MARKER_RX = re.compile(r"Full result archived(?: \(([0-9,]+) chars\))?")
+# Per-collect-pass caps: the backlog drains over flushes (same philosophy as
+# _COLLECT_MAX_PER_RUN); `counted-backfill` runs uncapped interactively.
+_COUNTED_MAX_SESSIONS_PER_PASS = 8
+_COUNTED_MARKER_FILES_PER_PASS = 120
+_COUNTED_PASS_DEADLINE_SECONDS = 6.0
+_COUNTED_META_MARKER_DONE = "counted_marker_backfill_done"
+_COUNTED_META_MARKER_CURSOR = "counted_marker_backfill_cursor"
+
+
+def _counted_event_utc(ts):
+    """Savings-event timestamps are naive LOCAL time (datetime.now()); transcript
+    timestamps are UTC. Convert local-naive -> UTC-naive (DST-correct for the
+    event's own date via the system tz database). Never raises."""
+    try:
+        dt = datetime.fromisoformat(str(ts)[:26])
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    except (ValueError, TypeError, OSError):
+        return None
+
+
+def _counted_walk_transcript(path, collect_markers=False):
+    """One pass over a transcript for the counted-cumulative engine.
+
+    Returns (turns, compacts, markers):
+      turns   = [(utc-naive datetime, model_norm)] -- parent API calls, deduped
+                on requestId/message.id (Claude Code writes one assistant line
+                per content block, all sharing the same usage);
+      compacts= [utc-naive datetime] of real compact_boundary system lines;
+      markers = [(utc-naive datetime-or-None, tokens-or-None)] for
+                "Full result archived" injections (collect_markers only).
+    Never raises; returns ([], [], []) on unreadable files.
+    """
+    turns, compacts, markers = [], [], []
+    seen = set()
+    last_ts = None
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if collect_markers and "Full result archived" in line:
+                    m = _COUNTED_MARKER_RX.search(line)
+                    tok = None
+                    if m and m.group(1):
+                        tok = max(1, int(m.group(1).replace(",", "")) // 4)
+                    markers.append((last_ts, tok))
+                if '"assistant"' not in line and "compact_boundary" not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                t = d.get("type")
+                ts = d.get("timestamp")
+                dt = None
+                if ts:
+                    try:
+                        dt = datetime.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S")
+                    except (ValueError, TypeError):
+                        dt = None
+                if dt is not None:
+                    last_ts = dt
+                if t == "system" and d.get("subtype") == "compact_boundary":
+                    if dt is not None:
+                        compacts.append(dt)
+                    continue
+                if t != "assistant" or d.get("isSidechain"):
+                    continue
+                msg = d.get("message") or {}
+                if not isinstance(msg, dict) or not msg.get("usage"):
+                    continue
+                rid = d.get("requestId") or msg.get("id")
+                if rid in seen:
+                    continue
+                seen.add(rid)
+                if dt is None:
+                    continue
+                turns.append((dt, _normalize_model_name(msg.get("model"))))
+    except (OSError, PermissionError):
+        return [], [], []
+    turns.sort(key=lambda x: x[0])
+    compacts.sort()
+    return turns, compacts, markers
+
+
+def _counted_score_event(turns, compacts, ev_dt, tokens, tier_data):
+    """(oneshot_usd, reread_tokens, reread_usd, turns_counted) for one removal.
+
+    Re-reads start at the SECOND call after the event (the first call is the
+    one-shot: the removal's tokens never got sent at the input rate) and stop
+    at the next real compact_boundary -- after compaction the content is gone
+    in both arms. `tokens` may be negative (tool_archive_reexpand debits)."""
+    import bisect as _bisect
+    models = tier_data.get("claude_models", {})
+
+    def _rate(model, kind, default):
+        r = models.get(model or "") or models.get("sonnet") or {}
+        return float(r.get(kind, default))
+
+    times = [t[0] for t in turns]
+    k = _bisect.bisect_right(times, ev_dt)
+    if k >= len(turns):
+        return 0.0, 0, 0.0, 0
+    end = len(turns)
+    for c in compacts:
+        if c > ev_dt:
+            end = _bisect.bisect_left(times, c)
+            break
+    oneshot_usd = tokens * _rate(turns[k][1], "input", 3.0) / 1e6
+    reread_tokens = 0
+    reread_usd = 0.0
+    n = 0
+    for j in range(k + 1, max(k + 1, end)):
+        reread_tokens += tokens
+        reread_usd += tokens * _rate(turns[j][1], "cache_read", 0.3) / 1e6
+        n += 1
+    return oneshot_usd, reread_tokens, reread_usd, n
+
+
+def _counted_candidate_events(conn):
+    """Counted removal events from both ledgers, era-gated, resume_lean excluded.
+
+    Yields (event_key, session_uuid, timestamp, tokens, as_logged_cost, model).
+    compression_events has no cost column (as_logged_cost is NULL there); the
+    caller prices those at the row's own model input rate when no transcript
+    turn is available to price against."""
+    se_types = ",".join("?" for _ in _COUNTED_SE_EVENT_TYPES)
+    ce_excl = ",".join("?" for _ in _COUNTED_CE_EXCLUDED_FEATURES)
+    rows = conn.execute(
+        "SELECT 'se:'||id, session_uuid, timestamp, "
+        "  CASE WHEN event_type='tool_archive_reexpand' THEN -tokens_saved "
+        "       ELSE tokens_saved END, cost_saved_usd, model "
+        "FROM savings_events "
+        "WHERE event_type IN (" + se_types + ") AND timestamp >= ? "
+        "UNION ALL "
+        "SELECT 'ce:'||id, session_uuid, timestamp, "
+        "  original_tokens - compressed_tokens, NULL, model "
+        "FROM compression_events "
+        "WHERE (tier IS NULL OR tier = 'measured') AND verified = 1 "
+        "  AND original_tokens > compressed_tokens "
+        "  AND feature NOT IN (" + ce_excl + ") AND timestamp >= ?",
+        (*_COUNTED_SE_EVENT_TYPES, _COUNTED_LEDGER_ERA_START,
+         *_COUNTED_CE_EXCLUDED_FEATURES, _COUNTED_LEDGER_ERA_START),
+    ).fetchall()
+    return rows
+
+
+def _counted_session_path(conn, session_uuid):
+    """Transcript path for a session: session_log.jsonl_path, else a projects glob."""
+    try:
+        row = conn.execute(
+            "SELECT jsonl_path FROM session_log WHERE session_uuid = ? "
+            "ORDER BY id DESC LIMIT 1", (session_uuid,)).fetchone()
+        if row and row[0] and Path(row[0]).exists():
+            return Path(row[0])
+    except sqlite3.Error:
+        pass
+    try:
+        base = CLAUDE_DIR / "projects"
+        if base.exists():
+            cands = list(base.glob(f"*/{session_uuid}.jsonl"))
+            if cands:
+                return max(cands, key=lambda p: p.stat().st_mtime)
+    except (OSError, PermissionError):
+        pass
+    return None
+
+
+def _update_counted_cumulative(conn, max_sessions=_COUNTED_MAX_SESSIONS_PER_PASS,
+                               deadline_seconds=_COUNTED_PASS_DEADLINE_SECONDS,
+                               quiet=True):
+    """Incrementally (re)compute counted_reread rows in the collect pass.
+
+    A session is (re)walked only when it has counted events with no stored row,
+    or when its transcript grew since the stored rows were computed (an open
+    session keeps accruing re-reads). Unchanged sessions cost one stat() each.
+    Bounded by `max_sessions` and a soft wall-clock deadline so a hook-path
+    flush is never held up; the backlog converges over passes. Fail-open."""
+    stats = {"sessions_walked": 0, "rows_written": 0, "pending_sessions": 0}
+    try:
+        started = time.monotonic()
+        events = _counted_candidate_events(conn)
+        if not events:
+            return stats
+        stored = {r[0]: r[1] for r in conn.execute(
+            "SELECT event_key, transcript_mtime FROM counted_reread")}
+        by_sess = {}
+        for key, uuid, ts, tok, cost, model in events:
+            by_sess.setdefault(uuid, []).append((key, ts, tok, cost, model))
+        tier_data = PRICING_TIERS.get(_load_pricing_tier(), PRICING_TIERS["anthropic"])
+        now_iso = datetime.now().isoformat()
+
+        def _fallback_oneshot(tok, cost, model):
+            # savings_events rows carry an as-logged cost; compression_events
+            # rows do not -- price those once at the row's own model input rate
+            # (sonnet card when unstamped). Re-reads stay 0 without a transcript.
+            if cost is not None:
+                return float(cost)
+            models = tier_data.get("claude_models", {})
+            r = models.get(_normalize_model_name(model) or "") or models.get("sonnet") or {}
+            return tok * float(r.get("input", 3.0)) / 1e6
+
+        # Unjoinable events (no session uuid): one-shot only; there is no
+        # transcript to count re-reads against.
+        for key, ts, tok, cost, model in by_sess.pop(None, []) + by_sess.pop("", []):
+            if key in stored:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO counted_reread (event_key, source, "
+                "session_uuid, event_ts, event_month, tokens, oneshot_usd, "
+                "reread_tokens, reread_usd, turns_counted, transcript_mtime, "
+                "computed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (key, key.split(":", 1)[0], None, ts, str(ts)[:7], int(tok or 0),
+                 round(_fallback_oneshot(int(tok or 0), cost, model), 6),
+                 0, 0.0, 0, None, now_iso))
+            stats["rows_written"] += 1
+
+        # Which sessions need a walk?
+        todo = []
+        for uuid, evs in by_sess.items():
+            path = _counted_session_path(conn, uuid)
+            if path is None:
+                for key, ts, tok, cost, model in evs:
+                    if key in stored:
+                        continue
+                    conn.execute(
+                        "INSERT OR REPLACE INTO counted_reread (event_key, source, "
+                        "session_uuid, event_ts, event_month, tokens, oneshot_usd, "
+                        "reread_tokens, reread_usd, turns_counted, transcript_mtime, "
+                        "computed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (key, key.split(":", 1)[0], uuid, ts, str(ts)[:7],
+                         int(tok or 0),
+                         round(_fallback_oneshot(int(tok or 0), cost, model), 6),
+                         0, 0.0, 0, None, now_iso))
+                    stats["rows_written"] += 1
+                continue
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            fresh = all(
+                key in stored and stored[key] is not None
+                and stored[key] >= mtime - 1.0
+                for key, _ts, _tok, _cost, _model in evs)
+            if not fresh:
+                todo.append((mtime, uuid, path, evs))
+        stats["pending_sessions"] = len(todo)
+        todo.sort(reverse=True)  # freshest first: the active session updates every pass
+
+        for mtime, uuid, path, evs in todo[:max_sessions]:
+            if deadline_seconds is not None and time.monotonic() - started > deadline_seconds:
+                break
+            turns, compacts, _ = _counted_walk_transcript(path)
+            for key, ts, tok, cost, model in evs:
+                ev_dt = _counted_event_utc(ts)
+                if ev_dt is None or not turns:
+                    oneshot, rr_tok, rr_usd, n = (
+                        _fallback_oneshot(int(tok or 0), cost, model), 0, 0.0, 0)
+                else:
+                    oneshot, rr_tok, rr_usd, n = _counted_score_event(
+                        turns, compacts, ev_dt, int(tok or 0), tier_data)
+                conn.execute(
+                    "INSERT OR REPLACE INTO counted_reread (event_key, source, "
+                    "session_uuid, event_ts, event_month, tokens, oneshot_usd, "
+                    "reread_tokens, reread_usd, turns_counted, transcript_mtime, "
+                    "computed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (key, key.split(":", 1)[0], uuid, ts, str(ts)[:7],
+                     int(tok or 0), round(oneshot, 6), int(rr_tok),
+                     round(rr_usd, 6), n, mtime, now_iso))
+                stats["rows_written"] += 1
+            stats["sessions_walked"] += 1
+            stats["pending_sessions"] -= 1
+        conn.commit()
+        if not quiet and stats["rows_written"]:
+            print(f"[Token Optimizer] counted-cumulative: walked "
+                  f"{stats['sessions_walked']} session(s), "
+                  f"{stats['rows_written']} row(s), "
+                  f"{stats['pending_sessions']} pending.")
+    except Exception:
+        pass
+    return stats
+
+
+def _counted_marker_backfill(conn, max_files=_COUNTED_MARKER_FILES_PER_PASS,
+                             deadline_seconds=_COUNTED_PASS_DEADLINE_SECONDS,
+                             quiet=True):
+    """One-time representation of the pre-ledger era (before
+    _COUNTED_LEDGER_ERA_START) from the transcripts' own "Full result archived"
+    markers -- the Mar-Apr ledger logged 17 events against 305 physical markers.
+    Cursor-resumable over collect passes; a done-flag ends it forever. The files
+    are historical (never rewritten), so one pass per file is final. Fail-open."""
+    stats = {"files_scanned": 0, "rows_written": 0, "done": False}
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS token_optimizer_meta "
+                     "(key TEXT PRIMARY KEY, value TEXT)")
+        row = conn.execute("SELECT value FROM token_optimizer_meta WHERE key = ?",
+                           (_COUNTED_META_MARKER_DONE,)).fetchone()
+        if row and row[0] == "1":
+            stats["done"] = True
+            return stats
+        row = conn.execute("SELECT value FROM token_optimizer_meta WHERE key = ?",
+                           (_COUNTED_META_MARKER_CURSOR,)).fetchone()
+        cursor = row[0] if row else ""
+        base = CLAUDE_DIR / "projects"
+        paths = sorted(str(p) for p in base.glob("*/*.jsonl")) if base.exists() else []
+        # Pre-era files only: anything (re)written after the era start belongs
+        # to the ledger era and is already covered by savings/compression rows.
+        era_epoch = datetime.fromisoformat(
+            _COUNTED_LEDGER_ERA_START).astimezone(timezone.utc).timestamp()
+        started = time.monotonic()
+        tier_data = PRICING_TIERS.get(_load_pricing_tier(), PRICING_TIERS["anthropic"])
+        now_iso = datetime.now().isoformat()
+        processed_any = False
+        last = cursor
+        for sp in paths:
+            if sp <= cursor:
+                continue
+            if max_files is not None and stats["files_scanned"] >= max_files:
+                break
+            if deadline_seconds is not None and time.monotonic() - started > deadline_seconds:
+                break
+            last = sp
+            stats["files_scanned"] += 1
+            processed_any = True
+            try:
+                if Path(sp).stat().st_mtime >= era_epoch:
+                    continue
+            except OSError:
+                continue
+            turns, compacts, markers = _counted_walk_transcript(sp, collect_markers=True)
+            if not turns or not markers:
+                continue
+            first_month = turns[0][0].strftime("%Y-%m")
+            if first_month >= _COUNTED_LEDGER_ERA_START[:7]:
+                continue
+            sid = Path(sp).stem
+            for i, (m_dt, m_tok) in enumerate(markers):
+                tok = int(m_tok or _COUNTED_MARKER_MEDIAN_TOKENS)
+                ev_dt = m_dt or turns[0][0]
+                oneshot, rr_tok, rr_usd, n = _counted_score_event(
+                    turns, compacts, ev_dt, tok, tier_data)
+                conn.execute(
+                    "INSERT OR REPLACE INTO counted_reread (event_key, source, "
+                    "session_uuid, event_ts, event_month, tokens, oneshot_usd, "
+                    "reread_tokens, reread_usd, turns_counted, transcript_mtime, "
+                    "computed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (f"mk:{sid}:{i}", "mk", sid, ev_dt.isoformat(),
+                     ev_dt.strftime("%Y-%m"), tok, round(oneshot, 6),
+                     int(rr_tok), round(rr_usd, 6), n, None, now_iso))
+                stats["rows_written"] += 1
+        exhausted = (not processed_any) or (last >= (paths[-1] if paths else ""))
+        if paths and last == paths[-1]:
+            conn.execute("INSERT OR REPLACE INTO token_optimizer_meta (key, value) "
+                         "VALUES (?, '1')", (_COUNTED_META_MARKER_DONE,))
+        elif not paths:
+            conn.execute("INSERT OR REPLACE INTO token_optimizer_meta (key, value) "
+                         "VALUES (?, '1')", (_COUNTED_META_MARKER_DONE,))
+        else:
+            conn.execute("INSERT OR REPLACE INTO token_optimizer_meta (key, value) "
+                         "VALUES (?, ?)", (_COUNTED_META_MARKER_CURSOR, last))
+        conn.commit()
+        if not quiet and stats["rows_written"]:
+            print(f"[Token Optimizer] counted-cumulative marker backfill: "
+                  f"{stats['files_scanned']} file(s), {stats['rows_written']} marker row(s).")
+    except Exception:
+        pass
+    return stats
+
+
+def _counted_cumulative_summary():
+    """Cheap SELECT-only rollup of counted_reread for the Counted-to-date card.
+
+    NEVER walks transcripts (the collect pass owns that); a dashboard regen
+    pays one aggregate query. Fail-open to {"available": False}."""
+    out = {"available": False}
+    if not TRENDS_DB.exists():
+        return out
+    try:
+        conn = _init_trends_db()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(tokens),0), "
+                "COALESCE(SUM(oneshot_usd),0), COALESCE(SUM(reread_tokens),0), "
+                "COALESCE(SUM(reread_usd),0), MIN(event_month), MAX(computed_at) "
+                "FROM counted_reread").fetchone()
+            months = conn.execute(
+                "SELECT event_month, ROUND(COALESCE(SUM(oneshot_usd),0) + "
+                "COALESCE(SUM(reread_usd),0), 2) FROM counted_reread "
+                "GROUP BY event_month ORDER BY event_month").fetchall()
+            try:
+                done = conn.execute(
+                    "SELECT value FROM token_optimizer_meta WHERE key = ?",
+                    (_COUNTED_META_MARKER_DONE,)).fetchone()
+            except sqlite3.Error:
+                # A fresh DB may not have the meta table yet (created lazily by
+                # the backfill); its absence must not blank the whole card.
+                done = None
+        finally:
+            conn.close()
+        n, tok, oneshot, rr_tok, rr_usd, first_month, computed_at = row
+        if not n:
+            return out
+        return {
+            "available": True,
+            "events": int(n),
+            "removed_tokens": int(tok),
+            "oneshot_usd": round(float(oneshot), 2),
+            "reread_tokens": int(rr_tok),
+            "reread_usd": round(float(rr_usd), 2),
+            "total_usd": round(float(oneshot) + float(rr_usd), 2),
+            "window_start": (first_month + "-01") if first_month else None,
+            "months": {m: v for m, v in months},
+            "marker_backfill_done": bool(done and done[0] == "1"),
+            "computed_at": computed_at,
+            # Same construction as the estimated tiers: the method is counted,
+            # the one modeling choice (trajectory held fixed) is disclosed on
+            # the card.
+            "method": "removals x deduped turns to next real compaction, "
+                      "per-turn cache-read rates; metered-magnitude removals "
+                      "only -- resume_lean, estimated-magnitude events "
+                      "(mcp_cap, hint_followed) and unapplied work excluded",
+        }
+    except (sqlite3.Error, OSError, TypeError, ValueError):
+        return out
+
 
 
 def _get_savings_summary(days=30, since=None):
@@ -17340,6 +17941,21 @@ def _get_savings_summary(days=30, since=None):
             total_cost -= float(verbosity_steer_est.get("cost_saved_usd", 0.0) or 0.0)
             total_events -= int(verbosity_steer_est.get("events", 0) or 0)
 
+        # resume_lean is a COUNTERFACTUAL --
+        # the cold `claude --resume` the user would otherwise have run -- not a
+        # removal of tokens already in flight (260/370 real events fired on the
+        # best-guess "continue" path). v5.13.1 fixed its magnitude (target's
+        # real last-turn context) and rate (cache-read when the cache is still
+        # warm, 1h cache-write when cold), but the trigger stays counterfactual,
+        # so it must not sit inside the measured counted total. Relocate to the
+        # estimated tier exactly like mcp_cap. savings_events has no tier
+        # column: this pop IS the tier=estimated stamp.
+        resume_lean_est = by_category.pop("resume_lean", None)
+        if resume_lean_est:
+            total_tokens -= int(resume_lean_est.get("tokens_saved", 0) or 0)
+            total_cost -= float(resume_lean_est.get("cost_saved_usd", 0.0) or 0.0)
+            total_events -= int(resume_lean_est.get("events", 0) or 0)
+
         # B6: net tool-archive re-expansions out of the tool_archive credit. A
         # re-popped result didn't stay collapsed, so its eager credit is reversed
         # (floored at 0). tool_archive_reexpand is a DEBIT, never its own savings
@@ -17386,6 +18002,9 @@ def _get_savings_summary(days=30, since=None):
             # _estimate_before_after_savings can add it to the transformation
             # headline as a separate estimated addback.
             "verbosity_steer_estimated": verbosity_steer_est,
+            # Cold-resume avoided (counterfactual trigger, measured
+            # magnitude since v5.13.1). Estimated tier, never in the realized total.
+            "resume_lean_estimated": resume_lean_est,
             # True when at least one event's dollars moved because its event-time
             # model stamp disagreed with its own session's recorded model mix. The
             # figure is then a rate ALLOCATION, not a pure event-time meter, so
@@ -17412,6 +18031,7 @@ def _get_savings_summary(days=30, since=None):
             "mcp_cap_estimated": None,
             "hint_followed_estimated": None,
             "verbosity_steer_estimated": None,
+            "resume_lean_estimated": None,
             "repriced_to_session_mix": False,
             "reprice_detail": None,
         }
@@ -18170,9 +18790,11 @@ def collect_sessions(days=90, quiet=False, rebuild=False):
                 cache_create_1h_tokens, cache_create_5m_tokens, cache_ttl_scanned,
                 avg_call_gap_seconds, max_call_gap_seconds, p95_call_gap_seconds,
                 skills_json, subagents_json, tool_calls_json, model_usage_json,
-                all_model_usage_json, model_usage_breakdown_json, version, slug, topic, collected_at,
-                quality_score, quality_grade, stale_waste_tokens, is_sidechain, platform)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    all_model_usage_json, model_usage_breakdown_json, version, slug, topic, collected_at,
+                    quality_score, quality_grade, stale_waste_tokens, is_sidechain,
+                    sidechain_reason, reported_input_tokens, reported_output_tokens,
+                    reported_model_usage_json, platform)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(filepath), date, project_name,
                 parsed["duration_minutes"],
@@ -18201,6 +18823,10 @@ def collect_sessions(days=90, quiet=False, rebuild=False):
                 sq["grade"],
                 int(stale_waste or 0),
                 1 if parsed.get("is_sidechain") else 0,
+                parsed.get("sidechain_reason"),
+                int(parsed.get("reported_input_tokens", 0) or 0),
+                int(parsed.get("reported_output_tokens", 0) or 0),
+                json.dumps(parsed.get("reported_model_usage", {})),
                 session_platform,
             ),
         )
@@ -18225,6 +18851,16 @@ def collect_sessions(days=90, quiet=False, rebuild=False):
     # over a few flushes instead of blocking turn-end for minutes.
     try:
         _backfill_session_metrics(conn, days=days, limit=50)
+    except Exception:
+        pass
+
+    # Keep the counted-cumulative ledger fresh in the SAME bounded
+    # collect pass (never at dashboard-regen time). Both helpers carry their
+    # own per-pass caps + soft deadline and are fail-open, so a slow transcript
+    # can never hold the flush; the backlog converges over passes.
+    try:
+        _update_counted_cumulative(conn, quiet=quiet)
+        _counted_marker_backfill(conn, quiet=quiet)
     except Exception:
         pass
 
@@ -18300,6 +18936,7 @@ def _query_trends_db(conn, days):
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
     population_metrics = _query_dashboard_population_metrics(conn, days)
+    spent_basis = _dashboard_spent_token_basis(conn, days=days)
 
     # Basic stats
     # v5.4.9: "Total tokens" matches Claude Code Desktop methodology exactly:
@@ -18347,13 +18984,10 @@ def _query_trends_db(conn, days):
     total_fresh_input = int(_total_fresh_clamped)
     total_cache_create = int(row["total_cache_create"])
     total_cache_read = max(0, int(total_input) - total_fresh_input - total_cache_create)
-    # Billable tokens for headline (matches our token coach methodology):
-    # fresh_input + cache_create + output.
-    # - Excludes cache_read (bills at 10% of fresh, would dominate numbers).
-    # - Includes cache_create (bills at 125% of fresh, real cost driver).
-    # Claude Code Desktop's "Total tokens" uses server-side aggregation we
-    # cannot reproduce exactly from local JSONL. Our number reflects what
-    # your Anthropic invoice bills for on full-rate input + output.
+    # Billable tokens are retained as a separate diagnostic, not used for the
+    # official-compatible spent-token headline. Cache writes are real billing
+    # cost, but including them in the headline makes the spent basis diverge
+    # from the provider's fresh-input plus streamed-output stats.
     total_billable_tokens = total_fresh_input + total_cache_create + total_output
 
     # Skill usage
@@ -18370,7 +19004,26 @@ def _query_trends_db(conn, days):
            FROM model_daily WHERE date >= ? GROUP BY model ORDER BY tot DESC""",
         (cutoff,),
     ).fetchall()
-    model_mix = {r["model"]: r["tot"] for r in model_rows}
+    billable_model_mix = {r["model"]: r["tot"] for r in model_rows}
+    reported_model_mix = {}
+    reported_rows = conn.execute(
+        "SELECT reported_model_usage_json FROM session_log "
+        "WHERE date >= ? AND COALESCE(is_sidechain, 0) = 0",
+        (cutoff,),
+    ).fetchall()
+    for rr in reported_rows:
+        try:
+            usage = json.loads(rr["reported_model_usage_json"] or "{}")
+        except (json.JSONDecodeError, TypeError, KeyError):
+            usage = {}
+        if not isinstance(usage, dict):
+            continue
+        for model, tokens in usage.items():
+            normalized = _normalize_model_name(model)
+            if normalized is None:
+                continue
+            reported_model_mix[normalized] = reported_model_mix.get(normalized, 0) + int(tokens or 0)
+    model_mix = reported_model_mix or billable_model_mix
 
     # Subagents
     sub_rows = conn.execute(
@@ -18624,7 +19277,9 @@ def _query_trends_db(conn, days):
         "total_fresh_input": total_fresh_input,      # v5.4.9: billable fresh input (Desktop-parity)
         "total_cache_read": total_cache_read,
         "total_cache_create": total_cache_create,    # separate (bills at 1.25x fresh)
-        "total_tokens": total_billable_tokens,       # v5.4.9: fresh_input + output (Desktop-parity)
+        "total_tokens": spent_basis["tokens"],       # official-compatible spent basis
+        "total_billable_tokens": total_billable_tokens,
+        "spent_token_basis": spent_basis,
         "total_tokens_raw": total_input + total_output,  # includes cache, for debugging
         "total_messages": total_messages,            # Desktop-parity headline
         "avg_duration_minutes": round(total_duration / session_count, 1) if session_count else 0,
@@ -18638,6 +19293,7 @@ def _query_trends_db(conn, days):
         },
         "subagents": subagents,
         "model_mix": model_mix,
+        "billable_model_mix": billable_model_mix,
         "tool_calls": total_tools,
         "trajectory": {
             "snapshots": snapshots,
@@ -18710,7 +19366,9 @@ def _collect_trends_from_jsonl(days=30):
             all_model_usage = dict(parsed["model_usage"])
             for sub_jf in subagent_files:
                 sub_parsed = _parse_session_jsonl(sub_jf)
-                if sub_parsed and sub_parsed.get("model_usage"):
+                if not sub_parsed:
+                    continue
+                if sub_parsed.get("model_usage"):
                     for model_id, tokens in sub_parsed["model_usage"].items():
                         if model_id.startswith("<"):
                             continue
@@ -18731,8 +19389,12 @@ def _collect_trends_from_jsonl(days=30):
     total_subagents = {}
     total_tools = {}
     total_model_tokens = {}
+    total_reported_model_tokens = {}
     total_input = 0
     total_output = 0
+    total_reported_input = 0
+    total_reported_output = 0
+    reported_complete = True
     total_cache_read = 0
     total_cache_create = 0
     total_duration = 0
@@ -18741,6 +19403,11 @@ def _collect_trends_from_jsonl(days=30):
     for s in sessions:
         total_input += s["total_input_tokens"]
         total_output += s["total_output_tokens"]
+        if s.get("reported_input_tokens") is None or s.get("reported_output_tokens") is None:
+            reported_complete = False
+        else:
+            total_reported_input += int(s.get("reported_input_tokens") or 0)
+            total_reported_output += int(s.get("reported_output_tokens") or 0)
         total_cache_read += s.get("total_cache_read", 0)
         total_cache_create += s.get("total_cache_create", 0)
         total_duration += s["duration_minutes"]
@@ -18760,6 +19427,18 @@ def _collect_trends_from_jsonl(days=30):
             if normalized is None:
                 continue
             total_model_tokens[normalized] = total_model_tokens.get(normalized, 0) + tokens
+        for model, tokens in (s.get("reported_model_usage") or {}).items():
+            normalized = _normalize_model_name(model)
+            if normalized is None:
+                continue
+            total_reported_model_tokens[normalized] = total_reported_model_tokens.get(normalized, 0) + int(tokens or 0)
+
+    if not reported_complete:
+        total_reported_input = sum(
+            max(0, s["total_input_tokens"] - s.get("total_cache_read", 0) - s.get("total_cache_create", 0))
+            for s in sessions
+        )
+        total_reported_output = total_output
 
     skill_sessions = {}
     for s in sessions:
@@ -18915,7 +19594,15 @@ def _collect_trends_from_jsonl(days=30):
         "total_fresh_input": max(0, total_input - total_cache_read - total_cache_create),
         "total_cache_read": total_cache_read,
         "total_cache_create": total_cache_create,
-        "total_tokens": max(0, total_input - total_cache_read) + total_output,
+        "total_billable_tokens": max(0, total_input - total_cache_read) + total_output,
+        "total_tokens": total_reported_input + total_reported_output,
+        "spent_token_basis": {
+            "tokens": total_reported_input + total_reported_output,
+            "basis": (_DASHBOARD_SPENT_TOKEN_BASIS if reported_complete else
+                      "fresh_input + deduped output (fallback for unreadable legacy transcripts)"),
+            "complete": reported_complete,
+            "fallback_rows": 0 if reported_complete else session_count,
+        },
         "total_tokens_raw": total_input + total_output,
         "total_messages": sum(s.get("message_count", 0) for s in sessions),
         "avg_duration_minutes": round(total_duration / session_count, 1) if session_count else 0,
@@ -18928,7 +19615,8 @@ def _collect_trends_from_jsonl(days=30):
             "never_used_overhead": never_used_overhead,
         },
         "subagents": dict(sorted(total_subagents.items(), key=lambda x: -x[1])),
-        "model_mix": total_model_tokens,
+        "model_mix": total_reported_model_tokens or total_model_tokens,
+        "billable_model_mix": total_model_tokens,
         "tool_calls": dict(sorted(total_tools.items(), key=lambda x: -x[1])),
         "trajectory": {
             "snapshots": snapshots,
@@ -19249,7 +19937,7 @@ def _scan_project_jsonl_stats():
     # Stamp AFTER the walk finishes, not before: on a large cold history the walk
     # itself can exceed the TTL. Stamping the pre-walk time would make the cache
     # born already-expired, so the very next per-PID call re-walks and the memoization
-    # is a no-op in exactly the cold-cache case this exists to fix. (Caught by Kimi K3.)
+    # is a no-op in exactly the cold-cache case this exists to fix.
     _PROJECT_JSONL_STAT_CACHE_TS = time.monotonic()
     return out
 
@@ -29772,7 +30460,7 @@ def _security_report(as_json=False):
         except OSError:
             return {"exists": True, "size_bytes": 0, "permissions": "???", "mtime": None}
 
-    # FIX A (Fable #2): report the unified state base so the inventory reflects the real
+    # FIX A: report the unified state base so the inventory reflects the real
     # Cowork locations (these globals == RUNTIME_DIR/token-optimizer on desktop).
     checkpoint_dir = CHECKPOINT_DIR
     quality_cache_dir = QUALITY_CACHE_DIR
@@ -31341,7 +32029,7 @@ _CHECKPOINT_SCAFFOLD_STOPWORDS = frozenset({
     # word that can be part of a real project slug. "company"/"brain" were removed
     # (2026-08-12): they name a real sub-project (northwind-company-brain), and listing
     # them made "continue working on the company brain" score 0.0 on a genuine
-    # resume (a curated-against-one-tree false negative, flagged by Fable review).
+    # resume (a curated-against-one-tree false negative).
     "config", "configs", "src", "lib", "libs",
     "app", "apps", "data", "notes", "note", "file", "files", "docs", "doc",
     "projects", "project", "sessions", "session", "build", "builds",
@@ -32856,15 +33544,17 @@ def build_lean_resume_context(session_id, max_chars=3500, prompt_text=None, cwd=
     return "\n".join(out)
 
 
-def _resume_lean_already_credited(target_session_uuid, window_seconds=6 * 3600):
-    """True if a resume_lean saving was already booked for this target session
-    recently -- prevents double-counting when the user says "continue" more than
-    once. Dedups on the TARGET session (the cold resume we avoided), not the
-    current one. Never raises."""
+def _resume_lean_already_credited(target_session_uuid):
+    """True if a resume_lean saving was EVER booked for this target session --
+    prevents double-counting when the user says "continue" more than once.
+    Dedups on the TARGET session (the cold resume we avoided), not the current
+    one, and dedups FOREVER: the cold `--resume` of one target can only be
+    avoided once, so a second credit days later is the same avoided reload
+    claimed twice (measured on real data: the old 6h window let one target
+    session be credited millions of tokens twice, 42h apart). Never raises."""
     if not target_session_uuid or not TRENDS_DB.exists():
         return False
     try:
-        cutoff = (datetime.now() - timedelta(seconds=window_seconds)).isoformat()
         conn = _init_trends_db()
         try:
             # Match on session_id OR session_uuid: _log_savings_event stores
@@ -32873,8 +33563,8 @@ def _resume_lean_already_credited(target_session_uuid, window_seconds=6 * 3600):
             # rows and double-credit. session_id is always populated.
             row = conn.execute(
                 "SELECT 1 FROM savings_events WHERE event_type='resume_lean' "
-                "AND (session_id = ? OR session_uuid = ?) AND timestamp >= ? LIMIT 1",
-                (target_session_uuid, target_session_uuid, cutoff),
+                "AND (session_id = ? OR session_uuid = ?) LIMIT 1",
+                (target_session_uuid, target_session_uuid),
             ).fetchone()
         finally:
             conn.close()
@@ -32883,14 +33573,101 @@ def _resume_lean_already_credited(target_session_uuid, window_seconds=6 * 3600):
         return False
 
 
+# What a cold `claude --resume` re-sends is the target's last-turn context; both
+# arms pay the shared system prefix, so it is subtracted from the credit.
+_RESUME_LEAN_SHARED_PREFIX_TOKENS = 30_000
+# Inside the 1h cache TTL a cold resume is mostly a cache HIT (the prefix is
+# byte-identical), so the avoided reload prices at cache_read; past it, the
+# cache is gone and the reload is a 1h cache write.
+_RESUME_LEAN_WARM_WINDOW_SECONDS = 3600
+
+
+def _transcript_last_turn(sid_safe):
+    """(context_tokens, model, age_seconds) of a session's LAST parent API call.
+
+    context_tokens = input + cache_read + cache_creation of the last
+    non-sidechain assistant entry carrying usage -- exactly the context a cold
+    `claude --resume` of that session would re-send. Reads only the transcript
+    tail (last ~4MB). Returns None when the transcript cannot be found or
+    parsed; `model` / `age_seconds` may be None individually. Never raises.
+    """
+    try:
+        projects_base = CLAUDE_DIR / "projects"
+        if not projects_base.exists():
+            return None
+        candidates = list(projects_base.glob(f"*/{sid_safe}.jsonl"))
+        if not candidates:
+            return None
+        path = max(candidates, key=lambda p: p.stat().st_mtime)
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            if size > 4_000_000:
+                f.seek(size - 4_000_000)
+                f.readline()  # drop the partial line at the seek point
+            data = f.read()
+        for raw in reversed(data.splitlines()):
+            # Cheap byte filter before JSON-parsing 47MB-class transcripts.
+            if b'"usage"' not in raw or b'"assistant"' not in raw:
+                continue
+            try:
+                d = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                continue
+            if not isinstance(d, dict) or d.get("type") != "assistant" or d.get("isSidechain"):
+                continue
+            msg = d.get("message") or {}
+            u = msg.get("usage") or {}
+            if not isinstance(u, dict):
+                continue
+            try:
+                ctx = (int(u.get("input_tokens") or 0)
+                       + int(u.get("cache_read_input_tokens") or 0)
+                       + int(u.get("cache_creation_input_tokens") or 0))
+            except (TypeError, ValueError):
+                continue
+            if ctx <= 0:
+                continue
+            model = _normalize_model_name(msg.get("model"))
+            age_s = None
+            ts = d.get("timestamp")
+            if ts:
+                try:
+                    # Transcript timestamps are UTC ("...Z"); compare in UTC.
+                    dt = datetime.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S")
+                    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                    age_s = max(0.0, (now_utc - dt).total_seconds())
+                except (ValueError, TypeError):
+                    age_s = None
+            return ctx, model, age_s
+        return None
+    except (OSError, PermissionError):
+        return None
+
+
 def _log_resume_lean_savings(target_session_id, lean_block):
     """Credit the cold-resume cost avoided by reconstructing a session lean
     instead of `claude --resume`-ing it.
 
-    The avoided cost is the target session's cache-create size (what a cold
-    resume would re-write at full rate), minus the small lean block we inject.
-    Pulled from session_log; falls back to the checkpoint working-set estimate.
-    Idempotent per target session. Best-effort: never breaks the caller.
+    v5.13.1 rework. The old credit used the
+    target's LIFETIME cache_create (every incremental write plus every full
+    re-write after a >1h idle) at the input rate -- median claim was 0.4x the
+    real reload, two whales claimed 10x, and 305/370 events fired while the
+    cache was still warm. The honest quantities, all measured:
+
+      * tokens  = the target's LAST-TURN context (what `--resume` re-sends),
+                  minus the shared system prefix (~30K) and the lean block;
+      * rate    = cache_read of the target's model when its last turn is under
+                  the 1h cache TTL (a warm resume is a cache hit), else the 1h
+                  cache-write rate (cold reload);
+      * tier    = estimated: the trigger is a counterfactual (the `--resume`
+                  the user WOULD have run). _get_savings_summary relocates the
+                  event_type out of the counted headline -- that relocation is
+                  the tier stamp (savings_events has no tier column);
+      * dedup   = one credit per target session EVER (the same avoided reload
+                  can only be claimed once).
+
+    Falls back to the checkpoint working-set estimate at the cache_read rate
+    when the transcript is unreadable. Best-effort: never breaks the caller.
     """
     try:
         sid_safe = sanitize_session_id(target_session_id) if target_session_id else None
@@ -32898,19 +33675,33 @@ def _log_resume_lean_savings(target_session_id, lean_block):
             return
         if _resume_lean_already_credited(sid_safe):
             return
-        row = _session_log_row(sid_safe)
-        avoided = int((row.get("cache_create_1h_tokens") or 0)
-                      + (row.get("cache_create_5m_tokens") or 0))
-        if avoided <= 0:
-            # No cache-create on record (older row / aged out): fall back to the
-            # active working set a resume would otherwise re-read.
-            avoided = _checkpoint_restore_recovery_tokens(sid_safe, floor_tokens=0)
         lean_tokens = _estimate_tokens(lean_block or "")
-        saved = max(0, avoided - lean_tokens)
+        last = _transcript_last_turn(sid_safe)
+        if last:
+            ctx, model, age_s = last
+            saved = max(0, int(ctx) - _RESUME_LEAN_SHARED_PREFIX_TOKENS - lean_tokens)
+            warm = age_s is not None and age_s < _RESUME_LEAN_WARM_WINDOW_SECONDS
+            rate_key = "cache_read" if warm else "cache_write_1h"
+            basis = "warm cache-read" if warm else "cold 1h cache-write"
+        else:
+            # Transcript unavailable: active working set a resume would re-read,
+            # priced conservatively at cache_read (never the write rate on a guess).
+            model = None
+            saved = max(0, _checkpoint_restore_recovery_tokens(sid_safe, floor_tokens=0)
+                        - lean_tokens)
+            rate_key = "cache_read"
+            basis = "working-set fallback, cache-read"
         if saved <= 0:
             return
+        model_norm = model or _resolve_session_model(sid_safe)
+        tier_data = PRICING_TIERS.get(_load_pricing_tier(), PRICING_TIERS["anthropic"])
+        rates = tier_data["claude_models"].get(
+            model_norm, tier_data["claude_models"].get("sonnet", {}))
+        per_mtok = float(rates.get(rate_key) or rates.get("input", 3.0))
         _log_savings_event("resume_lean", saved, session_id=sid_safe,
-                           detail="lean resume vs --resume cold rewrite")
+                           detail=f"lean resume vs --resume reload of last-turn context "
+                                  f"({basis}, ${per_mtok}/MTok)",
+                           model=model_norm, cost_per_mtok=per_mtok)
     except Exception:
         pass
 
@@ -33495,7 +34286,7 @@ def _cleanup_quality_cache():
     if _QUALITY_CACHE_RETENTION_DAYS <= 0:
         return
     try:
-        # FIX A (Fable #2): follow the unified state base. On desktop QUALITY_CACHE_DIR
+        # FIX A: follow the unified state base. On desktop QUALITY_CACHE_DIR
         # == RUNTIME_DIR/token-optimizer (unchanged); in Cowork it is the resolved
         # plugin-data base where fix routes quality-cache-*.json / once-*.json, so the
         # retention sweep must target it or those files never age out (slow accumulation).
@@ -37157,14 +37948,13 @@ def runway_snapshot(days=30, now=None):
 
         # --- context lever: measured, never estimated ---
         consumed = saved = 0
+        spent_basis = None
         try:
             conn = _init_trends_db()
             try:
                 cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-                consumed = conn.execute(
-                    "SELECT COALESCE(SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)),0) "
-                    "FROM session_log WHERE date >= date('now', ?)",
-                    (f"-{days} day",)).fetchone()[0] or 0
+                spent_basis = _dashboard_spent_token_basis(conn, days=days)
+                consumed = spent_basis["tokens"]
                 saved = conn.execute(
                     "SELECT COALESCE(SUM(tokens_saved),0) FROM savings_events "
                     "WHERE timestamp >= ? AND event_type != 'verbosity_steer'",
@@ -37377,6 +38167,8 @@ def runway_snapshot(days=30, now=None):
             "routing_multiplier": round(routing_mult, 3),
             "extra_work_pct": round((mult - 1) * 100, 1),
             "tokens_consumed": int(consumed),
+            "tokens_consumed_basis": spent_basis["basis"] if spent_basis else None,
+            "tokens_consumed_basis_complete": bool(spent_basis and spent_basis["complete"]),
             "tokens_saved": int(saved),
             "windows": windows,
             # USD spine: metered context $ + estimated routing $ over the WEEKLY
@@ -38740,6 +39532,57 @@ def _session_token_vector(row):
     if fresh_raw < 0:
         cr = max(0.0, cr + fresh_raw)
     return (fi, cw, cr, out)
+
+
+_DASHBOARD_SPENT_TOKEN_BASIS = (
+    "fresh_input + streamed assistant output (top-level, no streaming dedup)"
+)
+
+
+def _dashboard_spent_token_basis(conn, days=30):
+    """Return the official-compatible token basis used by dashboard totals.
+
+    The local billed-input column includes cache reads and cache writes, so it
+    cannot be used as the denominator for throughput or as the dashboard's
+    spent-token figure. The provider's stats basis is fresh input plus every
+    streamed assistant usage record. Legacy rows without the reported fields
+    use the older fresh-input plus deduped-output reconstruction and are marked
+    incomplete so callers can disclose the fallback.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(session_log)")}
+    select = [
+        "reported_input_tokens" if "reported_input_tokens" in columns else "NULL",
+        "reported_output_tokens" if "reported_output_tokens" in columns else "NULL",
+        "input_tokens" if "input_tokens" in columns else "0",
+        "output_tokens" if "output_tokens" in columns else "0",
+        "cache_create_5m_tokens" if "cache_create_5m_tokens" in columns else "0",
+        "cache_create_1h_tokens" if "cache_create_1h_tokens" in columns else "0",
+        "cache_hit_rate" if "cache_hit_rate" in columns else "0",
+        "is_sidechain" if "is_sidechain" in columns else "0",
+    ]
+    rows = conn.execute(
+        f"SELECT {', '.join(select)} FROM session_log WHERE date >= date('now', ?)",
+        (f"-{days} day",),
+    ).fetchall()
+    total = 0
+    fallback_rows = 0
+    for row in rows:
+        if row[7]:
+            continue
+        if row[0] is not None and row[1] is not None:
+            total += int(row[0] or 0) + int(row[1] or 0)
+            continue
+        fresh_input, _cache_write, _cache_read, output = _session_token_vector(row[2:])
+        total += int(fresh_input) + int(output)
+        fallback_rows += 1
+    complete = fallback_rows == 0
+    return {
+        "tokens": int(total),
+        "basis": (_DASHBOARD_SPENT_TOKEN_BASIS if complete else
+                  "fresh_input + deduped output (fallback for unreadable legacy transcripts)"),
+        "complete": complete,
+        "fallback_rows": fallback_rows,
+    }
 
 
 def _winsorized_mean_session(rows, cap_pct=_BASELINE_WINSOR_PCT):
@@ -40410,6 +41253,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
                 "hint_followed": (comp or {}).get("hint_followed_estimated") or {},
                 "handover_rerun": _estimate_handover_rerun_savings(days=days),
                 "retrieval_serve": _estimate_retrieval_serve_savings(days=days),
+                "resume_lean": (comp or {}).get("resume_lean_estimated") or {},
             }
         pool_labels = {
             "uncaptured_runtime": "Compressed subagent context (estimated)",
@@ -40417,6 +41261,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
             "hint_followed": "Followed context hints (estimated)",
             "handover_rerun": "Continuity handovers (estimated)",
             "retrieval_serve": "Direct context retrieval (estimated)",
+            "resume_lean": "Lean session resumes (estimated)",
         }
         estimated_volume_pools = {}
         for key, label in pool_labels.items():
@@ -41024,6 +41869,7 @@ def _get_merged_savings(days=30, since=None):
         "hint_followed": savings.get("hint_followed_estimated") or {},
         "handover_rerun": handover_rerun,
         "retrieval_serve": retrieval_serve,
+        "resume_lean": savings.get("resume_lean_estimated") or {},
     })
     stale_reads_reclaimable = _estimate_stale_reads_reclaimable(days=days)
 
@@ -41091,6 +41937,10 @@ def _get_merged_savings(days=30, since=None):
         # nudges. Estimated tier, never in the realized total. Surfaced for
         # the dashboard's estimated-tier display.
         "verbosity_steer": savings.get("verbosity_steer_estimated"),
+        # Cold-resume avoided. Counterfactual trigger, measured
+        # magnitude (target's real last-turn context at cache-read / 1h-write
+        # rates). Estimated tier, never in the realized total.
+        "resume_lean_estimated": savings.get("resume_lean_estimated"),
     }
 
 
@@ -41154,7 +42004,7 @@ def _savings_since_install():
             float((full.get(k) or {}).get("cost_saved_usd", 0) or 0)
             for k in (
                 "behavioral_estimate", "uncaptured_runtime", "mcp_cap_estimated",
-                "contamination_exit", "handover_rerun",
+                "contamination_exit", "handover_rerun", "resume_lean_estimated",
             )
         )
         # Avoided-search: prefer the deterministic observed hint->read measure
@@ -41193,6 +42043,7 @@ def _live_savings_payload(days=30):
     try:
         savings_data = _get_merged_savings(days=days)
         savings_data["since_install"] = _savings_since_install()
+        savings_data["counted_cumulative"] = _counted_cumulative_summary()
         # Billing-mode transparency caption wiring — mirrors
         # generate_standalone_dashboard so live-patched tiles match a full regen.
         savings_data["billing_mode"] = keepwarm_billing_mode()
@@ -41385,7 +42236,7 @@ def savings_report(days=30, as_json=False):
     # feature fires thousands of times/month — the raw nudge injection count is
     # an estimated-tier metric, and the measured output reduction shows as
     # verbosity_steer_measured below.
-    _RELOCATED = {"setup_optimization", "mcp_cap", "verbosity_steer"}
+    _RELOCATED = {"setup_optimization", "mcp_cap", "verbosity_steer", "resume_lean"}
 
     # Show all known measured categories (even if zero)
     for key, label in _SAVINGS_CATEGORY_LABELS.items():
@@ -41459,6 +42310,15 @@ def savings_report(days=30, as_json=False):
         mce_monthly = _mo(mce_cost)
         print(f"  + est. MCP output cap: ~${mce_monthly:.2f}{per} "
               f"({mcp_cap_est.get('events', 0)} capped MCP results) [estimated]")
+
+    # Estimated tier — lean resumes (cold `--resume` reload avoided; the trigger
+    # is a counterfactual, the magnitude is the target's real last-turn context).
+    rl_est = summary.get("resume_lean_estimated") or {}
+    rle_cost = float(rl_est.get("cost_saved_usd", 0.0) or 0.0)
+    if rle_cost > 0:
+        rle_monthly = _mo(rle_cost)
+        print(f"  + est. lean resumes: ~${rle_monthly:.2f}{per} "
+              f"({rl_est.get('events', 0)} cold-resume reloads avoided) [estimated]")
 
     # Estimated tier — FLAGSHIP: contamination-exit avoided rework (cohort).
     ce = summary.get("contamination_exit") or {}
@@ -45261,6 +46121,23 @@ if __name__ == "__main__":
             print(f"[Error] Unknown v5 subcommand '{sub}'")
             print("  Usage: measure.py v5 [status|enable|disable|welcome|info] [feature]")
             sys.exit(1)
+    elif args[0] == "counted-backfill":
+        # Interactively (re)build the full counted-cumulative ledger
+        # with no per-pass caps (the collect pass converges incrementally; this
+        # drains the whole backlog in one run). Prints the resulting summary.
+        _quiet = "--quiet" in args
+        conn = _init_trends_db()
+        try:
+            _update_counted_cumulative(conn, max_sessions=10**9,
+                                       deadline_seconds=None, quiet=_quiet)
+            while True:
+                st = _counted_marker_backfill(conn, max_files=500,
+                                              deadline_seconds=None, quiet=_quiet)
+                if st.get("done") or not st.get("files_scanned"):
+                    break
+        finally:
+            conn.close()
+        print(json.dumps(_counted_cumulative_summary(), indent=2))
     elif args[0] == "cohorts":
         # First-read cohort tripwire control:
         #   cohorts                       -> show live edit-rate + demotions

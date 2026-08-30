@@ -2025,7 +2025,7 @@ window.__TOKEN_DATA__ = null;
   <!-- NAV -->
   <nav class="nav-col">
     <div>
-      <div class="brand"><span></span> Token Optimizer <small id="brand-runtime" style="display:block;margin-left:27px;margin-top:2px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--c-text-dim);font-weight:600;"></small></div>
+      <div class="brand"><span></span> Token Optimizer <small id="brand-meta" style="display:block;margin-left:27px;margin-top:2px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--c-text-dim);font-weight:600;"></small></div>
       <div class="nav-menu">
         <a class="nav-item active" data-view="overview">Overview</a>
         <a class="nav-item" data-view="savings">Savings</a>
@@ -3374,12 +3374,10 @@ var DB = (function() {
   // renderSavings render it identically without duplicating the body logic.
   // Reads trends data from the global `data`; the savings object is passed as
   // `savings` (data.savings in renderTrends, the in-scope `s` in renderSavings).
-  // SPENT = data.trends.total_tokens (BILLABLE total: fresh_input + cache_create
-  // + output, excludes cache_read) — the SAME number the Trends "Billable
-  // Tokens, all logged" stat card shows. NOT sum(model_mix): model_mix only
-  // covers model-attributed rows, so tokens billed without a model tag (~4M in
-  // a typical payload) would be dropped. Fail-open: if trends/total_tokens is
-  // missing, fall back to sum(model_mix) rather than 0 (never NaN).
+  // SPENT = data.trends.total_tokens on the Claude /stats-compatible basis:
+  // fresh input + every streamed assistant output record from top-level
+  // transcripts, with cache read/write classes excluded. NOT sum(model_mix):
+  // model_mix can omit unattributed tokens. Fail-open to that sum rather than 0.
   // SAVED = savings.total_tokens. Fail-open: SAVED ≤ 0 → return '' (omit card
   // entirely); SAVED > 0 but SPENT missing/zero → render hero + footer only.
   // The model-mix "where the spent went" bar reconciles to SPENT via a trailing
@@ -3390,17 +3388,17 @@ var DB = (function() {
     var tsSavedTokens = Number(s.total_tokens) || 0;
     if (tsSavedTokens <= 0) return '';
     var tsTrends = data.trends || {};
+    var tsSpentBasis = tsTrends.spent_token_basis || {};
     var tsModelMix = tsTrends.model_mix || {};
     var tsModelTotal = 0;
     for (var tsMk in tsModelMix) { tsModelTotal += tsModelMix[tsMk]; }
     var tsIsCodex = data.runtime === 'codex';
     var tsPeriodDays = Number(tsTrends.period_days) || Number(s.period_days) || 30;
-    // SPENT = billable total (trends.total_tokens), fail-open to sum(model_mix).
-    var tsBillableTotal = Number(tsTrends.total_tokens) || 0;
-    var tsSpentTokens = tsBillableTotal > 0 ? tsBillableTotal : tsModelTotal;
-    var tsWouldSendTotal = tsSpentTokens + tsSavedTokens;
-    var tsSavedPct = (tsWouldSendTotal > 0) ? Math.round(tsSavedTokens / tsWouldSendTotal * 100) : 0;
-    var tsSpentPct = 100 - tsSavedPct; // no 101% rounding
+    // SPENT = provider-stats-compatible total, fail-open to sum(model_mix).
+    var tsReportedTotal = Number(tsTrends.total_tokens) || 0;
+    var tsSpentTokens = tsReportedTotal > 0 ? tsReportedTotal : tsModelTotal;
+    // (tsWouldSendTotal / percentages are computed below, AFTER the estimated
+    // tier is summed: the card headlines the FULL saved total in every state.)
     // Estimated-tier tokens (kept OUT of the measured SAVED total by
     // _get_savings_summary). Surfaced only in the footer as "not included
     // here", labelled with whichever estimated categories are present.
@@ -3422,20 +3420,35 @@ var DB = (function() {
       var tk = Number(obj && obj.tokens_saved) || 0;
       if (tk > 0) tsEstItems.push({ label: label, tokens: tk });
     })(s.verbosity_steer || s.verbosity_steer_estimated, 'verbosity nudges');
+    (function pushEst(obj, label) {
+      var tk = Number(obj && obj.tokens_saved) || 0;
+      if (tk > 0) tsEstItems.push({ label: label, tokens: tk });
+    })(s.resume_lean_estimated, 'lean resumes');
     var tsEstTokens = tsEstItems.reduce(function(a, b) { return a + b.tokens; }, 0);
     var tsEstLabelList = tsEstItems.map(function(it) { return it.label; }).join(', ');
+    // FULL saved total = measured floor + estimated tier. The headline is
+    // ALWAYS the full number, never the floor alone; the measured-vs-estimated
+    // split stays visible right under it so the honesty travels with the size,
+    // and the %-prevented / spent-vs-saved bar / would-send total are all
+    // computed against the same full figure.
+    var tsFullSaved = tsSavedTokens + tsEstTokens;
+    var tsWouldSendTotal = tsSpentTokens + tsFullSaved;
+    var tsSavedPct = (tsWouldSendTotal > 0) ? Math.round(tsFullSaved / tsWouldSendTotal * 100) : 0;
+    var tsSpentPct = 100 - tsSavedPct; // no 101% rounding
+    var tsSplitShort = fn(tsSavedTokens) + ' measured' + (tsEstTokens > 0 ? ' + ' + fn(tsEstTokens) + ' estimated' : '');
 
-    var out = '<div class="card wide"><div class="card-header"><span>Tokens Saved</span><span class="label">Last ' + tsPeriodDays + ' days · what never had to be sent</span></div>';
+    var out = '<div class="card wide"><div class="card-header"><span>Tokens Saved</span><span class="label">Last ' + tsPeriodDays + ' days · measured + estimated</span></div>';
     // HERO: total tokens saved, savings-green, mono, tabular-nums.
-    out += '<div style="display:flex;align-items:baseline;gap:var(--s-3);flex-wrap:wrap;margin-top:var(--s-2)"><div class="metric-large savings-hero">' + fn(tsSavedTokens) + '</div><div class="metric-unit">tokens saved</div></div>';
+    out += '<div style="display:flex;align-items:baseline;gap:var(--s-3);flex-wrap:wrap;margin-top:var(--s-2)"><div class="metric-large savings-hero">' + fn(tsFullSaved) + '</div><div class="metric-unit">tokens saved</div></div>';
+    out += '<div class="metric-sub tight" style="margin-top:2px;">' + fn(tsFullSaved) + ' saved · ' + tsSplitShort + '</div>';
     if (tsSpentTokens > 0) {
-      out += '<div class="metric-sub tight">Token Optimizer cut <span class="pct">≈' + tsSavedPct + '%</span> of your total token load. You spent <b>' + fn(tsSpentTokens) + '</b>, and it saved <b>' + fn(tsSavedTokens) + '</b> more that never got sent.</div>';
+      out += '<div class="metric-sub tight">Token Optimizer prevented <span class="pct">≈' + tsSavedPct + '%</span> of the tokens this workload would otherwise have sent. Claude <code>/stats</code>-compatible spent: <b>' + fn(tsSpentTokens) + '</b>; tokens never sent: <b>' + fn(tsFullSaved) + '</b> (' + tsSplitShort + ').</div>';
       // Spent vs Saved bar: one row, two proportional segments (spent+saved).
       out += '<div class="ts-divider"></div>';
       out += '<div class="ts-section-label"><span>Spent vs Saved</span><span class="muted">without Token Optimizer: ≈' + fn(tsWouldSendTotal) + '</span></div>';
-      out += '<div class="sv-bar" title="spent ' + fn(tsSpentTokens) + ' + saved ' + fn(tsSavedTokens) + ' = ' + fn(tsWouldSendTotal) + ' would-be total">';
+      out += '<div class="sv-bar" title="spent ' + fn(tsSpentTokens) + ' + saved ' + fn(tsFullSaved) + ' (' + tsSplitShort + ') = ' + fn(tsWouldSendTotal) + ' would-be total">';
       out += '<div class="sv-seg spent" style="width:' + tsSpentPct + '%">spent · ' + fn(tsSpentTokens) + '</div>';
-      out += '<div class="sv-seg saved" style="width:' + tsSavedPct + '%">saved · ' + fn(tsSavedTokens) + '</div>';
+      out += '<div class="sv-seg saved" style="width:' + tsSavedPct + '%">saved · ' + fn(tsFullSaved) + '</div>';
       out += '</div>';
       out += '<div class="sv-caption">Without Token Optimizer you\'d have sent <b>≈' + fn(tsWouldSendTotal) + '</b> to do the same work.</div>';
       // Model mix relabeled as USAGE: where the SPENT went. Bar + legend
@@ -3449,10 +3462,10 @@ var DB = (function() {
     } else {
       // SAVED exists but SPENT is unknown (no billable total AND no
       // model_mix). Render the hero + footer only.
-      out += '<div class="metric-sub tight">Token Optimizer saved <b>' + fn(tsSavedTokens) + '</b> tokens that never had to be sent.</div>';
+      out += '<div class="metric-sub tight">Token Optimizer saved <b>' + fn(tsFullSaved) + '</b> tokens that never had to be sent (' + tsSplitShort + ').</div>';
     }
     // Footer: metered floor + optional estimated-slice sentence + plan note.
-    out += '<div class="ts-foot"><span class="tier">Metered floor.</span> Every token counted is measured, not estimated.' + (tsEstTokens > 0 ? ' A further ≈' + fn(tsEstTokens) + ' in estimated savings (' + esc(tsEstLabelList) + ') is <b>not</b> included here.' : '') + ' Subscription plan — counted in tokens, no per-token cost.</div>';
+    out += '<div class="ts-foot"><span class="tier">Measured + estimated.</span> ' + fn(tsSavedTokens) + ' of these tokens are metered action by action (the floor)' + (tsEstTokens > 0 ? '; ≈' + fn(tsEstTokens) + ' are estimated (' + esc(tsEstLabelList) + ') and are included in the headline, labelled.' : '.') + (tsSpentBasis.basis ? ' Spent basis: ' + esc(tsSpentBasis.basis) + '.' : '') + ' Subscription plan — counted in tokens, no per-token cost.</div>';
     out += '</div>';
     return out;
   }
@@ -3989,7 +4002,10 @@ var DB = (function() {
     // (Regression: after a quiet week the meter aged past every window and the card
     // disappeared entirely.)
     var rwHasWindows = rw && rw.windows && rw.windows.length;
-    var rwHasMultiplier = rw && isFinite(Number(rw.extra_work_pct)) && Number(rw.extra_work_pct) > 0;
+    var rwEfficiencyMult = rw ? Number(rw.cost_efficiency_multiplier) : NaN;
+    var rwHasCostEfficiency = isFinite(rwEfficiencyMult) && rwEfficiencyMult > 1;
+    var rwHasLegacyMultiplier = rw && isFinite(Number(rw.extra_work_pct)) && Number(rw.extra_work_pct) > 0;
+    var rwHasMultiplier = rwHasCostEfficiency || rwHasLegacyMultiplier;
     // NB: do NOT gate on rw.available. That is the live-meter's availability, and
     // the headline multiplier + weekly savings do not need the meter (Bug A: an
     // unavailable meter used to vanish the whole card). runway_snapshot already
@@ -4028,8 +4044,12 @@ var DB = (function() {
         // Per-window USD from the metered savings ledger. None when the
         // ledger has nothing to show; degrade to no line rather than $-0/NaN.
         var savedUsd = Number(w.saved_usd);
-        var hasUsd = isFinite(savedUsd) && savedUsd > 0;
         var spanWord = w.key === 'five_hour' ? '5h' : 'week';
+        // Weekly $: shown whenever it is meaningful (>= $15) and NEVER gated on
+        // already being capped — at that size it is the overage you are on
+        // track to hit, not a hypothetical. Below $15 the line is noise: hide.
+        // The 5h window keeps the any-positive rule (its $ is already rare).
+        var hasUsd = isFinite(savedUsd) && (w.key === 'five_hour' ? savedUsd > 0 : savedUsd >= 15);
         // The per-window USD is the EXTRA you'd have paid in API credits to match
         // this window's work WITHOUT Token Optimizer, priced over the window's OWN
         // real span (the weekly card = the last 7 days, not a slice of a longer
@@ -4037,12 +4057,26 @@ var DB = (function() {
         // and NOT strict post-cap overage; the explainer line + ESTIMATED $ chip
         // carry that honesty. A big "$N more" number, a tiny "in API credits"
         // caption, then a plain sentence that spells out the meaning.
-        var usdExplainer = 'Matching this ' + spanWord + '&rsquo;s work without Token Optimizer ' +
-          'would have pushed you onto paid API credits. That&rsquo;s the extra you&rsquo;d pay.';
+        // Honest per-window claim, conditional on whether the without-Optimizer arm
+        // would ACTUALLY have exceeded the cap this window. Capped => you'd have paid
+        // real overage (the value scenario). Not capped => the tokens removed have an
+        // API-rate value, but no bill was avoided; say so plainly (never claim overage
+        // that did not occur).
+        var usdExplainer = w.would_be_capped
+          ? ('Matching this ' + spanWord + '&rsquo;s work without Token Optimizer would have pushed you ' +
+             '<b style="color:var(--c-text-main);font-weight:500;">past your limit</b>. That&rsquo;s the extra you&rsquo;d have paid to do the same work.')
+          : (w.key === 'five_hour'
+             ? ('That&rsquo;s what this ' + spanWord + '&rsquo;s work would have cost you in API credits ' +
+                'without Token Optimizer &mdash; compute it kept off your plan. ' +
+                '<b style="color:var(--c-text-main);font-weight:500;">The harder you push your limits, ' +
+                'the more it saves you from paying to keep going.</b>')
+             : ('At this pace, doing this week&rsquo;s work without Token Optimizer ' +
+                '<b style="color:var(--c-text-main);font-weight:500;">would blow past your weekly limit</b> ' +
+                '&mdash; that&rsquo;s the API-credit overage you&rsquo;re on track to avoid.'));
         return '<div style="background:rgba(255,255,255,.02);border:1px solid var(--c-border);border-radius:8px;padding:var(--s-3);">' +
           '<div class="label" style="display:block;margin-bottom:var(--s-3);">' + name + '</div>' +
           (hasUsd
-            ? '<div style="margin-bottom:6px;font-size:22px;font-weight:500;color:var(--c-savings-alt, #10b981);line-height:1.2;">&asymp;' + rwMoney(savedUsd) + ' more <span style="font-size:13px;color:var(--c-text-dim);font-weight:400;">in API credits</span></div>' +
+            ? '<div style="margin-bottom:6px;font-size:22px;font-weight:500;color:var(--c-savings-alt, #10b981);line-height:1.2;">&asymp;' + rwMoney(savedUsd) + (w.would_be_capped ? ' more <span style="font-size:13px;color:var(--c-text-dim);font-weight:400;">in API credits</span>' : (w.key === 'five_hour' ? ' <span style="font-size:13px;color:var(--c-text-dim);font-weight:400;">of API-credit value kept off this ' + spanWord + '</span>' : ' <span style="font-size:13px;color:var(--c-text-dim);font-weight:400;">of overage you&rsquo;re on track to avoid this week</span>')) + '</div>' +
               '<div style="margin-bottom:var(--s-3);font-size:13px;color:var(--c-text-dim);line-height:1.5;text-wrap:pretty;">' + usdExplainer + '</div>'
             : '') +
           '<div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:var(--s-3);">' +
@@ -4084,6 +4118,26 @@ var DB = (function() {
         usdParts.push('<em style="font-style:normal;color:var(--c-accent-cyan);">' + rwMoney(v) + '</em> ' + span);
       });
       var usdHeadline = usdParts.join(' &middot; ');
+      var rwBeforeCost = Number(rw.before_cost_per_session);
+      var rwAfterCost = Number(rw.after_cost_per_session);
+      var rwCostCut = Number(rw.per_session_cost_reduction_pct);
+      var rwCostCutDisplay = isFinite(rwCostCut) ? Math.round(rwCostCut / 5) * 5 : null;
+      var rwSpentTokens = Number(rw.tokens_consumed);
+      var rwSavedTokens = Number(rw.tokens_saved);
+      var rwTokenFloorPct = (isFinite(rwSpentTokens) && rwSpentTokens > 0 && isFinite(rwSavedTokens) && rwSavedTokens > 0)
+        ? Math.round(rwSavedTokens / (rwSpentTokens + rwSavedTokens) * 100)
+        : null;
+      var rwEfficiencyHeadline = rwHasCostEfficiency
+        ? '<div class="metric-large" style="text-wrap:balance;text-shadow:none;"><em style="font-style:normal;color:var(--c-accent-cyan);">&asymp;' + rwEfficiencyMult.toFixed(1) + '&times;</em> work per dollar</div>'
+        : ((isFinite(Number(rw.extra_work_pct)) && Number(rw.extra_work_pct) > 0)
+          ? '<div class="metric-large" style="text-wrap:balance;text-shadow:none;"><em style="font-style:normal;color:var(--c-accent-cyan);">&asymp;' + rw.extra_work_pct + '%</em> more work per token</div>'
+          : '<div class="metric-large" style="text-wrap:balance;text-shadow:none;">' + (usdHeadline || '<em style="font-style:normal;color:var(--c-accent-cyan);">more work</em>') + '</div>');
+      var rwEfficiencyDetail = rwHasCostEfficiency
+        ? 'A comparable session fell from <strong>' + rwMoney(rwBeforeCost) + '</strong> to <strong>' + rwMoney(rwAfterCost) + '</strong>' + (rwCostCutDisplay !== null ? ' &middot; ~' + rwCostCutDisplay + '% cheaper/session' : '') + '. This cost-efficiency lens combines lighter context, the cache re-read cascade, and model routing.'
+        : 'lighter context &times;' + rw.context_multiplier + ' &middot; lighter models &times;' + rw.routing_multiplier + '. A per-token throughput multiplier, shown separately from the window headroom and dollar figures below.';
+      var rwTokenFloorDetail = (rwTokenFloorPct !== null)
+        ? '<div style="margin-top:var(--s-2);font-size:15px;color:var(--c-text-dim);line-height:1.5;text-wrap:pretty;">Separate measured token floor: <strong>' + fn(rwSavedTokens) + '</strong> never sent on <strong>' + fn(rwSpentTokens) + '</strong> <code>/stats</code>-compatible spent &middot; &asymp;' + rwTokenFloorPct + '% of the would-be token load.</div>'
+        : '';
       // Tier chip reflects the USD spine's measured-vs-estimated boundary:
       // context $ is metered, routing $ is an estimated counterfactual.
       // When routing savings contribute, the dollar figure is estimated; when
@@ -4101,17 +4155,11 @@ var DB = (function() {
         // No glow on this headline. `.metric-large` carries a text-shadow built
         // from --c-border-strong, which is a light veil on dark but resolves to a
         // DARK halo in light mode, so the words read as smudged rather than lit.
-        // Headline = the per-token throughput multiplier ("X% more work per token").
-        // The dollar figures live in the per-window cards below, NOT the headline, so
-        // the top line stays a single honest unit (a %) instead of mixing $ and %.
-        // The USD-per-window string is kept only as a fallback for the rare case where
-        // the throughput multiplier is not yet computable.
-        ((isFinite(Number(rw.extra_work_pct)) && Number(rw.extra_work_pct) > 0)
-          ? '<div class="metric-large" style="text-wrap:balance;text-shadow:none;"><em style="font-style:normal;color:var(--c-accent-cyan);">&asymp;' + rw.extra_work_pct + '%</em> more work per token</div>'
-          : '<div class="metric-large" style="text-wrap:balance;text-shadow:none;">' + (usdHeadline || '<em style="font-style:normal;color:var(--c-accent-cyan);">more work</em>') + '</div>') +
-        // Secondary: the composition of the multiplier, plus a one-line units note so it
-        // is never presented as combinable with the per-window dollar/headroom numbers.
-        '<div style="margin-top:var(--s-2);font-size:15px;color:var(--c-text-dim);line-height:1.5;text-wrap:pretty;">lighter context &times;' + rw.context_multiplier + ' &middot; lighter models &times;' + rw.routing_multiplier + '. A per-token throughput multiplier, shown separately from the window headroom and dollar figures below.</div>' +
+        // Cost efficiency is the transformation lens; the token floor remains a
+        // separate measured line so neither percentage is forced to equal the other.
+        rwEfficiencyHeadline +
+        '<div style="margin-top:var(--s-2);font-size:15px;color:var(--c-text-dim);line-height:1.5;text-wrap:pretty;">' + rwEfficiencyDetail + '</div>' +
+        rwTokenFloorDetail +
         // Stands alone. An earlier revision opened with "before you hit your usage
         // limits.", a continuation of the headline that reads as a truncated
         // fragment once it wraps to its own line, and the limit panels below
@@ -4180,7 +4228,9 @@ var DB = (function() {
           // carry -- the throughput-% is its own unit, not a sum of the dollars --
           // because it needs the live JS value.
           esc(rw.proxy) + ' ' +
-          'The &asymp;' + rw.extra_work_pct + '% is a separate per-token throughput multiplier, not a sum of the per-window dollar figures.' +
+          (rwHasCostEfficiency
+            ? 'The &asymp;' + rwEfficiencyMult.toFixed(1) + '&times; figure is the before/after per-session cost ratio, not a sum of the token floor or per-window dollar figures.'
+            : 'The &asymp;' + rw.extra_work_pct + '% is a separate per-token throughput multiplier, not a sum of the per-window dollar figures.') +
         '</div>' +
       '</div>';
     }
@@ -4249,6 +4299,7 @@ var DB = (function() {
     // and output-waste are OPPORTUNITY (avoidable waste TO does not yet prevent), not here. ----
     var mce = s.mcp_cap_estimated || {}, ce = s.contamination_exit || {}, hr = s.handover_rerun || {};
     var rs = s.retrieval_serve || {};
+    var rle = s.resume_lean_estimated || {};
     var hf = s.hint_followed || {};
     // Avoided-search: prefer the deterministic observed hint->read measure
     // (hint_followed); fall back to the cohort estimate only before any hint has
@@ -4263,8 +4314,8 @@ var DB = (function() {
     // estimators + avoided-search), so the pillars (struct + runtime + behavioral)
     // always reconcile exactly to gettingMo (measured + estimated). Every estItems
     // entry maps to exactly one pillar: loops/sub-agent/mcp_cap -> runtime;
-    // heeded/handover/avoided-search -> behavioral.
-    var behavMo   = mo(mr.realized_cost_usd) + mo(beh.cost_saved_usd) + mo(ce.cost_saved_usd) + mo(hr.cost_saved_usd) + avoidedSearchMo;
+    // heeded/handover/avoided-search/lean-resumes -> behavioral.
+    var behavMo   = mo(mr.realized_cost_usd) + mo(beh.cost_saved_usd) + mo(ce.cost_saved_usd) + mo(hr.cost_saved_usd) + avoidedSearchMo + mo(rle.cost_saved_usd);
     // ---- trust tiers: measured / estimated / opportunity. Opportunity NEVER folds into the headline. ----
     // Measured = billable events we metered (runtime compression + realized model routing).
     var measuredMo = mo(s.total_cost_usd) + mo(mr.realized_cost_usd);
@@ -4276,7 +4327,8 @@ var DB = (function() {
       { label: 'MCP output cap',                 amt: mo(mce.cost_saved_usd), n: Number(mce.events) || 0,             unit: 'capped results' },
       { label: 'avoided rework (heeded nudges)', amt: mo(ce.cost_saved_usd),  n: Number(ce.heeded_sessions) || 0,     unit: 'heeded', conf: ce.confidence },
       { label: 'continuity handover',            amt: mo(hr.cost_saved_usd),  n: Number(hr.restored_sessions) || 0,    unit: 'restored', conf: hr.confidence },
-      { label: 'avoided search (hints)',         amt: avoidedSearchMo,        n: avoidedSearchN,                       unit: avoidedSearchUnit, conf: hfHasData ? 'observed' : rs.confidence }
+      { label: 'avoided search (hints)',         amt: avoidedSearchMo,        n: avoidedSearchN,                       unit: avoidedSearchUnit, conf: hfHasData ? 'observed' : rs.confidence },
+      { label: 'lean resumes (cold reload avoided)', amt: mo(rle.cost_saved_usd), n: Number(rle.events) || 0,           unit: 'resumes' }
     ].filter(function(it){ return it.amt > 0 || it.conf; });
     var estimatedMo = estItems.reduce(function(a, b){ return a + b.amt; }, 0);
     // What you're getting = measured + estimated (both real value; estimated shown split-out, never hidden).
@@ -4379,13 +4431,25 @@ var DB = (function() {
       var wpTokPerUnit = function (tokPerSess, sess, units) {
         return (units > 0) ? fmtTok((Number(tokPerSess) || 0) * (Number(sess) || 0) / units) : '0';
       };
+      // The dollar headline and the adjacent percentage answer different parts
+      // of the same transformation. monthly_savings_usd is workload-normalized;
+      // the percentage is the per-session cost cut the owner recognizes
+      // (e.g. $10.00 -> $2.50 = 75%). Round to the nearest 5 points so an estimated
+      // counterfactual does not imply false precision. Fall back for old payloads.
+      var baBeforePerSession = Number(ba.before_cost_per_session);
+      var baAfterPerSession = Number(ba.after_cost_per_session);
+      var baPerSessionPct = (isFinite(baBeforePerSession) && baBeforePerSession > 0 &&
+        isFinite(baAfterPerSession) && baAfterPerSession >= 0)
+        ? Math.max(0, (1 - baAfterPerSession / baBeforePerSession) * 100)
+        : Math.max(0, (Number(ba.transformation_pct) || 0) * 100);
+      var baPerSessionDisplay = Math.round(baPerSessionPct / 5) * 5;
       var baExplicit = ba.baseline_source === 'pretool_baseline';  // stable flag, not display prose
       html += '<div class="card wide" style="padding:var(--s-5) var(--s-4);margin-bottom:var(--s-3);">' +
         '<div class="label" style="margin-bottom:var(--s-2);">The big picture &middot; estimated</div>' +
         '<div style="display:flex;align-items:baseline;gap:var(--s-2);flex-wrap:wrap;">' +
           '<span style="font-family:var(--font-mono);font-weight:300;font-size:84px;line-height:0.9;color:var(--c-accent-cyan);text-shadow:0 0 28px var(--c-accent-glow);letter-spacing:-0.02em;">' + money(ba.monthly_savings_usd) + '</span>' +
           '<span style="font-size:24px;color:var(--c-text-dim);font-family:var(--font-mono);">/mo</span>' +
-          '<span style="font-size:22px;color:var(--c-accent-cyan);font-family:var(--font-mono);opacity:0.9;">&middot; ~' + (Math.round((Number(ba.transformation_pct) || 0) * 100)) + '% less</span>' +
+          '<span style="font-size:22px;color:var(--c-accent-cyan);font-family:var(--font-mono);opacity:0.9;">&middot; ~' + baPerSessionDisplay + '% cheaper/session</span>' +
         '</div>' +
         '<div class="lede">Had you worked the way you did before Token Optimizer (~' + (Math.round((Number(ba.before_opus) || 0) * 100)) + '% Opus and the older cache pattern), you\'d have paid about <strong>' + money(ba.monthly_savings_usd) + ' more</strong>. Estimated cost is <strong>' + money(ba.actual_monthly_usd) + '</strong> now vs <strong>' + money(ba.counterfactual_monthly_usd) + '</strong> the old way.</div>' +
         // The claim and the method are two different reads. Run together they form
@@ -4537,7 +4601,25 @@ var DB = (function() {
           ) +
         '</div>' : '') +
       '</div>';
-    if (si && (Number(si.measured_usd) > 0 || Number(si.estimated_usd) > 0)) {
+    // ---- Counted to date: the cumulative counted number. Every
+    // removal metered once PLUS its prevented re-reads, walked per event to the
+    // next real compaction in its own session and STORED in trends.db by the
+    // collect pass (counted_reread table) -- regen only sums. The metered
+    // 30d hero above stays the one-shot floor; this card is the to-date view.
+    var cc = s.counted_cumulative || {};
+    if (Number(cc.total_usd) > 0) {
+      html += '<div class="card" style="flex:1;min-width:210px;padding:var(--s-5) var(--s-4);">' +
+          '<div class="label" style="margin-bottom:var(--s-2);">Counted to date</div>' +
+          '<div style="font-family:var(--font-mono);font-weight:300;font-size:52px;line-height:0.9;color:var(--c-text-main);letter-spacing:-0.02em;">' + money(Number(cc.total_usd)) + '</div>' +
+          '<div style="margin-top:var(--s-1);font-family:var(--font-mono);font-size:14px;color:var(--c-text-dim);">' + money(Number(cc.oneshot_usd)) + ' removals metered once + ' + money(Number(cc.reread_usd)) + ' prevented re-reads</div>' +
+          '<div class="note" style="margin-top:var(--s-2);">Every token Token Optimizer removed from a session (' + Number(cc.removed_tokens).toLocaleString() + ' since ' + esc(prettyDate(cc.window_start)) + '), plus every later turn of that same session that no longer re-billed it &mdash; ' + Number(cc.reread_tokens).toLocaleString() + ' avoided cache reads, each priced at that turn\'s model, counted until the session actually compacted. Excludes lean resumes and all identified-but-unapplied work.</div>' +
+          '<div class="note" style="margin-top:var(--s-1);opacity:.75;">Holding the trajectory fixed assumes the untrimmed context would have lived to each session\'s real compaction point &mdash; the one modeling choice in an otherwise counted number.</div>' +
+          '<div class="note" style="margin-top:var(--s-1);">' + billingCaption + '</div>' +
+          ((si && si.install_date) ? '<div style="margin-top:var(--s-3);font-size:14px;color:var(--c-text-dim);font-family:var(--font-mono);line-height:1.85;">counting since ' + esc(prettyDate(cc.window_start)) + ' &middot; ledger tracked since ' + esc(prettyDate(si.install_date)) + '</div>' : '') +
+        '</div>';
+    } else if (si && (Number(si.measured_usd) > 0 || Number(si.estimated_usd) > 0)) {
+      // Fallback while the counted_reread ledger is still empty (first passes
+      // after upgrade): the pre-C2 since-install card, unchanged.
       html += '<div class="card" style="flex:1;min-width:210px;padding:var(--s-5) var(--s-4);">' +
           // Once the model-mix repair has moved a rate (measure.py
           // _session_model_reprice), this figure is a rate ALLOCATION, not a pure
@@ -6530,7 +6612,11 @@ var DB = (function() {
   function refreshSavings(payload) {
     if (!data || !payload || typeof payload !== 'object') return false;
     if (payload.savings && typeof payload.savings === 'object') {
-      data.savings = payload.savings;
+      // /api/savings is fail-open and may return only the fields it could
+      // recompute. Preserve generated blocks it omits, especially before_after:
+      // replacing the whole object erased a valid $2,010 transformation hero
+      // immediately after the static page painted it.
+      data.savings = Object.assign({}, data.savings || {}, payload.savings);
     }
     if (payload.cache_health && typeof payload.cache_health === 'object') {
       data.cache_health = payload.cache_health;
@@ -6914,8 +7000,16 @@ document.addEventListener('DOMContentLoaded', function() {
   if (data.runtime === 'codex') {
     document.title = 'Token Optimizer - Codex';
   }
-  var brandRuntime = document.getElementById('brand-runtime');
-  if (brandRuntime) brandRuntime.textContent = data.runtime === 'codex' ? 'Codex' : '';
+  // The nav header persists while views swap, so this is the one version label
+  // that stays visible on every tab. data.version comes from
+  // TOKEN_OPTIMIZER_VERSION, whose source of truth is plugin.json.
+  var brandMeta = document.getElementById('brand-meta');
+  if (brandMeta) {
+    var brandParts = [];
+    if (data.version) brandParts.push('v' + data.version);
+    if (data.runtime === 'codex') brandParts.push('Codex');
+    brandMeta.textContent = brandParts.join(' \u00b7 ');
+  }
 
   function startApp() { DB.init(data); refreshSavingsLive(); }
 
