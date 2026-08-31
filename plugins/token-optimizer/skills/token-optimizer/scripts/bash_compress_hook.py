@@ -55,6 +55,15 @@ def main() -> None:
     except (json.JSONDecodeError, OSError, ImportError):
         return  # Bad input, exit silently
 
+    # CC delivers the session id in the PostToolUse payload, not the env. Thread
+    # it into CLAUDE_SESSION_ID so the archive key, cross-turn dedup, and the
+    # savings log (all of which read the env) attribute to the real session
+    # instead of "". Empty session_id priced every event oneshot-only, dropping
+    # its reread annuity (GLM current-week-undercount finding).
+    _sid = str(payload.get("session_id", "") or "")
+    if _sid and not os.environ.get("CLAUDE_SESSION_ID"):
+        os.environ["CLAUDE_SESSION_ID"] = _sid
+
     tool_name = payload.get("tool_name", "")
     if tool_name != "Bash":
         return

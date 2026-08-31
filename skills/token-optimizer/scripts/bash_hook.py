@@ -305,9 +305,24 @@ def main():
     # command unchanged under the current shell: compression degrades to plain
     # execution, and a genuine failure still surfaces loudly. The leading `exec`
     # on a hit means this fallback only runs when no bash was found.
+    #
+    # Thread the real session id (delivered in the hook payload, ABSENT from the
+    # wrapper's own env) into the wrapper process so bash_compress.py attributes
+    # its savings event to THIS session instead of "". An empty session_id priced
+    # every bash_compress event oneshot-only, dropping its reread annuity (GLM
+    # current-week-undercount finding). The export sits INSIDE the `&&` chain,
+    # right before `exec`, on the branch that found a bash -- so the string still
+    # begins with `for b in bash` (a contract other consumers rely on) and the
+    # var never depends on `env` resolving under a stripped PATH. Charset-gated +
+    # shell-quoted; empty string (no-op) if the id is absent or looks unusual, so
+    # the chain is byte-identical to before for a missing/odd id.
+    _sid = str(payload.get("session_id", "") or "")
+    _sid_export = ""
+    if _sid and len(_sid) <= 64 and all(c.isalnum() or c in "._-" for c in _sid):
+        _sid_export = "export CLAUDE_SESSION_ID=" + shlex.quote(_sid) + " && "
     rewritten = (
         'for b in bash /bin/bash /usr/bin/bash /usr/local/bin/bash /opt/homebrew/bin/bash; '
-        'do command -v "$b" >/dev/null 2>&1 && exec "$b" '
+        'do command -v "$b" >/dev/null 2>&1 && ' + _sid_export + 'exec "$b" '
         + shlex.quote(str(launcher_path))
         + " " + shlex.quote(str(compress_path))
         + " " + " ".join(shlex.quote(t) for t in original_tokens)

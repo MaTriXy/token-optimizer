@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -59,10 +60,17 @@ _VERBOSE_PYTEST_OUTPUT = (
 
 def _payload(command: str, stdout: str, stderr: str = "",
              interrupted: bool = False, is_image: bool = False,
-             tool_use_id: str = "toolu_01UNITTEST123") -> str:
-    """Build a PostToolUse hook stdin payload matching Claude Code's actual format."""
+             tool_use_id: str = "toolu_01UNITTEST123",
+             session_id: str | None = None) -> str:
+    """Build a PostToolUse hook stdin payload matching Claude Code's actual format.
+
+    session_id defaults to a UNIQUE per-call id so the cross-turn dedup's
+    persistent SessionStore (now active since the hook threads the payload
+    session_id into CLAUDE_SESSION_ID) can't leak a stored output from a prior
+    test or a prior suite run into this test. A test that wants to exercise
+    same-session dedup passes an explicit shared session_id."""
     return json.dumps({
-        "session_id": "test-session-unit-b",
+        "session_id": session_id or ("test-session-" + uuid.uuid4().hex),
         "transcript_path": "/tmp/transcript.jsonl",
         "cwd": "/Users/test/project",
         "permission_mode": "default",

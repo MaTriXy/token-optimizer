@@ -38201,6 +38201,7 @@ def runway_snapshot(days=30, now=None):
             if cache_key not in _overage_cache:
                 ctx = rt = 0.0
                 merged_ctx = 0.0
+                est_add = 0.0
                 repriced = False
                 counted_window = False
                 try:
@@ -38208,6 +38209,16 @@ def runway_snapshot(days=30, now=None):
                     merged_ctx = float(wm.get("total_cost_usd", 0.0) or 0.0)
                     rt = float((wm.get("model_routing") or {}).get("realized_cost_usd", 0.0) or 0.0)
                     repriced = bool(wm.get("repriced_to_session_mix"))
+                    # Counterfactual-but-priced levers that _get_merged_savings
+                    # relocates OUT of total_cost_usd into the estimated tier
+                    # (resume_lean, verbosity_steer). The counted window excludes
+                    # resume_lean too, so both the counted and legacy ctx omit them
+                    # -- real, magnitude-metered (v5.13.1) savings that were simply
+                    # unlabelled. Window-scoped already (days/since passed above).
+                    _rl = wm.get("resume_lean_estimated") or {}
+                    _vs = wm.get("verbosity_steer_estimated") or {}
+                    est_add = float(_rl.get("cost_saved_usd", 0.0) or 0.0) \
+                        + float(_vs.get("cost_saved_usd", 0.0) or 0.0)
                 except Exception:
                     pass
                 try:
@@ -38232,8 +38243,13 @@ def runway_snapshot(days=30, now=None):
                     pass
                 if not counted_window:
                     ctx = merged_ctx
-                _overage_cache[cache_key] = (ctx, rt, repriced, counted_window)
-            ctx, rt, repriced, counted_window = _overage_cache[cache_key]
+                # Fold the estimated-tier levers back into the shown dollar. This
+                # flips the tier to "estimated" (est_added below) -- honest: the
+                # trigger is counterfactual even though the magnitude is metered.
+                ctx += est_add
+                est_added = est_add > 0.0
+                _overage_cache[cache_key] = (ctx, rt, repriced, counted_window, est_added)
+            ctx, rt, repriced, counted_window, est_added = _overage_cache[cache_key]
             total = ctx + rt
             # Suppress immaterial dollar lines. Right after a limit reset the
             # aligned window is only hours old, so its overage is a few cents
@@ -38249,7 +38265,7 @@ def runway_snapshot(days=30, now=None):
             # allocation, not a measurement. Routing $ is an estimated
             # counterfactual. Estimated wins the label whenever routing
             # contributes OR the reprice fired.
-            tier = "estimated" if (rt > 0 or repriced) else "measured"
+            tier = "estimated" if (rt > 0 or repriced or est_added) else "measured"
             return round(total, 2), tier
 
         windows = []
@@ -38323,8 +38339,8 @@ def runway_snapshot(days=30, now=None):
         # Top-level spine reflects the WEEKLY (7d) ledger -- the dollar the card
         # actually shows -- so the tier chip matches the number beside it. The 7d
         # merged call is already cached above; re-read the same components.
-        _wk_ctx, _wk_rt, _wk_repriced, _wk_counted = _overage_cache.get(
-            _wk_cache_key, (0.0, 0.0, False, False))
+        _wk_ctx, _wk_rt, _wk_repriced, _wk_counted, _wk_est = _overage_cache.get(
+            _wk_cache_key, (0.0, 0.0, False, False, False))
         # Suppress an immaterial weekly dollar figure (same rule as the per-window
         # line above): below _MIN_OVERAGE_USD_SHOWN the spine reads zero so the
         # card shows no "$X in API credits" line -- only the headroom bars. Right
@@ -38340,7 +38356,7 @@ def runway_snapshot(days=30, now=None):
         # so a repriced-but-immaterial window never advertises a tier for $0.
         saved_usd_tier = (
             None if (saved_context_usd <= 0 and saved_routing_usd <= 0)
-            else ("estimated" if (saved_routing_usd > 0 or _wk_repriced) else "measured"))
+            else ("estimated" if (saved_routing_usd > 0 or _wk_repriced or _wk_est) else "measured"))
 
         return {
             "available": True,
