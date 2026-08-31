@@ -4,8 +4,9 @@ Method under test: context removals only; per removal, prevented re-reads = the 
 API turns from the event to the next REAL compact_boundary in its own actual
 session, priced per-turn at that turn's model cache-read rate; one-shot floor
 = the removal once at the first post-event call's input rate. resume_lean and
-opportunity/unapplied rows are excluded. Computed in the collect pass and
-STORED in trends.db (counted_reread); the dashboard summary only ever SUMs.
+opportunity/unapplied rows are excluded. Events without a real transcript are
+excluded rather than estimated. Computed in the collect pass and STORED in
+trends.db (counted_reread); the dashboard summary only ever SUMs.
 
 Run: python3 -m pytest tests/test_counted_cumulative.py -v
 """
@@ -304,11 +305,8 @@ def test_marker_backfill_skips_ledger_era_files(m, tmp_path, monkeypatch):
     assert n == 0
 
 
-def test_uuidless_compression_row_is_priced_at_its_own_model_input_rate(m, tmp_path, monkeypatch):
-    """compression_events has no cost column; a NULL-uuid row (bash_compress
-    hooks often cannot stamp one) must still enter the one-shot floor at its
-    own model's input rate -- the real-ledger regression was 875 August rows
-    priced at $0."""
+def test_uuidless_compression_row_stays_out_without_a_transcript(m, tmp_path, monkeypatch):
+    """A NULL-uuid row has no transcript evidence and must not be estimated."""
     dbp = _db(m, tmp_path, monkeypatch)
     monkeypatch.setattr(m, "CLAUDE_DIR", tmp_path / "claude")  # no transcripts
     ts = _local_iso(_utc_now() - timedelta(hours=1))
@@ -319,10 +317,6 @@ def test_uuidless_compression_row_is_priced_at_its_own_model_input_rate(m, tmp_p
                  (ts,))
     conn.commit()
     m._update_counted_cumulative(conn, quiet=True)
-    tok, oneshot, rr = conn.execute(
-        "SELECT tokens, oneshot_usd, reread_tokens FROM counted_reread").fetchone()
+    row = conn.execute("SELECT COUNT(*) FROM counted_reread").fetchone()
     conn.close()
-    opus_in = _rates(m)["opus"]["input"]
-    assert tok == 40_000
-    assert oneshot == pytest.approx(40_000 * opus_in / 1e6, rel=1e-9)
-    assert rr == 0  # no transcript, no re-read claim
+    assert row[0] == 0

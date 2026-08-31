@@ -5110,12 +5110,7 @@ def generate_dashboard(coord_path):
     # structural + opportunity (unclaimed) + estimated uncaptured runtime, all
     # tier-labelled. Wrapped so a slow/failed savings eval never blocks regen.
     print("  Collecting savings data...")
-    try:
-        savings_data = _get_merged_savings(days=30)
-        savings_data["since_install"] = _savings_since_install()
-        savings_data["counted_cumulative"] = _counted_cumulative_summary()
-    except Exception:
-        savings_data = _get_savings_summary(days=30)
+    savings_data = _dashboard_savings_data(days=30)
 
     # U6: tiered compression-coverage diagnostic (kept separate from savings;
     # shadow/opportunity ratios never feed the headline). Fail-open to empty.
@@ -6543,16 +6538,12 @@ def generate_standalone_dashboard(days=30, quiet=False, force=False):
 
     # Merged savings (measured + realized + opportunity + estimated, tier-labelled).
     # Wrapped so a slow/failed eval never breaks the SessionEnd dashboard regen.
-    try:
-        savings_data = _get_merged_savings(days=30)
-        savings_data["since_install"] = _savings_since_install()
-        savings_data["counted_cumulative"] = _counted_cumulative_summary()
-        # Billing-mode transparency: the dashboard captions the savings heroes
-        # differently for flat-plan vs API-billed users ("capacity freed" vs
-        # "spend not incurred"). Conservative default is 'subscription'.
-        savings_data["billing_mode"] = keepwarm_billing_mode()
-    except Exception:
-        savings_data = {"total_tokens": 0, "total_cost_usd": 0.0, "by_category": {}}
+    savings_data = _dashboard_savings_data(days=30, include_billing_mode=True)
+    if savings_data != {"total_tokens": 0, "total_cost_usd": 0.0, "by_category": {}}:
+        try:
+            savings_data["billing_mode"] = keepwarm_billing_mode()
+        except Exception:
+            pass
 
     # Cache-TTL watchdog (opportunity tier — observed waste, potential recovery).
     # Standalone analysis; never reaches the realized savings headline. Fail-open.
@@ -17533,13 +17524,65 @@ def _counted_score_event(turns, compacts, ev_dt, tokens, tier_data):
     return oneshot_usd, reread_tokens, reread_usd, n
 
 
+def _counted_window_summary(conn, window_start, window_end):
+    """Price counted savings inside one real window, including rereads."""
+    out = {"available": False}
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='counted_reread'"
+        ).fetchone()
+        if not exists:
+            return out
+        start = window_start.astimezone(timezone.utc).replace(tzinfo=None) \
+            if window_start.tzinfo else window_start
+        end = window_end.astimezone(timezone.utc).replace(tzinfo=None) \
+            if window_end.tzinfo else window_end
+        if end < start:
+            return out
+        tier_data = PRICING_TIERS.get(_load_pricing_tier(), PRICING_TIERS["anthropic"])
+        oneshot = reread_usd = 0.0
+        reread_tokens = removed_tokens = events = 0
+        for _key, session_uuid, ts, tokens, _logged_cost, _model in _counted_candidate_events(conn):
+            ev_dt = _counted_event_utc(ts)
+            if ev_dt is None or ev_dt < start or ev_dt > end:
+                continue
+            path = _counted_session_path(conn, session_uuid)
+            if path is None:
+                continue
+            turns, compacts, _ = _counted_walk_transcript(path)
+            turns = [turn for turn in turns if start <= turn[0] <= end]
+            compacts = [compact for compact in compacts if start <= compact <= end]
+            one, rr_tok, rr_usd, _n = _counted_score_event(
+                turns, compacts, ev_dt, int(tokens or 0), tier_data)
+            if one == 0.0 and rr_usd == 0.0:
+                continue
+            oneshot += one
+            reread_tokens += rr_tok
+            reread_usd += rr_usd
+            removed_tokens += int(tokens or 0)
+            events += 1
+        return {
+            "available": True,
+            "events": events,
+            "removed_tokens": removed_tokens,
+            "oneshot_usd": round(oneshot, 6),
+            "reread_tokens": reread_tokens,
+            "reread_usd": round(reread_usd, 6),
+            "total_usd": round(oneshot + reread_usd, 6),
+            "method": "removals x deduped turns to next real compaction, "
+                      "scoped to this window; per-turn cache-read rates; "
+                      "transcript-backed events only",
+        }
+    except (AttributeError, OSError, sqlite3.Error, TypeError, ValueError):
+        return out
+
+
 def _counted_candidate_events(conn):
     """Counted removal events from both ledgers, era-gated, resume_lean excluded.
 
     Yields (event_key, session_uuid, timestamp, tokens, as_logged_cost, model).
-    compression_events has no cost column (as_logged_cost is NULL there); the
-    caller prices those at the row's own model input rate when no transcript
-    turn is available to price against."""
+    compression_events has no cost column (as_logged_cost is NULL there). Events
+    without a resolvable transcript are excluded by the caller."""
     se_types = ",".join("?" for _ in _COUNTED_SE_EVENT_TYPES)
     ce_excl = ",".join("?" for _ in _COUNTED_CE_EXCLUDED_FEATURES)
     rows = conn.execute(
@@ -17592,7 +17635,8 @@ def _update_counted_cumulative(conn, max_sessions=_COUNTED_MAX_SESSIONS_PER_PASS
     session keeps accruing re-reads). Unchanged sessions cost one stat() each.
     Bounded by `max_sessions` and a soft wall-clock deadline so a hook-path
     flush is never held up; the backlog converges over passes. Fail-open."""
-    stats = {"sessions_walked": 0, "rows_written": 0, "pending_sessions": 0}
+    stats = {"sessions_walked": 0, "rows_written": 0, "pending_sessions": 0,
+             "unmeasured_events": 0}
     try:
         started = time.monotonic()
         events = _counted_candidate_events(conn)
@@ -17606,49 +17650,19 @@ def _update_counted_cumulative(conn, max_sessions=_COUNTED_MAX_SESSIONS_PER_PASS
         tier_data = PRICING_TIERS.get(_load_pricing_tier(), PRICING_TIERS["anthropic"])
         now_iso = datetime.now().isoformat()
 
-        def _fallback_oneshot(tok, cost, model):
-            # savings_events rows carry an as-logged cost; compression_events
-            # rows do not -- price those once at the row's own model input rate
-            # (sonnet card when unstamped). Re-reads stay 0 without a transcript.
-            if cost is not None:
-                return float(cost)
-            models = tier_data.get("claude_models", {})
-            r = models.get(_normalize_model_name(model) or "") or models.get("sonnet") or {}
-            return tok * float(r.get("input", 3.0)) / 1e6
-
-        # Unjoinable events (no session uuid): one-shot only; there is no
-        # transcript to count re-reads against.
+        # Unjoinable events (no session uuid) have no transcript to price. Keep
+        # them out of the counted ledger rather than inventing a one-shot value.
         for key, ts, tok, cost, model in by_sess.pop(None, []) + by_sess.pop("", []):
-            if key in stored:
-                continue
-            conn.execute(
-                "INSERT OR REPLACE INTO counted_reread (event_key, source, "
-                "session_uuid, event_ts, event_month, tokens, oneshot_usd, "
-                "reread_tokens, reread_usd, turns_counted, transcript_mtime, "
-                "computed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (key, key.split(":", 1)[0], None, ts, str(ts)[:7], int(tok or 0),
-                 round(_fallback_oneshot(int(tok or 0), cost, model), 6),
-                 0, 0.0, 0, None, now_iso))
-            stats["rows_written"] += 1
+            stats["unmeasured_events"] += 1
 
         # Which sessions need a walk?
         todo = []
         for uuid, evs in by_sess.items():
             path = _counted_session_path(conn, uuid)
             if path is None:
-                for key, ts, tok, cost, model in evs:
-                    if key in stored:
-                        continue
-                    conn.execute(
-                        "INSERT OR REPLACE INTO counted_reread (event_key, source, "
-                        "session_uuid, event_ts, event_month, tokens, oneshot_usd, "
-                        "reread_tokens, reread_usd, turns_counted, transcript_mtime, "
-                        "computed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (key, key.split(":", 1)[0], uuid, ts, str(ts)[:7],
-                         int(tok or 0),
-                         round(_fallback_oneshot(int(tok or 0), cost, model), 6),
-                         0, 0.0, 0, None, now_iso))
-                    stats["rows_written"] += 1
+                # No transcript means no counted reread evidence. Leave the
+                # event unmeasured; the full backfill purges any old fallback row.
+                stats["unmeasured_events"] += len(evs)
                 continue
             try:
                 mtime = path.stat().st_mtime
@@ -17670,11 +17684,17 @@ def _update_counted_cumulative(conn, max_sessions=_COUNTED_MAX_SESSIONS_PER_PASS
             for key, ts, tok, cost, model in evs:
                 ev_dt = _counted_event_utc(ts)
                 if ev_dt is None or not turns:
-                    oneshot, rr_tok, rr_usd, n = (
-                        _fallback_oneshot(int(tok or 0), cost, model), 0, 0.0, 0)
-                else:
-                    oneshot, rr_tok, rr_usd, n = _counted_score_event(
-                        turns, compacts, ev_dt, int(tok or 0), tier_data)
+                    # A transcriptless or unscoreable event is not a counted
+                    # result. Do not fall back to a one-shot estimate.
+                    conn.execute("DELETE FROM counted_reread WHERE event_key = ?", (key,))
+                    stats["unmeasured_events"] += 1
+                    continue
+                oneshot, rr_tok, rr_usd, n = _counted_score_event(
+                    turns, compacts, ev_dt, int(tok or 0), tier_data)
+                if not n and oneshot == 0.0:
+                    conn.execute("DELETE FROM counted_reread WHERE event_key = ?", (key,))
+                    stats["unmeasured_events"] += 1
+                    continue
                 conn.execute(
                     "INSERT OR REPLACE INTO counted_reread (event_key, source, "
                     "session_uuid, event_ts, event_month, tokens, oneshot_usd, "
@@ -17783,6 +17803,44 @@ def _counted_marker_backfill(conn, max_files=_COUNTED_MARKER_FILES_PER_PASS,
     return stats
 
 
+def _purge_counted_without_transcripts(conn):
+    """Remove counted rows that have no real transcript to support them."""
+    try:
+        rows = conn.execute(
+            "SELECT rowid, session_uuid FROM counted_reread"
+        ).fetchall()
+    except sqlite3.Error:
+        return 0
+    removed = 0
+    for rowid, session_uuid in rows:
+        if not session_uuid or _counted_session_path(conn, session_uuid) is None:
+            cur = conn.execute("DELETE FROM counted_reread WHERE rowid = ?", (rowid,))
+            removed += max(0, cur.rowcount)
+    if removed:
+        conn.commit()
+    return removed
+
+
+def _counted_backfill_all(conn, quiet=True):
+    """Drain counted ledgers, marker history, and remove transcriptless estimates."""
+    stats = _update_counted_cumulative(
+        conn, max_sessions=10**9, deadline_seconds=None, quiet=quiet)
+    marker_total = {"files_scanned": 0, "rows_written": 0, "done": False}
+    while True:
+        marker = _counted_marker_backfill(
+            conn, max_files=500, deadline_seconds=None, quiet=quiet)
+        marker_total["files_scanned"] += int(marker.get("files_scanned", 0) or 0)
+        marker_total["rows_written"] += int(marker.get("rows_written", 0) or 0)
+        marker_total["done"] = bool(marker.get("done"))
+        if marker.get("done") or not marker.get("files_scanned"):
+            break
+    stats.update({"marker_files_scanned": marker_total["files_scanned"],
+                  "marker_rows_written": marker_total["rows_written"],
+                  "marker_backfill_done": marker_total["done"],
+                  "rows_removed_no_transcript": _purge_counted_without_transcripts(conn)})
+    return stats
+
+
 def _counted_cumulative_summary():
     """Cheap SELECT-only rollup of counted_reread for the Counted-to-date card.
 
@@ -17838,6 +17896,45 @@ def _counted_cumulative_summary():
         }
     except (sqlite3.Error, OSError, TypeError, ValueError):
         return out
+
+
+def _dashboard_savings_data(days=30, include_billing_mode=False, fail_open=False):
+    """Build one savings payload with counted-to-date as the source of truth."""
+    source_failed = False
+    try:
+        savings_data = _get_merged_savings(days=days)
+    except Exception:
+        if fail_open:
+            source_failed = True
+            savings_data = {"total_tokens": 0, "total_cost_usd": 0.0,
+                            "by_category": {}}
+        else:
+            try:
+                savings_data = _get_savings_summary(days=days)
+            except Exception:
+                savings_data = {"total_tokens": 0, "total_cost_usd": 0.0,
+                                "by_category": {}}
+    if not isinstance(savings_data, dict):
+        savings_data = {"total_tokens": 0, "total_cost_usd": 0.0,
+                        "by_category": {}}
+    if source_failed:
+        return savings_data
+    try:
+        savings_data["since_install"] = _savings_since_install()
+    except Exception:
+        pass
+    try:
+        # Always replace any stale merged-view copy. The card must reconcile to
+        # the full counted_reread table, not to a partial generation payload.
+        savings_data["counted_cumulative"] = _counted_cumulative_summary()
+    except Exception:
+        savings_data["counted_cumulative"] = {"available": False}
+    if include_billing_mode:
+        try:
+            savings_data["billing_mode"] = keepwarm_billing_mode()
+        except Exception:
+            pass
+    return savings_data
 
 
 
@@ -22279,7 +22376,20 @@ def _generate_daemon_script():
     (\\U, \\N, \\x, \\t) would raise SyntaxError when the generated daemon starts.
     """
     dashboard_literal = repr(str(DASHBOARD_PATH))
-    measure_py_literal = repr(str(Path(__file__).resolve()))
+    measure_path = Path(__file__).resolve()
+    measure_py_literal = repr(str(measure_path))
+    # A daemon can be generated by a runtime cache (for example .codex) while
+    # serving another runtime's plugin-data directory (for example .claude).
+    # Keep the marketplace identity so the generated resolver can select the
+    # unversioned source belonging to the served runtime before using this path.
+    measure_marketplace = "alexgreensh-token-optimizer"
+    try:
+        cache_index = measure_path.parts.index("cache")
+        if cache_index + 1 < len(measure_path.parts):
+            measure_marketplace = measure_path.parts[cache_index + 1]
+    except ValueError:
+        pass
+    measure_marketplace_literal = repr(measure_marketplace)
     token_path_literal = repr(str(DAEMON_TOKEN_PATH))
     host_path_literal = repr(str(DAEMON_HOST_PATH))
     thrash_path_literal = repr(str(DAEMON_THRASH_BREADCRUMB))
@@ -22391,6 +22501,7 @@ _last_regen = 0.0
 # which silently broke every regeneration for upgrading users (the daemon kept
 # listening, so health checks stayed green while refresh was dead).
 MEASURE_PY_FALLBACK = {measure_py_literal}
+MEASURE_PY_MARKETPLACE = {measure_marketplace_literal}
 _MEASURE_PY_CACHE = ("", 0.0)
 _regen_inflight = False
 REGEN_STEP_TIMEOUT = 45
@@ -22517,6 +22628,34 @@ def _resolve_measure_py():
     #     other writer controls
     #   - the resolved path is containment-checked before it is ever executed
     fallback = MEASURE_PY_FALLBACK
+    # Resolve against the install whose dashboard is actually being served.
+    # A .claude data dashboard may be generated by a .codex measure.py process;
+    # executing the fallback in that case writes a different snapshot and makes
+    # POST /api/regenerate return success without changing the visible file.
+    # The marketplace clone is version-independent and remains inside the same
+    # runtime's plugins root. Legacy/backups dashboards have no plugin-data
+    # shape, so they continue through the identity-scoped fallback below.
+    try:
+        dashboard_dir = os.path.realpath(os.path.dirname(DASHBOARD))
+        dashboard_parts = dashboard_dir.split(os.sep)
+        data_idx = next(
+            i for i in range(1, len(dashboard_parts))
+            if dashboard_parts[i - 1] == "plugins" and dashboard_parts[i] == "data")
+        if data_idx >= 1:
+            plugins_root = os.sep.join(dashboard_parts[:data_idx])
+            marketplaces_root = os.path.realpath(os.path.join(plugins_root, "marketplaces"))
+            served_candidate = os.path.join(
+                marketplaces_root, MEASURE_PY_MARKETPLACE,
+                "skills", "token-optimizer", "scripts", "measure.py")
+            served_real = os.path.realpath(served_candidate)
+            if (os.path.isfile(served_candidate) and not os.path.islink(served_candidate)
+                    and (served_real == marketplaces_root
+                         or served_real.startswith(marketplaces_root + os.sep))):
+                with _STATE_LOCK:
+                    _MEASURE_PY_CACHE = (served_real, now)
+                return served_real
+    except (OSError, ValueError, StopIteration):
+        pass
     # .../<identity>/token-optimizer/<version>/skills/token-optimizer/scripts/measure.py
     version_dir = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.dirname(os.path.abspath(fallback)))))
@@ -37991,13 +38130,12 @@ def runway_snapshot(days=30, now=None):
         # that drifts down as heavy days age out. When the meter is unavailable the
         # rolling 7-day fallback is used.
         #
-        # The figure reuses _get_merged_savings for that span: context tokens_saved
-        # priced at input rate (total_cost_usd, metered) + realized model-routing
-        # savings (model_routing.realized_cost_usd, an estimated counterfactual that
-        # ALREADY blends output rates, so the expensive output-token delta is
-        # counted). The two pools are disjoint (tokens never sent vs cheaper model
-        # for the same tokens), so summing is not a double-count. Never re-derived
-        # from context_mult/routing_mult -- that would double-count the ledger.
+        # The context-dollar part is the counted, transcript-backed ledger for
+        # that window: one-shot plus later deduped rereads to compaction. The
+        # routing-dollar part remains the merged model-routing counterfactual.
+        # The two pools are disjoint (tokens never sent vs cheaper model for the
+        # same tokens), so summing is not a double-count. Never re-derived from
+        # context_mult/routing_mult, which would double-count the ledger.
         #
         # Sub-day windows (5h) have NO honest figure: the savings ledger is
         # day-granular, so "dollars saved in the last 5 hours" cannot be computed
@@ -38042,16 +38180,40 @@ def runway_snapshot(days=30, now=None):
             # below this block touches `wm`.
             if cache_key not in _overage_cache:
                 ctx = rt = 0.0
+                merged_ctx = 0.0
                 repriced = False
+                counted_window = False
                 try:
                     wm = _get_merged_savings(days=wdays, since=since_iso)
-                    ctx = float(wm.get("total_cost_usd", 0.0) or 0.0)
+                    merged_ctx = float(wm.get("total_cost_usd", 0.0) or 0.0)
                     rt = float((wm.get("model_routing") or {}).get("realized_cost_usd", 0.0) or 0.0)
                     repriced = bool(wm.get("repriced_to_session_mix"))
                 except Exception:
                     pass
-                _overage_cache[cache_key] = (ctx, rt, repriced)
-            ctx, rt, repriced = _overage_cache[cache_key]
+                try:
+                    conn = _init_trends_db()
+                    try:
+                        end_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                        if since_iso:
+                            start_utc = datetime.fromisoformat(since_iso)
+                            if start_utc.tzinfo is not None:
+                                start_utc = start_utc.astimezone(timezone.utc).replace(tzinfo=None)
+                        else:
+                            start_utc = end_utc - timedelta(days=wdays)
+                        counted = _counted_window_summary(conn, start_utc, end_utc)
+                    finally:
+                        conn.close()
+                    if counted.get("available"):
+                        ctx = float(counted.get("total_usd", 0.0) or 0.0)
+                        counted_window = True
+                except Exception:
+                    # Older databases without counted_reread retain the legacy
+                    # flat-ledger fallback until their counted backfill completes.
+                    pass
+                if not counted_window:
+                    ctx = merged_ctx
+                _overage_cache[cache_key] = (ctx, rt, repriced, counted_window)
+            ctx, rt, repriced, counted_window = _overage_cache[cache_key]
             total = ctx + rt
             # Suppress immaterial dollar lines. Right after a limit reset the
             # aligned window is only hours old, so its overage is a few cents
@@ -38141,7 +38303,8 @@ def runway_snapshot(days=30, now=None):
         # Top-level spine reflects the WEEKLY (7d) ledger -- the dollar the card
         # actually shows -- so the tier chip matches the number beside it. The 7d
         # merged call is already cached above; re-read the same components.
-        _wk_ctx, _wk_rt, _wk_repriced = _overage_cache.get(_wk_cache_key, (0.0, 0.0, False))
+        _wk_ctx, _wk_rt, _wk_repriced, _wk_counted = _overage_cache.get(
+            _wk_cache_key, (0.0, 0.0, False, False))
         # Suppress an immaterial weekly dollar figure (same rule as the per-window
         # line above): below _MIN_OVERAGE_USD_SHOWN the spine reads zero so the
         # card shows no "$X in API credits" line -- only the headroom bars. Right
@@ -38178,6 +38341,8 @@ def runway_snapshot(days=30, now=None):
             "saved_usd_context": round(saved_context_usd, 2),
             "saved_usd_routing": round(saved_routing_usd, 2),
             "saved_usd_tier": saved_usd_tier,
+            "window_savings_basis": (
+                "counted transcript window" if _wk_counted else "flat savings ledger fallback"),
             # period_days scopes the throughput MULTIPLIERS (context/routing), not
             # the per-window dollars: each window now prices overage over its OWN
             # span (weekly = 7d), so the dollars are window-real, not a slice.
@@ -40140,6 +40305,10 @@ def _mix_from_session_rows(cutoff):
 # dedup, so a cold scan is the only cost we are amortizing.
 _subagent_pool_memo = {"key": None, "ts": 0.0, "payload": None}
 _SUBAGENT_POOL_TTL = 900.0  # 15 min, matches the cache-health sidecar cadence
+# Bump whenever sidechain classification changes. Old sidecars can contain a
+# signed negative pool from the pre-FIX-1 marker scan and must never feed a new
+# full-dashboard net calculation.
+_SUBAGENT_POOL_CACHE_SCHEMA = "sidechain-classifier-v2"
 # Long windows (the since-install pool, days >> 30) change slowly and cost the
 # most to recompute; give them a longer sidecar life so a dashboard regen never
 # pays the full-history scan more than a few times a day.
@@ -40345,7 +40514,7 @@ def _subagent_pool_savings(baseline_opus_share, days=30, tier=None, fresh=False,
             return zero
         if tier is None:
             tier = _load_pricing_tier()
-        key = (round(float(days), 3), round(float(baseline_opus_share), 4),
+        key = (_SUBAGENT_POOL_CACHE_SCHEMA, round(float(days), 3), round(float(baseline_opus_share), 4),
                detect_runtime(), str(tier), bool(baseline_mix_available))
         now = time.time()
         ttl = _subagent_pool_ttl(days)
@@ -42040,15 +42209,17 @@ def _live_savings_payload(days=30):
     full regen would render. Fail-open: every sub-block is guarded so a slow or
     failed eval degrades to a safe empty shape instead of raising.
     """
-    try:
-        savings_data = _get_merged_savings(days=days)
-        savings_data["since_install"] = _savings_since_install()
-        savings_data["counted_cumulative"] = _counted_cumulative_summary()
-        # Billing-mode transparency caption wiring — mirrors
-        # generate_standalone_dashboard so live-patched tiles match a full regen.
-        savings_data["billing_mode"] = keepwarm_billing_mode()
-    except Exception:
-        savings_data = {"total_tokens": 0, "total_cost_usd": 0.0, "by_category": {}}
+    savings_data = _dashboard_savings_data(
+        days=days, include_billing_mode=True, fail_open=True)
+    # Mirror generate_standalone_dashboard: only stamp billing_mode when the
+    # savings source produced a real payload. On fail-open the source degrades
+    # to the bare empty shape, and re-adding billing_mode here would break the
+    # safe-empty contract (the live-patched tile must equal a regen's fail-open).
+    if savings_data != {"total_tokens": 0, "total_cost_usd": 0.0, "by_category": {}}:
+        try:
+            savings_data["billing_mode"] = keepwarm_billing_mode()
+        except Exception:
+            pass
     try:
         cache_health = _cache_ttl_waste_cached(days=days)
     except Exception:
@@ -46128,13 +46299,7 @@ if __name__ == "__main__":
         _quiet = "--quiet" in args
         conn = _init_trends_db()
         try:
-            _update_counted_cumulative(conn, max_sessions=10**9,
-                                       deadline_seconds=None, quiet=_quiet)
-            while True:
-                st = _counted_marker_backfill(conn, max_files=500,
-                                              deadline_seconds=None, quiet=_quiet)
-                if st.get("done") or not st.get("files_scanned"):
-                    break
+            _counted_backfill_all(conn, quiet=_quiet)
         finally:
             conn.close()
         print(json.dumps(_counted_cumulative_summary(), indent=2))

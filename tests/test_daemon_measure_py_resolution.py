@@ -39,8 +39,9 @@ def _load_resolver(fallback: str, tmp_log: Path):
     # issue #160: _resolve_measure_py now guards _MEASURE_PY_CACHE with
     # _STATE_LOCK; give the extracted function a real lock so it runs in-isolation.
     ns = {"os": os, "json": __import__("json"), "time": __import__("time"),
+          "DASHBOARD": "",
           "_STATE_LOCK": threading.Lock()}
-    for const in ["_MEASURE_PY_CACHE", "MEASURE_PY_RESOLVE_TTL"]:
+    for const in ["_MEASURE_PY_CACHE", "MEASURE_PY_RESOLVE_TTL", "MEASURE_PY_MARKETPLACE"]:
         m = re.search(r"^%s = .*$" % re.escape(const), src, re.M)
         assert m, f"{const} missing from generated daemon"
         exec(m.group(0), ns)
