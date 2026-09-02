@@ -345,3 +345,22 @@ def test_install_sh_cursor_materializes_from_pinned_commit():
     assert "pull --ff-only" not in cursor_fn
     assert 'rev-parse HEAD' in cursor_fn
     assert 'checkout "$pin_sha" -- skills/' in cursor_fn
+
+
+@needs_posix
+def test_uninstall_rmtree_failure_is_runtime_error(home, monkeypatch):
+    """P1-12: an OSError from shutil.rmtree becomes a user-facing RuntimeError,
+    not a raw traceback (main() only catches RuntimeError)."""
+    import json as _json
+    plugin = home / "token-optimizer" / "plugin"
+    plugin.mkdir(parents=True)
+    (home / "hooks.json").write_text(_json.dumps({"hooks": {}}), encoding="utf-8")
+    for name in ci._PAYLOAD_MODULES:
+        (plugin / name).write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setattr(ci, "cursor_home", lambda: home)
+
+    def boom(_p, *a, **k):
+        raise OSError(13, "Permission denied")
+    monkeypatch.setattr(ci.shutil, "rmtree", boom)
+    with pytest.raises(RuntimeError, match="failed removing"):
+        ci.uninstall(home=home)

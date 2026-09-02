@@ -380,7 +380,12 @@ def uninstall(*, dry_run: bool = False, home: Path = None) -> dict:
     plugin_dir = _plugin_dir(root)
     if plugin_dir.exists():
         if not dry_run:
-            shutil.rmtree(plugin_dir)
+            try:
+                shutil.rmtree(plugin_dir)
+            except OSError as exc:
+                # main() only surfaces RuntimeError; a raw OSError would escape
+                # as a traceback and leave a half-uninstalled state unexplained.
+                raise RuntimeError(f"failed removing {plugin_dir}: {exc}") from exc
         actions["removed"].append(str(plugin_dir))
 
     return actions
