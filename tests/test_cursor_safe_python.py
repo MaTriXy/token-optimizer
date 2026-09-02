@@ -136,14 +136,15 @@ def test_trusted_prefix_still_checks_writability(c, monkeypatch, tmp_path):
     assert c._py_path_is_trusted(str(f)) is True
 
 
-def _fake_stat(uid_file, mode_file, uid_dir, mode_dir):
+def _fake_stat(uid_file, mode_file, uid_dir, mode_dir, gid=None):
     import stat as _s
     class R:
-        def __init__(self, uid, mode):
+        def __init__(self, uid, mode, gid=None):
             self.st_uid = uid
+            self.st_gid = os.getegid() if gid is None else gid
             self.st_mode = _s.S_IFREG | mode
     def fake(path, *a, **k):
-        return R(uid_dir, mode_dir) if str(path).endswith("bin") else R(uid_file, mode_file)
+        return R(uid_dir, mode_dir) if str(path).endswith("bin") else R(uid_file, mode_file, gid)
     return fake
 
 
@@ -171,4 +172,25 @@ def test_gate_rejects_third_party_group_writable_dir(c, monkeypatch, tmp_path):
     assert c._py_path_is_trusted(f) is False
     # world-writable dir is rejected regardless of owner
     monkeypatch.setattr(c.os, "stat", _fake_stat(0, 0o755, 0, 0o777))
+    assert c._py_path_is_trusted(f) is False
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
+def test_gate_accepts_hosted_ci_self_group_writable_interpreter(c, monkeypatch, tmp_path):
+    """Hosted CI (measured on ubuntu runner 33617174377): setup-python extracts
+    the interpreter 0775 under the runner's OWN group. That file must be
+    trusted; a foreign-group-writable or world-writable file must not."""
+    f = str(tmp_path / "bin" / "python3.14")
+    # self-group-writable file in an euid-owned 0775 dir: the hosted-CI layout
+    monkeypatch.setattr(c.os, "stat",
+                        _fake_stat(os.geteuid(), 0o775, os.geteuid(), 0o775))
+    assert c._py_path_is_trusted(f) is True
+    # foreign-group-writable file: rejected
+    other_gid = (os.getegid() or 1000) + 1
+    monkeypatch.setattr(c.os, "stat",
+                        _fake_stat(os.geteuid(), 0o775, os.geteuid(), 0o755, gid=other_gid))
+    assert c._py_path_is_trusted(f) is False
+    # world-writable file: rejected
+    monkeypatch.setattr(c.os, "stat",
+                        _fake_stat(os.geteuid(), 0o777, os.geteuid(), 0o755))
     assert c._py_path_is_trusted(f) is False

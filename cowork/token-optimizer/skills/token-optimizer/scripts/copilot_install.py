@@ -95,10 +95,18 @@ def _py_trust_reason(p: str) -> str | None:
 
         st_file = os.stat(real)
         st_dir = os.stat(os.path.dirname(real))
-        # The interpreter's BYTES must never be group/other-writable, whoever
-        # owns it, and the file must be admin-owned.
-        if st_file.st_mode & (_stat.S_IWGRP | _stat.S_IWOTH):
-            return f"{real} is group/other-writable"
+        # The interpreter's BYTES must never be world-writable, and must be
+        # admin-owned. Group-writable is accepted ONLY in the self-group case
+        # (owner is us AND the group is our own primary group): hosted-CI tool
+        # caches extract the interpreter 0775 under the runner's own group, and
+        # that group is exactly the account running this installer. A file
+        # group-writable by any OTHER group is a swap vector.
+        if st_file.st_mode & _stat.S_IWOTH:
+            return f"{real} is world-writable"
+        if st_file.st_mode & _stat.S_IWGRP and not (
+            st_file.st_uid == euid and st_file.st_gid == os.getegid()
+        ):
+            return f"{real} is group-writable by a foreign group"
         if not _admin_owned(st_file.st_uid):
             return f"{real} is owned by uid {st_file.st_uid}, not by us or root"
         # The containing DIR must not be world-writable. Group-writable is the
