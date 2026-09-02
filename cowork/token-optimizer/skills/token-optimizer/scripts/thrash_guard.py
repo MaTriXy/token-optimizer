@@ -31,6 +31,7 @@ streaks never leak across sessions.
 from __future__ import annotations
 
 import os
+import re
 import time
 
 # Fire once a command has produced byte-identical output this many times in
@@ -43,12 +44,31 @@ REPEAT_AFTER = 3
 STALE_SECONDS = 1800
 # Outputs shorter than this are not worth a nudge line (a bare "" or "0").
 MIN_OUTPUT_CHARS = 2
+# Session IDs must match this pattern (alphanumeric + - and _). An invalid
+# session ID would cause SessionStore to generate a fresh fallback UUID per
+# call, preventing streak accumulation. Rejecting it here makes the silent
+# disablement explicit rather than silently broken.
+_VALID_SESSION_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 _NUDGE_TEMPLATE = (
     "[Token Optimizer: `{label}` has now run {streak} times this session with "
     "byte-identical output. Re-running it will not change the result; either "
     "change the approach, or state plainly what is blocking you.]"
 )
+
+
+def _sanitize_label(command: str) -> str:
+    """Sanitize a command for use in the nudge label.
+
+    Strips backticks and instruction-like phrases so the nudge cannot be used
+    as a prompt-injection vector via the echoed command text. The agent
+    already sees the full command in the tool input; the nudge label is for
+    identification, not verbatim replay.
+    """
+    label = command[:60]
+    # Remove backticks so the label cannot break out of the template's code span.
+    label = label.replace("`", "'")
+    return label
 
 
 def check(command: str, output: str, now: float | None = None):
@@ -62,7 +82,7 @@ def check(command: str, output: str, now: float | None = None):
         if not command or not output or len(output) < MIN_OUTPUT_CHARS:
             return None
         session_id = os.environ.get("CLAUDE_SESSION_ID", "")
-        if not session_id:
+        if not session_id or not _VALID_SESSION_ID.match(session_id):
             return None
 
         from session_store import SessionStore
@@ -105,7 +125,7 @@ def check(command: str, output: str, now: float | None = None):
             )
             if not fire:
                 return None
-            return _NUDGE_TEMPLATE.format(label=stripped[:60], streak=streak)
+            return _NUDGE_TEMPLATE.format(label=_sanitize_label(stripped), streak=streak)
         finally:
             store.close()
     except Exception:

@@ -79,6 +79,25 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
         r"(?!\[CREDENTIAL REDACTED:)[A-Za-z0-9/+=]{40}",
         re.I,
     )),
+    # Inline CLI password flags. Two patterns:
+    # (a) Long forms (--password=V, --password V, --passwd=V, --passcode=V,
+    #     --auth-token=V) — unambiguous, always redact.
+    # (b) Short forms (-p V, -a V) restricted to known password-carrying
+    #     commands (sshpass, mysql, mariadb, redis-cli) to avoid false
+    #     positives on -p port/plugin/preserve flags in other commands.
+    # The named `keep` group captures the flag (+ command context for short
+    # forms) so redaction preserves it and blanks only the value.
+    ("CLI password flag (long)", re.compile(
+        r"(?P<keep>(?:--password|--passwd|--passcode|--auth-token)\s*=?\s*)"
+        r"(?!\[CREDENTIAL REDACTED:)[^\s\"']+",
+        re.I,
+    )),
+    ("CLI password flag (short)", re.compile(
+        r"(?P<keep>(?:sshpass|mysql|mariadb)\b.*?\s+-p\s*=?\s*"
+        r"|redis-cli\b.*?\s+-a\s*=?\s*)"
+        r"(?!\[CREDENTIAL REDACTED:)[^\s\"']+",
+        re.I,
+    )),
 ]
 
 # Bare compiled patterns list for backward compat with bash_compress.py
@@ -191,6 +210,8 @@ _PATTERN_ANCHORS = {
                               "password='", "password=\"", "pwd='", "pwd=\"",
                               "passwd='", "passwd=\""),
     "AWS secret key": ("aws_secret", "secret_access_key", "secretaccesskey"),
+    "CLI password flag (long)": ("--password", "--passwd", "--passcode", "--auth-token"),
+    "CLI password flag (short)": ("sshpass", "mysql", "mariadb", "redis-cli"),
 }
 
 
