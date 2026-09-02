@@ -22,8 +22,10 @@ responsibility for third-party ones.
   completes and the flush lock is always released.
 - Safety: the file is loaded only from that exact path (never from the repo,
   the snapshot dir, or an environment override) and only when it is not
-  group/world-writable. Extensions run with your user's privileges — only
-  install code you trust.
+  group/world-writable. On Windows the mode-bit guard is not enforced
+  (Windows has no group/other permission split); the config directory's own
+  ACLs are the protection there. Extensions run with your user's privileges —
+  only install code you trust.
 
 ## Example
 
