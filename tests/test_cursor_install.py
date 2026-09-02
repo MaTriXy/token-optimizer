@@ -269,3 +269,22 @@ def test_concurrent_installs_both_survive(tmp_path, monkeypatch):
     data = _json.loads((cur / "hooks.json").read_text(encoding="utf-8"))
     assert set(data["hooks"]) == {"sessionStart", "preToolUse", "postToolUse",
                                   "preCompact", "stop", "sessionEnd"}
+
+
+def test_payload_modules_ship_the_bridges_runtime_deps():
+    """P1-1: the bridge imports spawn_utils (spawn_detached), hook_runtime
+    (lease_lock) and utf8_io; every one absent from the payload means a silent
+    degraded fallback in EVERY installed hook."""
+    for required in ("spawn_utils.py", "hook_runtime.py", "utf8_io.py",
+                     "codex_io.py", "hermes_session.py"):
+        assert required in ci._PAYLOAD_MODULES, required
+        assert (SCRIPTS / required).is_file(), f"{required} missing from checkout"
+
+
+@needs_posix
+def test_install_copies_full_payload(home, monkeypatch):
+    monkeypatch.setattr(ci, "cursor_home", lambda: home)
+    ci.install(home=home)
+    plugin = home / "token-optimizer" / "plugin"
+    for name in ci._PAYLOAD_MODULES:
+        assert (plugin / name).is_file(), name

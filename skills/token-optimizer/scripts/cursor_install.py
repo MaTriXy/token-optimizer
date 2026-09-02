@@ -56,6 +56,13 @@ _PAYLOAD_MODULES = (
     # hermes_session supplies compute_quality_score — without it cursor_session
     # silently falls back to a single-signal quality estimate.
     "hermes_session.py",
+    # spawn_utils supplies spawn_detached — without it the bridge's degraded
+    # fallback does NOT detach, so rollup/dashboard spawns die with the hook.
+    "spawn_utils.py",
+    # hook_runtime supplies lease_lock (tally RMW + stop throttle) and
+    # utf8_io is enforced at startup; both degrade silently when absent.
+    "hook_runtime.py",
+    "utf8_io.py",
 )
 
 # One-line locator written next to the bridge, naming the canonical measure.py
