@@ -85,24 +85,15 @@ def test_cooldown_after_nudge(guard):
 
 def test_stale_streak_resets(guard):
     out = "same\n"
-    guard.check("git status", out)
-    guard.check("git status", out)
-    # Age the stored streak past STALE_SECONDS directly in the store.
-    from session_store import SessionStore
-    from delta_diff import content_hash
-    store = SessionStore(os.environ["CLAUDE_SESSION_ID"])
-    conn = store._connect()
-    conn.execute(
-        "UPDATE command_run_streaks SET last_ts = ? WHERE command_hash = ?",
-        (time.time() - (guard.STALE_SECONDS + 10), content_hash("git status")),
-    )
-    conn.commit()
-    store.close()
+    t0 = time.time()
+    guard.check("git status", out, now=t0)
+    guard.check("git status", out, now=t0)
     # A repeat after the stale window is a deliberate re-check: silent, and
-    # the streak restarts (so two more repeats stay silent too).
-    assert guard.check("git status", out) is None
-    assert guard.check("git status", out) is None
-    assert guard.check("git status", out) is not None
+    # the streak restarts (so the next two repeats stay silent too).
+    stale = t0 + guard.STALE_SECONDS + 10
+    assert guard.check("git status", out, now=stale) is None
+    assert guard.check("git status", out, now=stale) is None
+    assert guard.check("git status", out, now=stale) is not None
 
 
 def test_no_session_is_silent(guard, monkeypatch):
@@ -121,6 +112,21 @@ def test_distinct_commands_do_not_share_streaks(guard):
     assert guard.check("git status", "x\n") is None
     assert guard.check("git status", "x\n") is None
     assert guard.check("git status", "x\n") is not None
+
+
+def test_persisted_command_is_redacted(guard):
+    cmd = "curl -sS 'https://api.example.com/x?token=FAKE_SECRET_VALUE_123'"
+    out = "ok\nok\n"
+    guard.check(cmd, out)
+    guard.check(cmd, out)
+    guard.check(cmd, out)
+    from session_store import SessionStore
+    from delta_diff import content_hash
+    store = SessionStore(os.environ["CLAUDE_SESSION_ID"])
+    row = store.get_command_streak(content_hash(cmd.strip()))
+    store.close()
+    assert row is not None
+    assert "FAKE_SECRET_VALUE_123" not in row["command_text"], row["command_text"]
 
 
 # ---------------------------------------------------------------------------

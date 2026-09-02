@@ -11,7 +11,7 @@ agent itself to tell us. In band.") and their issue #35 (an agent looping
 "until the user interrupts", caused by Boost and undetected). Token Optimizer
 is a session-stateful hook, so it can see the streak and say something.
 
-Design (orchestrator-approved, nudge-only):
+Design (nudge-only):
 - Fire only on >= 3 consecutive runs of the SAME command with BYTE-IDENTICAL
   output. Any material output change resets the streak to 1, so a command
   whose output is evolving (progress bars, growing logs) never fires.
@@ -51,11 +51,12 @@ _NUDGE_TEMPLATE = (
 )
 
 
-def check(command: str, output: str):
+def check(command: str, output: str, now: float | None = None):
     """Record this Bash run and return a nudge line when the streak warrants it.
 
     Returns None when there is nothing to say (the overwhelmingly common case).
     Never raises; never denies — the caller decides how to surface the nudge.
+    ``now`` is injectable for tests and defaults to ``time.time()``.
     """
     try:
         if not command or not output or len(output) < MIN_OUTPUT_CHARS:
@@ -66,10 +67,18 @@ def check(command: str, output: str):
 
         from session_store import SessionStore
         from delta_diff import content_hash
+        from archive_result import _redact_credentials
 
-        cmd_h = content_hash(command.strip())
+        stripped = command.strip()
+        cmd_h = content_hash(stripped)
         out_h = content_hash(output)
-        now = time.time()
+        # Redact before persisting, mirroring the cross-turn dedup path
+        # (archive_result._redact_credentials): the command line can carry
+        # inline secrets (-pPASSWORD, an auth header, a connection string) and
+        # must never reach the on-disk streak store. The label shown to the
+        # agent stays on the live (unredacted) command the agent already sees.
+        safe_command = _redact_credentials(stripped)[:500]
+        now = time.time() if now is None else now
         store = SessionStore(session_id)
         try:
             prior = store.get_command_streak(cmd_h)
@@ -79,25 +88,24 @@ def check(command: str, output: str):
                 and now - float(prior.get("last_ts") or 0) <= STALE_SECONDS
             ):
                 streak = int(prior.get("streak") or 0) + 1
-                nudged_at = prior.get("nudged_streak")
-                nudged_at = int(nudged_at) if nudged_at is not None else None
+                nudged_streak = prior.get("nudged_streak")
+                nudged_streak = int(nudged_streak) if nudged_streak is not None else None
             else:
                 # Material change (different output), a new command, or a stale
                 # streak: start over. This is the "never fire when the output
                 # changed materially" guarantee.
                 streak = 1
-                nudged_at = None
+                nudged_streak = None
 
             fire = streak >= STREAK_THRESHOLD and (
-                nudged_at is None or streak >= nudged_at + REPEAT_AFTER
+                nudged_streak is None or streak >= nudged_streak + REPEAT_AFTER
             )
             store.upsert_command_streak(
-                cmd_h, command, out_h, streak, streak if fire else nudged_at
+                cmd_h, safe_command, out_h, streak, streak if fire else nudged_streak, now
             )
             if not fire:
                 return None
-            label = command.strip()[:60]
-            return _NUDGE_TEMPLATE.format(label=label, streak=streak)
+            return _NUDGE_TEMPLATE.format(label=stripped[:60], streak=streak)
         finally:
             store.close()
     except Exception:

@@ -89,29 +89,19 @@ def main() -> None:
     if not command:
         return
 
-    # Runtime thrash guard (Track F lever 1): record EVERY Bash run and, when
-    # the same command has produced byte-identical output >= 3 times in a row,
-    # append a one-line nudge. Nudge-only: the command already ran, nothing is
-    # denied, and any material output change resets the streak inside
-    # thrash_guard.check(). Runs BEFORE every eligibility gate below because
-    # thrash is exactly the small-output / failing-command case those gates
-    # skip, and before the already-compressed marker check so PreToolUse-
-    # compressed repeats are counted too.
+    # Runtime thrash guard: record EVERY Bash run and, when the same command
+    # has produced byte-identical output >= 3 times in a row, append a one-line
+    # nudge. Nudge-only: the command already ran, nothing is denied, and any
+    # material output change resets the streak inside thrash_guard.check().
+    # Runs BEFORE every eligibility gate below because thrash is exactly the
+    # small-output / failing-command case those gates skip, and before the
+    # already-compressed marker check so PreToolUse-compressed repeats are
+    # counted too.
     try:
         from thrash_guard import check as _thrash_check
         _nudge = _thrash_check(command, stdout)
         if _nudge:
-            print(json.dumps({
-                "hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
-                    "updatedToolOutput": {
-                        "stdout": stdout + "\n" + _nudge,
-                        "stderr": stderr,
-                        "interrupted": False,
-                        "isImage": False,
-                    },
-                },
-            }))
+            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
             return
     except Exception:
         pass  # Fail open: the raw output stands
@@ -228,18 +218,7 @@ def main() -> None:
         _log_event(command, cleaned_stdout, compressed, feature=_log_feature)
 
         # Emit updatedToolOutput to replace what Claude sees
-        response = {
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "updatedToolOutput": {
-                    "stdout": compressed,
-                    "stderr": stderr,
-                    "interrupted": False,
-                    "isImage": False,
-                },
-            },
-        }
-        print(json.dumps(response))
+        _emit_updated_tool_output(compressed, stderr)
 
     except Exception:
         return  # Fail open: any error → pass through raw
@@ -445,6 +424,26 @@ def _log_event(command: str, original: str, compressed: str,
         )
     except Exception:
         pass
+
+
+def _emit_updated_tool_output(stdout: str, stderr: str) -> None:
+    """Emit the PostToolUse updatedToolOutput envelope.
+
+    Both the thrash nudge and the compression path replace what the agent sees
+    through the same envelope, so the hook event name and the four output-shape
+    fields (stdout, stderr, interrupted, isImage) live in exactly one place.
+    """
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "updatedToolOutput": {
+                "stdout": stdout,
+                "stderr": stderr,
+                "interrupted": False,
+                "isImage": False,
+            },
+        },
+    }))
 
 
 if __name__ == "__main__":

@@ -708,6 +708,7 @@ class SessionStore:
         output_hash: str,
         streak: int,
         nudged_streak: Optional[int],
+        last_ts: float,
     ) -> None:
         if self._is_over_size_cap():
             return
@@ -720,7 +721,7 @@ class SessionStore:
             """,
             (
                 command_hash, command_text[:500], output_hash, streak,
-                nudged_streak, time.time(),
+                nudged_streak, last_ts,
             ),
         )
         conn.commit()
