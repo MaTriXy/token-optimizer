@@ -27,6 +27,12 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     ("Stripe live key",         re.compile(r"sk_live_[a-zA-Z0-9]{24,}")),
     ("Stripe restricted key",   re.compile(r"rk_live_[a-zA-Z0-9]{24,}")),
     ("HuggingFace token",       re.compile(r"hf_[a-zA-Z0-9]{34}")),
+    # M-16: negative lookahead so the Bearer pattern doesn't re-match text
+    # inside its own redaction placeholder [CREDENTIAL REDACTED: Bearer token].
+    # The lookahead checks the text BEFORE Bearer, but Python regex doesn't
+    # support variable-width lookbehinds. Instead, redact_credentials protects
+    # placeholders with a sentinel before running patterns. The lookahead here
+    # is a defense-in-depth for direct pattern.search() callers.
     ("Bearer token",            re.compile(r"Bearer\s+[a-zA-Z0-9\-._~+/]+=*", re.I)),
     ("Google API key",          re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
     ("Google OAuth token",      re.compile(r"ya29\.[0-9A-Za-z_\-]{20,}")),
@@ -49,6 +55,25 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
         r"(?P<keep>[?&#;](?:authorization|access[_-]?token|refresh[_-]?token|client[_-]?secret"
         r"|session[_-]?token|id[_-]?token|api[_-]?key|sessionid|session|password|passwd|signature"
         r"|secret|bearer|token|auth|sig|pwd|key|jwt)=)(?!\[CREDENTIAL REDACTED:)[^&#;\s\"'<>]+",
+        re.I,
+    )),
+    # M-12: mysql -p<password> (inline password after -p with no space).
+    # The -p flag is special: the password immediately follows with no = or space.
+    ("MySQL password flag",     re.compile(r"(?P<keep>\bmysql\s+.*?-p)(?!\s)(?!\[CREDENTIAL REDACTED:)[^\s\"']+")),
+    # M-12: PGPASSWORD=, MYSQL_PWD=, and similar *_PASSWORD= / *_PWD= env assignments.
+    # These appear as shell command prefixes (FOO=bar cmd ...) or in config output.
+    ("Database env password",   re.compile(
+        r"(?P<keep>\b(?:PGPASSWORD|MYSQL_PWD|REDIS_PASSWORD|MONGO_PASSWORD|DB_PASSWORD"
+        r"|DATABASE_PASSWORD|PGPASSWD)=[\"\']?)(?!\[CREDENTIAL REDACTED:)[^\s\"'\n]+",
+        re.I,
+    )),
+    # M-12: AWS secret access key (40-char base64). Distinct from the access key
+    # (AKIA prefix). Secret keys are mixed-case base64, 40 chars, no prefix.
+    # Use a context prefix to avoid false positives on random 40-char base64
+    # strings. No trailing \b because the secret may end with = or + (non-word).
+    ("AWS secret key",          re.compile(
+        r"(?P<keep>\b(?:aws_secret|secret_access_key|SecretAccessKey)[\"\'\s:=]+)"
+        r"(?!\[CREDENTIAL REDACTED:)[A-Za-z0-9/+=]{40}",
         re.I,
     )),
 ]
@@ -89,6 +114,11 @@ _CREDENTIAL_PREFIXES: Tuple[str, ...] = (
     "postgres://", "postgresql://", "mysql://", "mongodb://",
     "mongodb+srv://", "redis://",  # database URI
     "http://", "https://",  # basic auth URL (coarse, but covers the pattern)
+    # M-12: new credential prefixes
+    "mysql ",  # mysql -p<password>
+    "PGPASSWORD=", "MYSQL_PWD=", "REDIS_PASSWORD=", "MONGO_PASSWORD=",
+    "DB_PASSWORD=", "DATABASE_PASSWORD=", "PGPASSWD=",
+    "aws_secret", "secret_access_key", "SecretAccessKey",
 )
 # URL auth param parameter names (lowercase, checked case-insensitively).
 _URL_AUTH_PARAM_NAMES: Tuple[str, ...] = (
@@ -131,6 +161,12 @@ def scan_for_credentials(text: str) -> List[Tuple[str, str, int]]:
     return results
 
 
+# M-16: regex to find already-redacted placeholders so they can be protected
+# from re-matching during a second redaction pass.
+_PLACEHOLDER_RE = re.compile(r"\[CREDENTIAL REDACTED: [^\]]+\]")
+_PLACEHOLDER_SENTINEL = "\x00\x01REDACTED\x00\x01"
+
+
 def redact_credentials(text: str) -> str:
     """Replace credential matches with [CREDENTIAL REDACTED: <type>] placeholders.
 
@@ -139,19 +175,39 @@ def redact_credentials(text: str) -> str:
     value after it is replaced. Patterns without a `keep` group redact the whole
     match, unchanged.
 
-    H-8: uses a fast prefix scan to skip all 23 re.sub() calls when the text
+    H-8: uses a fast prefix scan to skip all re.sub() calls when the text
     contains no credential prefixes (the common case for clean command output).
     This makes clean text O(n) with a tiny constant instead of O(n × 23) regex
     passes. Text with credentials still gets the full sequential redaction,
     preserving correctness and the existing two-phase ordering (standalone
     credentials before URL auth params, so the negative lookahead works).
+
+    M-16: protects already-redacted [CREDENTIAL REDACTED: ...] placeholders
+    from re-matching by replacing them with a sentinel before redaction and
+    restoring them after. This fixes the Bearer pattern re-matching "Bearer
+    token" inside its own placeholder, which nested placeholders on re-runs.
     """
+    # M-16: protect existing placeholders from re-matching.
+    placeholders = []
+    def _save_placeholder(m):
+        placeholders.append(m.group(0))
+        return _PLACEHOLDER_SENTINEL
+    if "[CREDENTIAL REDACTED:" in text:
+        text = _PLACEHOLDER_RE.sub(_save_placeholder, text)
+
     # H-8: fast path — skip all regex work if no credential prefix is present.
     if not _text_may_contain_credentials(text):
+        # Restore placeholders before returning.
+        for ph in placeholders:
+            text = text.replace(_PLACEHOLDER_SENTINEL, ph, 1)
         return text
     for label, pat in CREDENTIAL_PATTERNS:
         if "keep" in pat.groupindex:
             text = pat.sub(rf"\g<keep>[CREDENTIAL REDACTED: {label}]", text)
         else:
             text = pat.sub(f"[CREDENTIAL REDACTED: {label}]", text)
+
+    # M-16: restore protected placeholders.
+    for ph in placeholders:
+        text = text.replace(_PLACEHOLDER_SENTINEL, ph, 1)
     return text

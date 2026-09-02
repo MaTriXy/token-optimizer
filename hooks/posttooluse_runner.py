@@ -393,6 +393,7 @@ def _handler_deadline(seconds: float):
         yield
     finally:
         elapsed = time.monotonic() - started
+        outer_delivered = False
         try:
             setitimer(timer_kind, 0)
             signal.signal(alarm_signal, previous_handler)
@@ -409,10 +410,16 @@ def _handler_deadline(seconds: float):
                     # via the just-restored outer handler. (Skipped when the
                     # previous handler is SIG_DFL/SIG_IGN, so we never turn an
                     # expired timer into a process-killing default SIGALRM.)
+                    # M-13: set a flag so the inner raise below is skipped —
+                    # otherwise both inner and outer budgets report exhaustion
+                    # for a single invocation (double "budget exhausted" stderr).
                     os.kill(os.getpid(), alarm_signal)
+                    outer_delivered = True
         except (OSError, ValueError):
             pass
-        if elapsed >= seconds:
+        # M-13: skip the inner raise if the outer budget was already delivered
+        # via os.kill above. The outer handler already raised _HandlerBudgetExceeded.
+        if elapsed >= seconds and not outer_delivered:
             raise _HandlerBudgetExceeded(seconds)
 
 

@@ -430,6 +430,7 @@ def test_cleanup_period_and_statusline_writers_merge_stale_reads(measure):
 
     def writer(key, value):
         try:
+            saw_true = False  # M-11: track that _write_settings_atomic returned True
             for attempt in range(50):
                 stale, ok = mod._read_settings_for_write()
                 assert ok
@@ -438,8 +439,14 @@ def test_cleanup_period_and_statusline_writers_merge_stale_reads(measure):
                 if attempt == 0:
                     barrier.wait(timeout=3)
                 if mod._write_settings_atomic(stale):
+                    saw_true = True
                     return
                 time.sleep(0.01)
+            # M-11: assert the writer observed at least one True return across
+            # retries. A regression where _write_settings_atomic returns False
+            # on success would now be caught.
+            if not saw_true:
+                errors.append(f"{key}: _write_settings_atomic never returned True")
             errors.append(f"{key}: write never landed after fresh-read retries")
         except BaseException as exc:  # pragma: no cover - surfaced below
             errors.append(f"{key}: {exc!r}")

@@ -30,6 +30,7 @@ intentionally out of scope.
 
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 import time
@@ -107,7 +108,10 @@ def _ro_connect(path: Path) -> Iterator[sqlite3.Connection]:
     # could drop or override mode=ro (opening the wrong DB, or read-write).
     # as_uri() percent-encodes those, keeping the whole path in the path
     # component. (Discovered DB paths are absolute, which as_uri() requires.)
-    db_uri = Path(path).as_uri()
+    # M-3: as_uri() raises ValueError on relative paths. Resolve first so a
+    # relative CODEX_HOME doesn't propagate an uncaught ValueError past
+    # callers that only catch (sqlite3.Error, OSError).
+    db_uri = Path(path).resolve().as_uri()
     conn = sqlite3.connect(f"{db_uri}?mode=ro", uri=True, timeout=_BUSY_TIMEOUT_SECONDS)
     try:
         # Defense-in-depth: `mode=ro` blocks writes to this DB but not ATTACH;
@@ -164,9 +168,16 @@ def _normalize_ms(updated_at_ms: Any, updated_at: Any) -> int | None:
     would be misread as decades stale and falsely flagged as leaked.
     """
     _MS_2001 = 1_000_000_000_000  # ms epoch for ~2001; below this = seconds
+    # M-2: float('inf') passes the > 0 check but int(float('inf')) raises
+    # OverflowError, which is not caught by any caller's try/except. Guard
+    # with math.isfinite() so inf and nan return None instead of crashing.
     if isinstance(updated_at_ms, (int, float)) and updated_at_ms > 0:
+        if not math.isfinite(updated_at_ms):
+            return None
         return int(updated_at_ms) if updated_at_ms >= _MS_2001 else int(updated_at_ms * 1000)
     if isinstance(updated_at, (int, float)) and updated_at > 0:
+        if not math.isfinite(updated_at):
+            return None
         return int(updated_at) if updated_at >= _MS_2001 else int(updated_at * 1000)
     return None
 

@@ -370,7 +370,18 @@ def _crossturn_dedup(command: str, output: str):
             return ref if len(ref) < len(output) * 0.85 else None
         finally:
             store.close()
-    except Exception:
+    except Exception as exc:
+        # M-15: log the exception type (not the message, which may contain
+        # unredacted text) so an admin can distinguish "no prior run" from
+        # "redaction failed" from logs. Fail-open: still return None.
+        try:
+            sys.stderr.write(
+                f"[Token Optimizer] crossturn dedup failed: "
+                f"{type(exc).__name__}\n"
+            )
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            pass
         return None
 
 
