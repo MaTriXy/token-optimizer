@@ -109,6 +109,9 @@ def test_probe_fires_all_installed_events(monkeypatch, tmp_path):
 
     assert [r["event"] for r in results] == list(_WIRED)
     assert all(r["status"] == "ok" for r in results), results
-    # The probe genuinely ran the bridge: the observed-events ledger now exists.
+    # The probe genuinely ran the bridge, but its writes are isolated to a
+    # throwaway cursor home: replaying documented payloads must prove the hooks
+    # can fire WITHOUT contaminating real session data with synthetic rows.
     ledger = cur / "token-optimizer" / "observed-events.jsonl"
-    assert ledger.exists()
+    assert not ledger.exists()
+    assert not (cur / "token-optimizer" / "sessions").exists()

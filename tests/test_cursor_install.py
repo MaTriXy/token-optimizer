@@ -121,3 +121,59 @@ def test_is_ours_matches_bridge_path(home):
     assert ci._is_ours({"command": f"python3 {bridge_path} stop"}, bridge_path) is True
     assert ci._is_ours(_foreign_entry(), bridge_path) is False
     assert ci._is_ours("not-a-dict", bridge_path) is False
+
+
+def test_install_writes_measure_locator(home):
+    home.mkdir()
+    ci.install(home=home)
+
+    locator = ci._plugin_dir(home) / ci._MEASURE_LOCATOR_NAME
+    assert locator.exists()
+    target = Path(locator.read_text(encoding="utf-8").strip())
+    assert target.is_file() and target.name == "measure.py"
+
+
+def test_install_aborts_on_corrupt_hooks_json(home):
+    home.mkdir()
+    hooks_path = ci._host_hooks_path(home)
+    hooks_path.write_text("{ not valid json", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        ci.install(home=home)
+    # The shared file must be left byte-for-byte intact, never clobbered.
+    assert hooks_path.read_text(encoding="utf-8") == "{ not valid json"
+
+
+def test_install_aborts_on_non_object_hooks_root(home):
+    home.mkdir()
+    hooks_path = ci._host_hooks_path(home)
+    hooks_path.write_text("[1, 2, 3]", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="non-object root"):
+        ci.install(home=home)
+    assert hooks_path.read_text(encoding="utf-8") == "[1, 2, 3]"
+
+
+def test_install_aborts_on_copy_failure_before_touching_hooks(home, monkeypatch):
+    home.mkdir()
+    hooks_path = ci._host_hooks_path(home)
+    hooks_path.write_text(json.dumps({"version": 1, "hooks": {"stop": [_foreign_entry()]}}),
+                          encoding="utf-8")
+
+    def _boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ci.shutil, "copy2", _boom)
+    with pytest.raises(RuntimeError, match="failed copying"):
+        ci.install(home=home)
+    # Abort happened before the read-merge-write: foreign entries untouched.
+    data = json.loads(hooks_path.read_text(encoding="utf-8"))
+    assert data["hooks"]["stop"] == [_foreign_entry()]
+
+
+def test_install_aborts_on_missing_payload_module(home, monkeypatch):
+    home.mkdir()
+    monkeypatch.setattr(ci, "_PAYLOAD_MODULES", ("cursor_hook_bridge.py", "nonexistent.py"))
+    with pytest.raises(RuntimeError, match="missing payload modules"):
+        ci.install(home=home)
+    assert ci._host_hooks_path(home).exists() is False

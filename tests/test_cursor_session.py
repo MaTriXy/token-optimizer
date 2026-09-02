@@ -125,3 +125,23 @@ def test_non_dict_and_missing_id_return_none():
     assert cursor_session.normalize_session([]) is None
     assert cursor_session.normalize_session({}) is None
     assert cursor_session.normalize_session({"turns": 1}) is None
+
+
+@pytest.mark.parametrize(
+    "model,expected",
+    [
+        ("gpt-5", 128_000),
+        ("gpt-4.1", 128_000),
+        ("gpt-4o", 128_000),
+        ("claude-sonnet-4.5", 200_000),
+        ("gemini-2.5-pro", 128_000),
+        ("o3", 200_000),
+        ("o4-mini", 200_000),
+        ("some-unknown-model", 128_000),
+        ("", 128_000),
+        (None, 128_000),
+        ("CLAUDE-OPUS", 200_000),  # case-insensitive prefix match
+    ],
+)
+def test_context_window_for_model(model, expected):
+    assert cursor_session.context_window_for_model(model) == expected

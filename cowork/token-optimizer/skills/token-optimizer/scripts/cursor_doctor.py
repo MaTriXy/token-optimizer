@@ -25,9 +25,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -181,6 +183,73 @@ def _payload_checks() -> list:
     return checks
 
 
+def _locator_checks() -> list:
+    """The bridge's detached rollup/dashboard spawns resolve measure.py via a
+    one-line ``measure-path`` locator (measure.py is never copied into the
+    plugin dir). Verify it exists and names a real file."""
+    checks = []
+    plugin_dir = cursor_home() / "token-optimizer" / "plugin"
+    locator = plugin_dir / "measure-path"
+    if not locator.exists():
+        checks.append(
+            _check(
+                "warn",
+                "measure-path locator",
+                f"{locator} missing (rollups paused).",
+                "Run `python3 measure.py cursor-install` to rewrite it.",
+            )
+        )
+        return checks
+    try:
+        target = Path(locator.read_text(encoding="utf-8").strip())
+    except OSError:
+        target = None
+    if target is not None and target.is_file():
+        checks.append(_check("ok", "measure-path locator", str(target)))
+    else:
+        checks.append(
+            _check(
+                "fail",
+                "measure-path locator",
+                f"{locator} does not name an existing measure.py.",
+                "Run `python3 measure.py cursor-install` to rewrite it.",
+            )
+        )
+    return checks
+
+
+def _persisted_python_check() -> list:
+    """The persisted hook command must use an absolute trusted interpreter,
+    never a bare ``python3`` (PATH-hijack risk). Parse our command and verify."""
+    checks = []
+    commands = _installed_commands()
+    if not commands:
+        checks.append(
+            _check("warn", "persisted python", "No wired hook command to inspect.",
+                   "Run `python3 measure.py cursor-install`.")
+        )
+        return checks
+    for event, cmd in commands.items():
+        try:
+            tokens = shlex.split(cmd)
+        except ValueError:
+            continue
+        # command = "TOKEN_OPTIMIZER_RUNTIME=cursor <py> <bridge> <event>"
+        py = tokens[1] if len(tokens) > 1 and tokens[0].startswith("TOKEN_OPTIMIZER_RUNTIME=") else ""
+        if py.startswith("/") and Path(py).is_file():
+            checks.append(_check("ok", "persisted python", py))
+            return checks
+    checks.append(
+        _check(
+            "fail",
+            "persisted python",
+            "The wired hook command does not use an absolute python path.",
+            "Run `python3 measure.py cursor-install` to re-persist a trusted interpreter.",
+        )
+    )
+    return checks
+
+
 def _read_observed(path: Path) -> list:
     if not path.exists():
         return []
@@ -277,6 +346,8 @@ def run_checks() -> list:
     checks.extend(_home_checks())
     checks.extend(_hook_config_checks())
     checks.extend(_payload_checks())
+    checks.extend(_locator_checks())
+    checks.extend(_persisted_python_check())
     checks.extend(_observed_checks())
     checks.extend(_data_checks())
     checks.append(_daemon_check())
@@ -356,12 +427,22 @@ def _installed_commands() -> dict:
     return out
 
 
-def _run_probe_command(command: str, payload: dict) -> dict:
-    """Run one installed command under /bin/sh -c with the payload on stdin."""
+def _run_probe_command(command: str, payload: dict, probe_home: Path) -> dict:
+    """Run one installed command under /bin/sh -c with the payload on stdin.
+
+    ``probe_home`` redirects the bridge's data writes (tallies, observed-events)
+    to a throwaway dir so replaying the documented payloads proves the hooks can
+    fire without contaminating real session data with synthetic probe rows.
+    """
     if sys.platform == "win32":
         return {"event": None, "status": "skip", "detail": "probe is POSIX-only (/bin/sh -c)"}
     env = dict(os.environ)
-    env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "TOKEN_OPTIMIZER_PROBE": "1"})
+    env.update({
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "TOKEN_OPTIMIZER_PROBE": "1",
+        "TOKEN_OPTIMIZER_CURSOR_HOME": str(probe_home),
+    })
     try:
         proc = subprocess.run(
             ["/bin/sh", "-c", command],
@@ -387,15 +468,22 @@ def _run_probe_command(command: str, payload: dict) -> dict:
 def run_probe() -> list:
     results = []
     commands = _installed_commands()
-    for event, payload in _probe_payloads().items():
-        command = commands.get(event)
-        if not command:
-            results.append({"event": event, "status": "skip",
-                            "detail": "no cursor hook entry installed for this event"})
-            continue
-        row = _run_probe_command(command, payload)
-        row["event"] = event
-        results.append(row)
+    # Throwaway data home (under $HOME so runtime_env's strict guard accepts it)
+    # so probe replays never write synthetic tallies/observed-events into the
+    # real ~/.cursor/token-optimizer data dir.
+    probe_home = Path(tempfile.mkdtemp(prefix=".cursor-to-probe-", dir=Path.home()))
+    try:
+        for event, payload in _probe_payloads().items():
+            command = commands.get(event)
+            if not command:
+                results.append({"event": event, "status": "skip",
+                                "detail": "no cursor hook entry installed for this event"})
+                continue
+            row = _run_probe_command(command, payload, probe_home)
+            row["event"] = event
+            results.append(row)
+    finally:
+        shutil.rmtree(probe_home, ignore_errors=True)
     return results
 
 

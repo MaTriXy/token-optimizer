@@ -188,6 +188,18 @@ def test_pre_tool_use_non_shell_emits_nothing_records_event(cursor_dir, monkeypa
     assert _read_last_observed(cursor_dir)["tool_name"] == "Read"
 
 
+def test_pre_tool_use_dangerous_command_emits_nothing(cursor_dir, monkeypatch, capsys):
+    # Fail closed: a whitelisted command with dangerous chars must emit NOTHING
+    # (no permission/updated_input), and must not record a rewrite attempt.
+    _fake_bash(monkeypatch, whitelisted=True, dangerous=True)
+    monkeypatch.setattr(bridge, "_COMPRESS_AVAILABLE", True)
+
+    bridge.handle_pre_tool_use(_shell_payload("git status; rm -rf /"))
+
+    assert capsys.readouterr().out == ""
+    assert "rewrite" not in _read_last_observed(cursor_dir)
+
+
 # ---------------------------------------------------------------------------
 # postToolUse rewrite ledger
 # ---------------------------------------------------------------------------
@@ -304,6 +316,38 @@ def test_stop_throttles_rollup_and_dashboard(cursor_dir, monkeypatch):
     # A second stop inside the 120s window must not spawn again.
     bridge.handle_stop(payload)
     assert len(calls) == 2
+
+
+def test_stop_rollup_due_fails_closed_when_write_fails(cursor_dir, monkeypatch):
+    # If the throttle-state write fails (disk full / read-only data dir), the
+    # throttle must NOT open the floodgate: _stop_rollup_due returns False so
+    # handle_stop spawns nothing, instead of spawning on every stop.
+    monkeypatch.setattr(bridge, "_atomic_write_json", lambda path, obj: False)
+    assert bridge._stop_rollup_due() is False
+
+
+def test_locate_measure_py_resolves_via_locator(cursor_dir, monkeypatch, tmp_path):
+    # After install, measure.py is NOT copied next to the bridge; a one-line
+    # measure-path locator names the canonical measure.py in the checkout.
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    real_measure = tmp_path / "measure.py"
+    real_measure.write_text("", encoding="utf-8")
+    (plugin / "measure-path").write_text(f"{real_measure}\n", encoding="utf-8")
+
+    monkeypatch.setattr(bridge, "_SCRIPT_DIR", plugin)
+    monkeypatch.setattr(bridge, "_MEASURE_LOCATOR", plugin / "measure-path")
+
+    assert bridge._locate_measure_py() == real_measure
+
+
+def test_locate_measure_py_returns_none_without_measure(cursor_dir, monkeypatch, tmp_path):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    monkeypatch.setattr(bridge, "_SCRIPT_DIR", plugin)
+    monkeypatch.setattr(bridge, "_MEASURE_LOCATOR", plugin / "measure-path")
+
+    assert bridge._locate_measure_py() is None
 
 
 def test_session_end_spawns_unthrottled(cursor_dir, monkeypatch):

@@ -52,8 +52,9 @@ Audits a Claude Code or Codex setup, identifies context window waste, implements
 >   On OpenCode, Token Optimizer runs as a native plugin; the Claude audit must not run.
 > - Prints **"… GitHub Copilot runtime detected."** → **STOP** and follow the Copilot guidance for the
 >   same reason.
-> - Prints **"… Cursor runtime detected."** → **STOP** and follow the Cursor guidance for the
->   same reason.
+> - Prints **"… Cursor runtime detected."** → **STOP. Do not resolve `measure.py`, do not run any
+>   phase below.** Read `references/cursor-workflow.md` (bundled with this skill) and follow it.
+>   On Cursor, Token Optimizer runs through the Cursor hook bridge; the Claude audit must not run.
 > - Prints nothing → continue to resolve `$MEASURE_PY` below. This env-only pre-gate does NOT
 >   check the process tree, so OpenCode launched without exporting `OPENCODE_*` env vars (e.g. a
 >   bare `opencode` binary or `node /path/to/opencode`) prints nothing here. The
@@ -256,6 +257,7 @@ work, check what we discussed last session"), the continuity hook reconstructs a
 | Context | Read |
 |---------|------|
 | Codex runtime | `references/codex-workflow.md` |
+| Cursor runtime | `references/cursor-workflow.md` |
 | Phase 0 setup details | `references/phase0-setup.md` |
 | Phase 1-2 agent prompts | `references/agent-prompts.md`, `references/token-flow-architecture.md` |
 | Phase 3 presentation | `references/presentation-workflow.md` |

@@ -256,13 +256,13 @@ def normalize_session(raw: dict) -> Optional[dict]:
     version = raw.get("cursor_version")
     surface = surface_from_version(version)
 
+    roots = raw.get("workspace_roots")
+    roots_list = roots if isinstance(roots, list) else None
     root = None
     if isinstance(raw.get("cwd"), str) and raw["cwd"]:
         root = raw["cwd"]
-    else:
-        roots = raw.get("workspace_roots")
-        if isinstance(roots, list) and roots and isinstance(roots[0], str):
-            root = roots[0]
+    elif roots_list and isinstance(roots_list[0], str):
+        root = roots_list[0]
 
     quality = _quality(total_input, total_output, message_count, model, ctx_window)
 
@@ -283,6 +283,7 @@ def normalize_session(raw: dict) -> Optional[dict]:
             "token_source": token_source,
             "version": version,
             "cwd": root,
+            "workspace_roots": roots_list,
             "incomplete": incomplete,
             "end_reason": end_reason,
             "compactions": compactions_count,

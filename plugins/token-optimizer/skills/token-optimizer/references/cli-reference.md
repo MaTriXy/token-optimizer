@@ -63,6 +63,15 @@
 - `measure.py codex-skill [enable|disable] NAME`
 - `measure.py codex-mcp [enable|disable] NAME`
 
+## Cursor Commands
+
+- `measure.py cursor-install` -- Wire Token Optimizer into `~/.cursor/hooks.json` (read-merge-write)
+- `measure.py cursor-uninstall` -- Remove only Token Optimizer's hook entries + payload
+- `measure.py cursor-doctor [--json]` -- Readiness report (binary, home, hooks, payload, data planes, daemon port 24846)
+- `measure.py cursor-doctor --probe` -- Replay each wired event through the installed command
+- `TOKEN_OPTIMIZER_RUNTIME=cursor measure.py cursor-summary` -- Token/quality session summary (no cost headline by design)
+- `TOKEN_OPTIMIZER_RUNTIME=cursor measure.py cursor-rollup` -- Ingest Cursor sessions into the trends DB
+
 ## Feature Controls
 
 ### Read-Cache

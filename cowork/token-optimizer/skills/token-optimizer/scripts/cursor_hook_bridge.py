@@ -512,13 +512,36 @@ def _measure_env(interactive=False):
     return env
 
 
+# The installer does NOT copy measure.py into the plugin dir (version-drift
+# risk); it writes a one-line "measure-path" locator next to this bridge naming
+# the canonical measure.py in the checkout. Resolution order: a sibling
+# measure.py (dev/test checkout), then the locator. Mirrors
+# hermes_hook_bridge._locate_measure_py.
+_MEASURE_LOCATOR = _SCRIPT_DIR / "measure-path"
+
+
+def _locate_measure_py():
+    """Return the path to measure.py, or None if not found (rollups paused)."""
+    sibling = _SCRIPT_DIR / "measure.py"
+    if sibling.is_file():
+        return sibling
+    try:
+        if _MEASURE_LOCATOR.is_file():
+            located = Path(_MEASURE_LOCATOR.read_text(encoding="utf-8").strip())
+            if located.is_file():
+                return located
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def _spawn_rollup():
     # cursor-doctor --probe replays the installed command to prove it fires;
     # it must not trigger a real detached rollup/dashboard as a side effect.
     if os.environ.get("TOKEN_OPTIMIZER_PROBE") == "1":
         return
-    measure = _SCRIPT_DIR / "measure.py"
-    if not measure.exists():
+    measure = _locate_measure_py()
+    if measure is None:
         return
     try:
         spawn_detached(
@@ -535,8 +558,8 @@ def _spawn_dashboard():
     # Same probe guard as _spawn_rollup(): replay must not spawn detached work.
     if os.environ.get("TOKEN_OPTIMIZER_PROBE") == "1":
         return
-    measure = _SCRIPT_DIR / "measure.py"
-    if not measure.exists():
+    measure = _locate_measure_py()
+    if measure is None:
         return
     try:
         spawn_detached(
@@ -566,8 +589,11 @@ def _stop_rollup_due():
         last = None
     if last is not None and now - last < _STOP_ROLLUP_SECS:
         return False
-    _atomic_write_json(state, {"last": now})
-    return True
+    # Fail closed: if the throttle-state write fails (disk full, read-only data
+    # dir), do NOT spawn — otherwise every stop would spawn a rollup+dashboard
+    # storm precisely under the degraded conditions the throttle is meant to
+    # contain. _atomic_write_json returns True only on a successful write.
+    return _atomic_write_json(state, {"last": now})
 
 
 def _sweep_stale_locks():

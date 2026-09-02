@@ -281,6 +281,7 @@ def _cursor_audit_notice() -> None:
     print("  measure.py cursor-rollup     — collect sessions into trends")
     print("  measure.py cursor-doctor     — readiness + hook firing probe")
     print("  measure.py cursor-install    — wire Token Optimizer into ~/.cursor/hooks.json")
+    print("  measure.py cursor-uninstall  — remove Token Optimizer's Cursor entries")
     print()
     print("To force this skill onto a specific runtime, set TOKEN_OPTIMIZER_RUNTIME.")
 
@@ -5535,10 +5536,10 @@ def _collect_cursor_hook_status_for_dashboard():
             "uninstall_cmd": doctor_cmd,
         },
         "cursor_data": {
-            "installed": _ok("transcript data") or _ok("state.vscdb data"),
+            "installed": _ok("IDE token plane") or _ok("CLI transcript plane"),
             "partial": any(
                 by_name.get(n, {}).get("status") == "warn"
-                for n in ("transcript data", "state.vscdb data")
+                for n in ("IDE token plane", "CLI transcript plane")
             ),
             "label": "Cursor Session Data",
             "description": "Best-effort token counts from state.vscdb (IDE) with a chars-over-four transcript estimate as fallback; the hook tally is always authoritative for calls/turns/compactions.",
@@ -19095,12 +19096,21 @@ def _write_cursor_restore_context(sessions, quiet=False):
 
         from runtime_env import cursor_home as _ch  # noqa: PLC0415
 
-        # Group the most recent COMPLETE session per workspace root (cwd).
+        # Group the most recent COMPLETE session per workspace root. The key
+        # must match what the sessionStart hook looks up: workspace_roots[0]
+        # (the repo root Cursor exports) first, then cwd as a fallback. Using
+        # cwd alone would key the file by a tool's working_directory (often a
+        # subdirectory) while sessionStart looks up the repo root — a silent
+        # never-match.
         by_ws: dict = {}
         for s in sessions:
             if s.get("incomplete"):
                 continue  # never seed continuity from a crash/kill session
-            root = str(s.get("cwd") or s.get("slug") or "")
+            wroots = s.get("workspace_roots")
+            if isinstance(wroots, list) and wroots and isinstance(wroots[0], str) and wroots[0]:
+                root = wroots[0]
+            else:
+                root = str(s.get("cwd") or s.get("slug") or "")
             if not root:
                 continue
             by_ws.setdefault(root, []).append(s)
@@ -19155,7 +19165,7 @@ def _cursor_summary():
     if not normalized:
         print()
         print("  No Cursor sessions found yet.")
-        print("  Upgrade to ships-hooks Cursor, then run:")
+        print("  Upgrade to a Cursor build with hook support, then run:")
         print("    bash install.sh --cursor")
         print("  and start a session. The hook tally appears after the first tool call.")
         return

@@ -58,6 +58,14 @@ _PAYLOAD_MODULES = (
     "hermes_session.py",
 )
 
+# One-line locator written next to the bridge, naming the canonical measure.py
+# in the checkout. The bridge's detached rollup/dashboard spawns resolve
+# measure.py through this locator because measure.py itself is NOT copied into
+# the plugin dir (version-drift risk — nothing refreshes a plugin-dir copy on
+# update; the checkout's measure.py stays the single source). Mirrors
+# hermes_install._MEASURE_LOCATOR_NAME.
+_MEASURE_LOCATOR_NAME = "measure-path"
+
 
 def _plugin_dir(root: Path) -> Path:
     return root / "token-optimizer" / "plugin"
@@ -166,13 +174,25 @@ def _is_ours(entry, bridge_path: Path) -> bool:
 
 
 def _read_hooks(path: Path) -> dict:
+    """Read hooks.json. Missing -> {} (fresh install). Present but unreadable,
+    invalid, or a non-object root -> RuntimeError: Cursor has ONE shared
+    hooks.json, so silently treating a corrupt file as empty would clobber
+    other tools' (and Cursor's own) entries on the next write."""
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError, ValueError):
-        return {}
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"cannot read {path}: {exc}") from exc
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeError(f"{path} is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"{path} has a non-object root; refusing to overwrite it."
+        )
+    return data
 
 
 def _write_hooks(path: Path, data: dict) -> None:
@@ -220,6 +240,22 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
             "missing payload modules in this checkout: "
             f"{actions['skipped']} — refusing to wire hooks against an incomplete bridge."
         )
+
+    # Write the measure.py locator so the bridge's detached rollup/dashboard
+    # spawns resolve the canonical measure.py (measure.py is never copied into
+    # the plugin dir — version-drift risk). Only written when measure.py exists
+    # next to the installer; the bridge degrades to "rollups paused" otherwise.
+    measure_py = _SCRIPT_DIR / "measure.py"
+    if measure_py.is_file():
+        if not dry_run:
+            try:
+                plugin_dir.mkdir(parents=True, exist_ok=True)
+                (plugin_dir / _MEASURE_LOCATOR_NAME).write_text(
+                    f"{measure_py}\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                raise RuntimeError(f"failed writing measure-path locator: {exc}") from exc
+        actions["measure_locator"] = str(measure_py)
 
     bridge_path = plugin_dir / "cursor_hook_bridge.py"
     hooks_path = _host_hooks_path(root)

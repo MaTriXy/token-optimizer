@@ -250,6 +250,61 @@ def test_collect_cursor_sessions_idempotent_second_run(monkeypatch, tmp_path):
     assert mod._collect_cursor_sessions(days=90, quiet=True) == 0
 
 
+def test_collect_cursor_sessions_skips_incomplete_restore(monkeypatch, tmp_path):
+    """An incomplete (crash/kill) session is ingested as a row but never seeds
+    continuity restore."""
+    mod, _snap, _claude_home, cursor_home = _import_measure(monkeypatch, tmp_path, "cursor")
+    cst = _monkeypatch_cursor_state_readers(monkeypatch)
+    tally = _tally()
+    tally["final"] = False
+    tally["end_reason"] = ""
+    monkeypatch.setattr(cst, "read_tally", lambda p: tally)
+
+    assert mod._collect_cursor_sessions(days=90, quiet=True) == 1
+    restore_dir = cursor_home / "token-optimizer" / "restore-context"
+    assert not restore_dir.exists() or not list(restore_dir.glob("*.md"))
+
+
+def test_collect_cursor_sessions_keys_restore_by_workspace_root(monkeypatch, tmp_path):
+    """The restore file must be keyed by workspace_roots[0] (repo root), not by
+    a tool's working_directory (often a subdirectory), so the sessionStart hook
+    (which looks up workspace_roots[0]) actually finds it."""
+    mod, _snap, _claude_home, cursor_home = _import_measure(monkeypatch, tmp_path, "cursor")
+    cst = _monkeypatch_cursor_state_readers(monkeypatch)
+    tally = _tally()
+    tally["cwd"] = "/Users/alex/repos/demo/src"          # tool working dir
+    tally["workspace_roots"] = ["/Users/alex/repos/demo"]  # repo root
+    monkeypatch.setattr(cst, "read_tally", lambda p: tally)
+
+    mod._collect_cursor_sessions(days=90, quiet=True)
+
+    restore_dir = cursor_home / "token-optimizer" / "restore-context"
+    files = list(restore_dir.glob("*.md"))
+    assert len(files) == 1
+    digest = hashlib.sha1(b"/Users/alex/repos/demo").hexdigest()
+    assert files[0].name == f"{digest}.md"
+
+
+def test_dashboard_cursor_toggles_read_real_doctor_names(monkeypatch, tmp_path):
+    """The dashboard collector must map to the check names cursor_doctor
+    actually emits (IDE/CLI token planes), not stale names."""
+    mod, _snap, _ch, _cuh = _import_measure(monkeypatch, tmp_path, "cursor")
+    import cursor_doctor as cd
+
+    monkeypatch.setattr(cd, "run_checks", lambda: [
+        {"name": "TO hook config", "status": "ok"},
+        {"name": "hook payload", "status": "ok"},
+        {"name": "measure-path locator", "status": "warn"},
+        {"name": "persisted python", "status": "ok"},
+        {"name": "IDE token plane", "status": "ok"},
+        {"name": "CLI transcript plane", "status": "warn"},
+    ])
+    status = mod._collect_cursor_hook_status_for_dashboard()
+    assert status["cursor_data"]["installed"] is True
+    assert status["cursor_data"]["partial"] is True
+    assert status["cursor_payload"]["partial"] is True
+
+
 # ---------------------------------------------------------------------------
 # Dispatch refusals (R20): no cursor runtime pin -> hint, no DB write.
 # ---------------------------------------------------------------------------
