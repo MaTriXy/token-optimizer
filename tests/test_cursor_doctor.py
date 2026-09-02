@@ -96,6 +96,7 @@ def test_run_checks_includes_daemon_and_data(monkeypatch, cur):
     assert "CLI transcript plane" in names
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="probe replays via POSIX /bin/sh -c")
 def test_probe_fires_all_installed_events(monkeypatch, tmp_path):
     home = tmp_path / "home"
     home.mkdir()

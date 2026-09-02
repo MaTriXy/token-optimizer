@@ -10,6 +10,7 @@ the six-event hook map, and the fail-closed Windows refusal.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +21,15 @@ SCRIPTS = REPO / "skills" / "token-optimizer" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import cursor_install as ci  # noqa: E402
+
+# The installer refuses native Windows by design (the persisted hook command is
+# POSIX-shell quoted). Install/uninstall paths therefore can't run on win32;
+# the refusal itself is covered by test_windows_install_refuses, which runs
+# everywhere.
+needs_posix = pytest.mark.skipif(
+    os.name == "nt",
+    reason="cursor_install refuses native Windows by design; install/uninstall paths are POSIX-only",
+)
 
 
 @pytest.fixture()
@@ -35,6 +45,7 @@ def _foreign_entry():
     return {"command": "echo other-tool", "type": "command", "timeout": 5}
 
 
+@needs_posix
 def test_install_writes_merged_hooks_and_payload(home):
     home.mkdir()
     # A foreign entry in sessionStart must survive; a stale "ours" entry is replaced.
@@ -69,6 +80,7 @@ def test_install_writes_merged_hooks_and_payload(home):
     assert _bridge_path(home).exists()
 
 
+@needs_posix
 def test_install_never_drops_foreign_entries(home):
     home.mkdir()
     ci._host_hooks_path(home).write_text(json.dumps({
@@ -85,6 +97,7 @@ def test_install_never_drops_foreign_entries(home):
     assert len([e for e in stops if str(_bridge_path(home)) in e["command"]]) == 1
 
 
+@needs_posix
 def test_uninstall_removes_only_our_entries_and_payload(home):
     home.mkdir()
     ci._host_hooks_path(home).write_text(json.dumps({
@@ -101,6 +114,7 @@ def test_uninstall_removes_only_our_entries_and_payload(home):
     assert any("sessionStart" in (r or "") for r in result["removed"]) or len(result["removed"]) >= 1
 
 
+@needs_posix
 def test_dry_run_writes_nothing(home):
     home.mkdir()
     result = ci.install(dry_run=True, home=home)
@@ -123,6 +137,7 @@ def test_is_ours_matches_bridge_path(home):
     assert ci._is_ours("not-a-dict", bridge_path) is False
 
 
+@needs_posix
 def test_install_writes_measure_locator(home):
     home.mkdir()
     ci.install(home=home)
@@ -133,6 +148,7 @@ def test_install_writes_measure_locator(home):
     assert target.is_file() and target.name == "measure.py"
 
 
+@needs_posix
 def test_install_aborts_on_corrupt_hooks_json(home):
     home.mkdir()
     hooks_path = ci._host_hooks_path(home)
@@ -144,6 +160,7 @@ def test_install_aborts_on_corrupt_hooks_json(home):
     assert hooks_path.read_text(encoding="utf-8") == "{ not valid json"
 
 
+@needs_posix
 def test_install_aborts_on_non_object_hooks_root(home):
     home.mkdir()
     hooks_path = ci._host_hooks_path(home)
@@ -154,6 +171,7 @@ def test_install_aborts_on_non_object_hooks_root(home):
     assert hooks_path.read_text(encoding="utf-8") == "[1, 2, 3]"
 
 
+@needs_posix
 def test_install_aborts_on_copy_failure_before_touching_hooks(home, monkeypatch):
     home.mkdir()
     hooks_path = ci._host_hooks_path(home)
@@ -171,6 +189,7 @@ def test_install_aborts_on_copy_failure_before_touching_hooks(home, monkeypatch)
     assert data["hooks"]["stop"] == [_foreign_entry()]
 
 
+@needs_posix
 def test_install_aborts_on_missing_payload_module(home, monkeypatch):
     home.mkdir()
     monkeypatch.setattr(ci, "_PAYLOAD_MODULES", ("cursor_hook_bridge.py", "nonexistent.py"))
