@@ -76,8 +76,12 @@ def context_window_for_model(model: str) -> int:
 
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
-        return int(value) if value is not None else default
-    except (TypeError, ValueError):
+        # H-1/N-1b: parse through float() first so float-shaped strings from
+        # JSON (e.g. "1234.0") don't raise ValueError and silently zero token
+        # counts, and so float('inf') raises OverflowError (caught below)
+        # instead of escaping.
+        return int(float(value)) if value is not None else default
+    except (TypeError, ValueError, OverflowError):
         return default
 
 

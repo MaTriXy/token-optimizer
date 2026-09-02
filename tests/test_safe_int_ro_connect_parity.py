@@ -27,6 +27,7 @@ _SAFE_INT_FILES = [
     "copilot_session.py",
     "copilot_state.py",
     "copilot_vscode.py",
+    "cursor_session.py",
     "hermes_session.py",
     "hermes_state.py",
     "structure_replay.py",
@@ -36,6 +37,7 @@ _SAFE_INT_FILES = [
 _RO_CONNECT_FILES = [
     "codex_state.py",
     "copilot_vscode.py",
+    "cursor_state.py",
     "hermes_doctor.py",
     "hermes_state.py",
 ]
@@ -131,6 +133,7 @@ sys.path.insert(0, SCRIPTS)
     ("copilot_session.py", True),
     ("copilot_state.py", True),
     ("copilot_vscode.py", True),
+    ("cursor_session.py", True),
     ("hermes_session.py", True),
     ("hermes_state.py", True),
     ("structure_replay.py", True),

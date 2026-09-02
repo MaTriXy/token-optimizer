@@ -226,5 +226,95 @@ class TestBearerIdempotency:
         assert twice.count("[CREDENTIAL REDACTED") == 1
 
 
+# ---------------------------------------------------------------------------
+# A3 re-verification findings (N-1, N-1b, N-3, N-4): the Cursor-PR copies of
+# _safe_int / _ro_connect missed the H-1/H-2 parity sweep, the MySQL pattern
+# was case-sensitive, and the M-3 resolve() fix was not applied to the
+# hermes/copilot _ro_connect copies.
+# ---------------------------------------------------------------------------
+class TestCursorRoConnectUriInjection:
+    def test_db_path_with_question_mark_opens_readonly(self, tmp_path):
+        """N-1: cursor_state._ro_connect_vscdb must build the URI via as_uri().
+        With f"file:{path}?mode=ro" interpolation, a '?' in the path starts the
+        query string early, dropping mode=ro and silently opening a truncated
+        path READ-WRITE (the exact H-2 bug, in the Cursor-PR copy)."""
+        from cursor_state import _ro_connect_vscdb
+        db = tmp_path / "we?ird" / "state.vscdb"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE x (id INTEGER)")
+        conn.execute("INSERT INTO x VALUES (42)")
+        conn.commit()
+        conn.close()
+        with _ro_connect_vscdb(db) as conn:
+            row = conn.execute("SELECT id FROM x").fetchone()
+            assert row[0] == 42
+            with pytest.raises(sqlite3.OperationalError):
+                conn.execute("INSERT INTO x VALUES (99)")
+        # No stray truncated-path db may be created (the old bug created one).
+        assert not (tmp_path / "we").exists()
+
+    def test_relative_path_does_not_raise(self, tmp_path, monkeypatch):
+        """N-1: resolve() before as_uri() so a relative path doesn't propagate
+        an uncaught ValueError (M-3 parity)."""
+        from cursor_state import _ro_connect_vscdb
+        db = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE x (id INTEGER)")
+        conn.execute("INSERT INTO x VALUES (1)")
+        conn.commit()
+        conn.close()
+        monkeypatch.chdir(tmp_path)
+        with _ro_connect_vscdb(Path("test.db")) as conn:
+            assert conn.execute("SELECT id FROM x").fetchone()[0] == 1
+
+
+class TestCursorSafeInt:
+    def test_parses_float_string(self):
+        """N-1b: cursor_session._safe_int must parse through float() so
+        float-shaped JSON strings ("1234.0") don't silently zero token counts
+        (the exact H-1 bug, in the Cursor-PR copy)."""
+        from cursor_session import _safe_int
+        assert _safe_int("1234.0") == 1234
+        assert _safe_int("1234") == 1234
+        assert _safe_int(None) == 0
+        assert _safe_int("not a number") == 0
+        assert _safe_int(float("inf")) == 0
+        assert _safe_int(float("nan")) == 0
+
+
+class TestMysqlPatternCaseInsensitive:
+    def test_capitalized_mysql_inline_password_redacted(self):
+        """N-3: 'MySQL -pSECRET' (capitalized, as MySQL ships the client name)
+        must be redacted too; the pattern was case-sensitive before."""
+        from credential_patterns import redact_credentials
+        out = redact_credentials("MySQL -pSECRET123 -h localhost")
+        assert "SECRET123" not in out
+        assert "[CREDENTIAL REDACTED:" in out
+
+
+class TestRoConnectRelativePathParity:
+    @pytest.mark.parametrize("modname,attr", [
+        ("hermes_state", "_ro_connect"),
+        ("copilot_vscode", "_ro_connect_otel"),
+    ])
+    def test_relative_path_does_not_raise_valueerror(self, tmp_path, monkeypatch, modname, attr):
+        """N-4 (M-3 parity): hermes_state and copilot_vscode _ro_connect must
+        resolve() before as_uri() so a relative path doesn't raise an uncaught
+        ValueError past callers that only catch (sqlite3.Error, OSError)."""
+        import importlib
+        mod = importlib.import_module(modname)
+        fn = getattr(mod, attr)
+        db = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE x (id INTEGER)")
+        conn.execute("INSERT INTO x VALUES (1)")
+        conn.commit()
+        conn.close()
+        monkeypatch.chdir(tmp_path)
+        with fn(Path("test.db")) as conn:
+            assert conn.execute("SELECT id FROM x").fetchone()[0] == 1
+
+
 # Need Path import for M-3 test
 from pathlib import Path
