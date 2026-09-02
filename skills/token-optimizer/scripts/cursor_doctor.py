@@ -230,14 +230,11 @@ def _persisted_python_check() -> list:
         )
         return checks
     for event, cmd in commands.items():
-        try:
-            tokens = shlex.split(cmd)
-        except ValueError:
-            continue
-        # command = "TOKEN_OPTIMIZER_RUNTIME=cursor <py> <bridge> <event>"
-        py = tokens[1] if len(tokens) > 1 and tokens[0].startswith("TOKEN_OPTIMIZER_RUNTIME=") else ""
-        if py.startswith("/") and Path(py).is_file():
-            checks.append(_check("ok", "persisted python", py))
+        # Same strict shape the probe enforces: runtime pin, absolute python,
+        # absolute bridge, wired event.
+        argv = _parse_hook_command(cmd)
+        if argv and Path(argv[0]).is_file():
+            checks.append(_check("ok", "persisted python", argv[0]))
             return checks
     checks.append(
         _check(
@@ -461,13 +458,13 @@ def _run_probe_command(command: str, payload: dict, probe_home: Path) -> dict:
     to a throwaway dir so replaying the documented payloads proves the hooks can
     fire without contaminating real session data with synthetic probe rows.
     """
-    argv = _parse_hook_command(command)
-    if argv is None:
-        return {"status": "fail",
-                "detail": "hook command is not the expected "
-                          "TOKEN_OPTIMIZER_RUNTIME=cursor <abs-python> <abs-bridge> <event> shape; refusing to run it"}
     if sys.platform == "win32":
         return {"event": None, "status": "skip", "detail": "probe is POSIX-only"}
+    argv = _parse_hook_command(command)
+    if argv is None:
+        return {"event": None, "status": "fail",
+                "detail": "hook command is not the expected "
+                          "TOKEN_OPTIMIZER_RUNTIME=cursor <abs-python> <abs-bridge> <event> shape; refusing to run it"}
     env = dict(os.environ)
     env.update({
         "PYTHONUTF8": "1",

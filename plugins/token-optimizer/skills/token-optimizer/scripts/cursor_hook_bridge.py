@@ -50,6 +50,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+_observed_warned = False
 
 # Windows console-flash guard (#107). Cursor's hook runners launch hooks
 # directly, so any child we spawn would otherwise allocate a console window on
@@ -303,7 +304,13 @@ def _record_observed(event, **extra):
         with (to_dir / "observed-events.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")
     except OSError:
-        logger.warning("[cursor_hook_bridge] observed-events append failed", exc_info=True)
+        # Log once per process: on a persistently unwritable data dir this fires
+        # per hook event, and a full traceback per tool call is log-spam.
+        global _observed_warned
+        if not _observed_warned:
+            _observed_warned = True
+            logger.warning("[cursor_hook_bridge] observed-events append failed; "
+                           "further append failures are silent", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -431,8 +438,11 @@ def _update_tally(fields, *, terminal=False, end_reason=None,
                 tally["_nudge_emitted"] = True
 
         # The marker is for the caller only; the persisted tally stays clean.
-        persist = {k: v for k, v in tally.items() if k != "_nudge_emitted"}
-        _atomic_write_json(path, persist)
+        if "_nudge_emitted" in tally:
+            persist = {k: v for k, v in tally.items() if k != "_nudge_emitted"}
+            _atomic_write_json(path, persist)
+        else:
+            _atomic_write_json(path, tally)
         return tally
 
 

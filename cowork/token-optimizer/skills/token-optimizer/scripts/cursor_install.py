@@ -30,6 +30,7 @@ import shlex
 import shutil
 import stat as _stat
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -226,7 +227,8 @@ def _write_hooks(path: Path, data: dict) -> None:
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-class _HooksLock:
+@contextmanager
+def _hooks_lock(hooks_path: Path):
     """Exclusive lease around the hooks.json read-merge-write.
 
     Two concurrent installs (or install racing uninstall) would otherwise both
@@ -234,24 +236,16 @@ class _HooksLock:
     entries. Uses hook_runtime.lease_lock (the same portable lock the bridges
     use); a failed acquire aborts loudly instead of racing.
     """
+    from hook_runtime import lease_lock
 
-    def __init__(self, hooks_path: Path):
-        self._lock_path = hooks_path.parent / f".{hooks_path.name}.to-install.lock"
-
-    def __enter__(self):
-        from hook_runtime import lease_lock
-
-        self._cm = lease_lock(self._lock_path, acquire_timeout=5.0, lease_seconds=30.0)
-        acquired = self._cm.__enter__()
+    lock_path = hooks_path.parent / f".{hooks_path.name}.to-install.lock"
+    with lease_lock(lock_path, acquire_timeout=5.0, lease_seconds=30.0) as acquired:
         if not acquired:
             raise RuntimeError(
                 "another Cursor install/uninstall is in progress "
-                f"(could not acquire {self._lock_path}); re-run in a moment"
+                f"(could not acquire {lock_path}); re-run in a moment"
             )
-        return self
-
-    def __exit__(self, *exc):
-        return self._cm.__exit__(*exc)
+        yield
 
 
 def install(*, dry_run: bool = False, home: Path = None) -> dict:
@@ -320,7 +314,7 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
 
     bridge_path = plugin_dir / "cursor_hook_bridge.py"
     hooks_path = _host_hooks_path(root)
-    with _HooksLock(hooks_path):
+    with _hooks_lock(hooks_path):
         existing = _read_hooks(hooks_path)
         hooks = existing.get("hooks")
         if not isinstance(hooks, dict):
@@ -354,7 +348,7 @@ def uninstall(*, dry_run: bool = False, home: Path = None) -> dict:
 
     bridge_path = _plugin_dir(root) / "cursor_hook_bridge.py"
     hooks_path = _host_hooks_path(root)
-    with _HooksLock(hooks_path):
+    with _hooks_lock(hooks_path):
         existing = _read_hooks(hooks_path)
         hooks = existing.get("hooks")
         if isinstance(hooks, dict):

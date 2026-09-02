@@ -208,9 +208,10 @@ def test_percent_wildcard_does_not_bleed_tokens(tmp_path):
 
 
 def test_single_scan_not_n_plus_one(tmp_path):
-    """P0-5: one query over the key prefixes, not 2 per composer id. On a
-    55K-row DB with 500 composers the old N+1 shape measured 4.6s; the single
-    scan must stay well under that on any machine."""
+    """P0-5: one query over the key prefixes, not 2 per composer id. The old
+    N+1 shape fired 1000 SELECTs here (4.6s on this DB); the single scan is
+    pinned by counting executed SELECT statements, with wall-clock as a loose
+    smoke bound only."""
     import sqlite3
     db = tmp_path / "state.vscdb"
     conn = sqlite3.connect(str(db))
@@ -223,9 +224,23 @@ def test_single_scan_not_n_plus_one(tmp_path):
     conn.commit()
     conn.close()
 
-    t0 = time.perf_counter()
-    res = cursor_state.read_state_vscdb_tokens(ids, db)
-    elapsed = time.perf_counter() - t0
+    selects = []
+    orig_connect = cursor_state.sqlite3.connect
+
+    def counting_connect(*a, **k):
+        c = orig_connect(*a, **k)
+        c.set_trace_callback(lambda s: selects.append(s) if s.lstrip().upper().startswith("SELECT") else None)
+        return c
+
+    cursor_state.sqlite3.connect = counting_connect
+    try:
+        t0 = time.perf_counter()
+        res = cursor_state.read_state_vscdb_tokens(ids, db)
+        elapsed = time.perf_counter() - t0
+    finally:
+        cursor_state.sqlite3.connect = orig_connect
+
     assert len(res) == 500
     assert res[ids[0]]["input_tokens"] == 10 * 110
-    assert elapsed < 5.0, f"single-scan read took {elapsed:.2f}s (N+1 regression?)"
+    assert len(selects) == 1, f"expected exactly 1 SELECT, got {len(selects)}"
+    assert elapsed < 5.0, f"single-scan read took {elapsed:.2f}s"

@@ -251,7 +251,6 @@ def test_concurrent_installs_both_survive(tmp_path, monkeypatch):
     plugin.mkdir(parents=True)
     for name in ci._PAYLOAD_MODULES:
         (plugin / name).write_text("# stub\n", encoding="utf-8")
-    (ci._SCRIPT_DIR / "measure.py").exists()  # locator path untouched
 
     errors, done = [], []
     def run():
