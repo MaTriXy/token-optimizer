@@ -418,3 +418,17 @@ def test_post_tool_use_nudge_in_single_locked_write(monkeypatch, tmp_path, capsy
     assert "_nudge_emitted" not in tally  # consumed by the handler, never persisted
     out = capsys.readouterr().out
     assert out.count("additional_context") == 1
+
+
+def test_main_logs_handler_failure_but_exits_zero(monkeypatch, caplog):
+    """P1-10: a handler crash must still exit 0 (never break Cursor) but can
+    no longer vanish silently -- it logs at ERROR with the event name."""
+    import logging
+    monkeypatch.setattr(bridge, "_read_stdin_payload", lambda: {})
+    def boom(_payload):
+        raise RuntimeError("disk exploded")
+    monkeypatch.setitem(bridge._HANDLERS, "stop", boom)
+    with caplog.at_level(logging.ERROR, logger="cursor_hook_bridge"):
+        rc = bridge.main(["stop"])
+    assert rc == 0
+    assert any("stop" in r.message and r.levelno == logging.ERROR for r in caplog.records)

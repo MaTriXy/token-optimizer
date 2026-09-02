@@ -303,7 +303,7 @@ def _record_observed(event, **extra):
         with (to_dir / "observed-events.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")
     except OSError:
-        logger.debug("[cursor_hook_bridge] observed-events append failed", exc_info=True)
+        logger.warning("[cursor_hook_bridge] observed-events append failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +589,7 @@ def _spawn_rollup():
             stderr=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
-        pass
+        logger.warning("[cursor_hook_bridge] detached rollup spawn failed", exc_info=True)
 
 
 def _spawn_dashboard():
@@ -607,7 +607,7 @@ def _spawn_dashboard():
             stderr=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
-        pass
+        logger.warning("[cursor_hook_bridge] detached dashboard spawn failed", exc_info=True)
 
 
 def _stop_rollup_due():
@@ -817,7 +817,10 @@ def main(argv=None):
     try:
         _HANDLERS[args[0]](payload)
     except Exception:
-        # A hook must never break the user's Cursor session. No output, exit 0.
+        # A hook must never break the user's Cursor session: still exit 0, but
+        # never silently. A broken install, disk-full, or spawn failure has to
+        # leave a log signal (stderr; Cursor surfaces hook stderr in its logs).
+        logger.exception("[cursor_hook_bridge] handler %s failed; failing open", args[0])
         return 0
     return 0
 
