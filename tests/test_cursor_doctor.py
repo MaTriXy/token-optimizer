@@ -9,6 +9,7 @@ live Cursor by monkeypatching the home dir.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -119,8 +120,12 @@ def test_probe_fires_all_installed_events(monkeypatch, tmp_path):
 
 
 def test_parse_hook_command_accepts_installed_shape():
-    cmd = f"TOKEN_OPTIMIZER_RUNTIME=cursor {sys.executable} /x/cursor_hook_bridge.py stop"
-    assert cd._parse_hook_command(cmd) == [sys.executable, "/x/cursor_hook_bridge.py", "stop"]
+    # abspath normalizes per platform: on Windows a root-relative "/x/..." is
+    # NOT absolute (ntpath.isabs is False without a drive since 3.13), so the
+    # test must use a platform-native absolute bridge path.
+    bridge = os.path.abspath("/x/cursor_hook_bridge.py")
+    cmd = f"TOKEN_OPTIMIZER_RUNTIME=cursor {sys.executable} {bridge} stop"
+    assert cd._parse_hook_command(cmd) == [sys.executable, bridge, "stop"]
 
 
 @pytest.mark.parametrize("cmd", [

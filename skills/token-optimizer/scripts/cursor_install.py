@@ -91,14 +91,8 @@ _TRUSTED_PY_PREFIXES = (
 )
 
 
-def _py_path_is_trusted(p: str) -> bool:
-    """Trusted iff the interpreter's bytes are admin-owned (euid or root) and
-    not group/other-writable, and its dir is not world-writable and not
-    group-writable by a third party. Pure stat, never runs the target.
-    _TRUSTED_PY_PREFIXES documents the known system locations but is no longer
-    a bypass: the ownership+writability rule accepts them on its own. On
-    Windows, stat ownership is unreliable under Git-Bash, so require only that
-    the path is a real file."""
+def _py_trust_reason(p: str) -> str | None:
+    """None when trusted, else a short human-readable rejection reason."""
     try:
         real = os.path.realpath(p)
         if not os.path.isfile(real):
@@ -118,21 +112,33 @@ def _py_path_is_trusted(p: str) -> bool:
         # The interpreter's BYTES must never be group/other-writable, whoever
         # owns it, and the file must be admin-owned.
         if st_file.st_mode & (_stat.S_IWGRP | _stat.S_IWOTH):
-            return False
+            return f"{real} is group/other-writable"
         if not _admin_owned(st_file.st_uid):
-            return False
+            return f"{real} is owned by uid {st_file.st_uid}, not by us or root"
         # The containing DIR must not be world-writable. Group-writable is the
         # admin-group case (Homebrew Cellar 0775, hostedtoolcache 0775 under
         # the runner's own group) and is accepted only when the DIR itself is
         # admin-owned -- a group-writable dir owned by a third party would let
         # that party swap the interpreter.
         if st_dir.st_mode & _stat.S_IWOTH:
-            return False
+            return f"{os.path.dirname(real)} is world-writable"
         if st_dir.st_mode & _stat.S_IWGRP and not _admin_owned(st_dir.st_uid):
-            return False
-        return True
-    except OSError:
-        return False
+            return (f"{os.path.dirname(real)} is group-writable and owned by "
+                    f"uid {st_dir.st_uid}")
+        return None
+    except OSError as exc:
+        return f"stat failed: {exc}"
+
+
+def _py_path_is_trusted(p: str) -> bool:
+    """Trusted iff the interpreter's bytes are admin-owned (euid or root) and
+    not group/other-writable, and its dir is not world-writable and not
+    group-writable by a third party. Pure stat, never runs the target.
+    _TRUSTED_PY_PREFIXES documents the known system locations but is no longer
+    a bypass: the ownership+writability rule accepts them on its own. On
+    Windows, stat ownership is unreliable under Git-Bash, so require only that
+    the path is a real file."""
+    return _py_trust_reason(p) is None
 
 
 def _resolve_safe_python() -> str:
@@ -155,9 +161,19 @@ def _resolve_safe_python() -> str:
         cand = shutil.which(name)
         if cand and _py_path_is_trusted(cand):
             return os.path.abspath(cand)
+    reasons = []
+    if override:
+        reasons.append(f"TOKEN_OPTIMIZER_PYTHON={override}: {_py_trust_reason(override) or 'accepted'}")
+    if sys.executable:
+        reasons.append(f"sys.executable={sys.executable}: {_py_trust_reason(sys.executable) or 'accepted'}")
+    for name in ("python3", "python"):
+        cand = shutil.which(name)
+        if cand:
+            reasons.append(f"{name}={cand}: {_py_trust_reason(cand) or 'accepted'}")
     raise RuntimeError(
         "no trusted python interpreter found for the Cursor hook; "
-        "set TOKEN_OPTIMIZER_PYTHON to an absolute python3 path and re-run install"
+        "set TOKEN_OPTIMIZER_PYTHON to an absolute python3 path and re-run install. "
+        "Candidates: " + "; ".join(reasons)
     )
 
 
