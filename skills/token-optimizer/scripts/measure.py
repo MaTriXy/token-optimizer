@@ -24702,7 +24702,8 @@ def _daemon_ports_to_reclaim(this_install_only: bool):
     running its token-authed mutating API after a reported uninstall.
 
     Scoped (``this_install_only``): just the resolved runtime's port. Sweep-all:
-    every runtime's port (claude 24842 + codex/hermes/copilot). ``script_name``
+    every runtime's port (claude 24842 + codex/hermes/copilot/cursor).
+    ``script_name``
     in the reclaim helper is runtime-generic, so this only ever kills our own
     ``dashboard-server.py`` bound to one of these ports.
     """
