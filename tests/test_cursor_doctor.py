@@ -96,7 +96,7 @@ def test_run_checks_includes_daemon_and_data(monkeypatch, cur):
     assert "CLI transcript plane" in names
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="probe replays via POSIX /bin/sh -c")
+@pytest.mark.skipif(sys.platform == "win32", reason="probe is POSIX-only")
 def test_probe_fires_all_installed_events(monkeypatch, tmp_path):
     home = tmp_path / "home"
     home.mkdir()
@@ -116,3 +116,47 @@ def test_probe_fires_all_installed_events(monkeypatch, tmp_path):
     ledger = cur / "token-optimizer" / "observed-events.jsonl"
     assert not ledger.exists()
     assert not (cur / "token-optimizer" / "sessions").exists()
+
+
+def test_parse_hook_command_accepts_installed_shape():
+    cmd = f"TOKEN_OPTIMIZER_RUNTIME=cursor {sys.executable} /x/cursor_hook_bridge.py stop"
+    assert cd._parse_hook_command(cmd) == [sys.executable, "/x/cursor_hook_bridge.py", "stop"]
+
+
+@pytest.mark.parametrize("cmd", [
+    # shell injection via metacharacters: shlex keeps it one token -> shape fails
+    "TOKEN_OPTIMIZER_RUNTIME=cursor /usr/bin/python3 /tmp/cursor_hook_bridge.py preToolUse; echo INJECTED > /tmp/pwned",
+    # extra token
+    "TOKEN_OPTIMIZER_RUNTIME=cursor /usr/bin/python3 /x/bridge.py stop extra",
+    # relative python
+    "TOKEN_OPTIMIZER_RUNTIME=cursor python3 /x/bridge.py stop",
+    # unknown event
+    "TOKEN_OPTIMIZER_RUNTIME=cursor /usr/bin/python3 /x/bridge.py notAnEvent",
+    # wrong runtime pin
+    "TOKEN_OPTIMIZER_RUNTIME=codex /usr/bin/python3 /x/bridge.py stop",
+    # unbalanced quote (shlex ValueError)
+    "TOKEN_OPTIMIZER_RUNTIME=cursor /usr/bin/python3 /x/bridge.py 'stop",
+])
+def test_parse_hook_command_rejects_malformed(cmd):
+    assert cd._parse_hook_command(cmd) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="probe is POSIX-only")
+def test_probe_refuses_to_execute_injected_command(monkeypatch, tmp_path):
+    """P0-2: a corrupted/malicious hooks.json entry must be reported, never run."""
+    home = tmp_path / "home"
+    cur = home / ".cursor"
+    cur.mkdir(parents=True)
+    marker = tmp_path / "pwned"
+    (cur / "hooks.json").write_text(json.dumps({"hooks": {
+        "stop": [{"command":
+                  f"TOKEN_OPTIMIZER_RUNTIME=cursor {sys.executable} /tmp/cursor_hook_bridge.py stop; echo INJECTED > {marker}"}],
+    }}), encoding="utf-8")
+    monkeypatch.setattr(cd, "cursor_home", lambda: cur)
+
+    results = cd.run_probe()
+
+    stop = next(r for r in results if r["event"] == "stop")
+    assert stop["status"] == "fail"
+    assert "refusing" in stop["detail"]
+    assert not marker.exists()

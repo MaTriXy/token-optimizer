@@ -427,15 +427,47 @@ def _installed_commands() -> dict:
     return out
 
 
-def _run_probe_command(command: str, payload: dict, probe_home: Path) -> dict:
-    """Run one installed command under /bin/sh -c with the payload on stdin.
+def _parse_hook_command(command: str) -> list | None:
+    """Parse a persisted hooks.json command into argv, or None if malformed.
 
+    The installer writes exactly ``TOKEN_OPTIMIZER_RUNTIME=cursor <abs-py>
+    <abs-bridge> <event>``. Anything else (extra tokens, relative paths, an
+    unknown event, shell metacharacters that survive shlex) is rejected rather
+    than executed: hooks.json is shared with other tools, and --probe must never
+    become an injection vector for a corrupted or malicious entry.
+    """
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    if len(tokens) != 4:
+        return None
+    runtime, py, bridge, event = tokens
+    if runtime != "TOKEN_OPTIMIZER_RUNTIME=cursor":
+        return None
+    if not os.path.isabs(py) or not os.path.isabs(bridge):
+        return None
+    if event not in _WIRED_EVENTS:
+        return None
+    return tokens[1:]
+
+
+def _run_probe_command(command: str, payload: dict, probe_home: Path) -> dict:
+    """Run one installed command (no shell) with the payload on stdin.
+
+    The command is shlex-parsed and shape-validated first (see
+    _parse_hook_command); a malformed entry is reported, never executed.
     ``probe_home`` redirects the bridge's data writes (tallies, observed-events)
     to a throwaway dir so replaying the documented payloads proves the hooks can
     fire without contaminating real session data with synthetic probe rows.
     """
+    argv = _parse_hook_command(command)
+    if argv is None:
+        return {"status": "fail",
+                "detail": "hook command is not the expected "
+                          "TOKEN_OPTIMIZER_RUNTIME=cursor <abs-python> <abs-bridge> <event> shape; refusing to run it"}
     if sys.platform == "win32":
-        return {"event": None, "status": "skip", "detail": "probe is POSIX-only (/bin/sh -c)"}
+        return {"event": None, "status": "skip", "detail": "probe is POSIX-only"}
     env = dict(os.environ)
     env.update({
         "PYTHONUTF8": "1",
@@ -445,7 +477,7 @@ def _run_probe_command(command: str, payload: dict, probe_home: Path) -> dict:
     })
     try:
         proc = subprocess.run(
-            ["/bin/sh", "-c", command],
+            argv,
             input=json.dumps(payload),
             capture_output=True,
             text=True,
