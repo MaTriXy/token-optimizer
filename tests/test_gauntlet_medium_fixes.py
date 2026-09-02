@@ -72,27 +72,53 @@ class TestRoConnectRelativePath:
 
 
 # ---------------------------------------------------------------------------
-# M-6: as_uri URI-injection test — path with ? must open read-only
+# M-6: as_uri URI-injection tests — paths with URI-significant characters
+# must open read-only, not interpret those characters as URI syntax that
+# could override mode=ro. '#' is a URI fragment delimiter (legal in filenames
+# on both POSIX and Windows). '?' is a URI query-string delimiter but is
+# illegal in Windows filenames, so it is tested POSIX-only.
 # ---------------------------------------------------------------------------
 class TestAsUriInjection:
-    def test_db_path_with_question_mark_opens_readonly(self, tmp_path):
-        """M-6: a DB path containing '?' must open read-only, not interpret
-        the '?' as a URI query string delimiter that could override mode=ro."""
+    def test_db_path_with_hash_opens_readonly(self, tmp_path):
+        """M-6: a DB path containing '#' must open read-only, not interpret
+        the '#' as a URI fragment delimiter that could truncate the path and
+        drop mode=ro. '#' is legal in filenames on both POSIX and Windows."""
         from codex_state import _ro_connect
-        # Create a DB at a path containing '?'.
-        db = tmp_path / "db?test.sqlite"
+        db = tmp_path / "db#test.sqlite"
         conn = sqlite3.connect(str(db))
         conn.execute("CREATE TABLE x (id INTEGER)")
         conn.execute("INSERT INTO x VALUES (42)")
         conn.commit()
         conn.close()
         # _ro_connect must open this read-only. If as_uri() didn't
-        # percent-encode the '?', it would start the query string early and
-        # mode=ro would be dropped, potentially opening read-write.
+        # percent-encode the '#', it would start the fragment early, truncating
+        # the path before mode=ro and potentially opening read-write.
         with _ro_connect(db) as conn:
             row = conn.execute("SELECT id FROM x").fetchone()
             assert row[0] == 42
             # Verify read-only: a write attempt must fail.
+            with pytest.raises(sqlite3.OperationalError):
+                conn.execute("INSERT INTO x VALUES (99)")
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="'?' is illegal in Windows filenames; tested via '#' instead",
+    )
+    def test_db_path_with_question_mark_opens_readonly(self, tmp_path):
+        """M-6 (POSIX-only): a DB path containing '?' must open read-only, not
+        interpret the '?' as a URI query string delimiter that could override
+        mode=ro. '?' is illegal in Windows filenames so this test is skipped
+        there; the '#' test covers the same URI-escaping fix cross-platform."""
+        from codex_state import _ro_connect
+        db = tmp_path / "db?test.sqlite"
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE x (id INTEGER)")
+        conn.execute("INSERT INTO x VALUES (42)")
+        conn.commit()
+        conn.close()
+        with _ro_connect(db) as conn:
+            row = conn.execute("SELECT id FROM x").fetchone()
+            assert row[0] == 42
             with pytest.raises(sqlite3.OperationalError):
                 conn.execute("INSERT INTO x VALUES (99)")
 
