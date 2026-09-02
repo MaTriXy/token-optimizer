@@ -513,6 +513,10 @@ def _measure_env(interactive=False):
 
 
 def _spawn_rollup():
+    # cursor-doctor --probe replays the installed command to prove it fires;
+    # it must not trigger a real detached rollup/dashboard as a side effect.
+    if os.environ.get("TOKEN_OPTIMIZER_PROBE") == "1":
+        return
     measure = _SCRIPT_DIR / "measure.py"
     if not measure.exists():
         return
@@ -528,6 +532,9 @@ def _spawn_rollup():
 
 
 def _spawn_dashboard():
+    # Same probe guard as _spawn_rollup(): replay must not spawn detached work.
+    if os.environ.get("TOKEN_OPTIMIZER_PROBE") == "1":
+        return
     measure = _SCRIPT_DIR / "measure.py"
     if not measure.exists():
         return
