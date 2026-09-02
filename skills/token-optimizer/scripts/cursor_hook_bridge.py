@@ -591,12 +591,34 @@ def _spawn_dashboard():
 
 
 def _stop_rollup_due():
-    """True once per 120s per machine (R12). Best-effort: reads then writes."""
+    """True once per 120s per machine (R12). Best-effort: reads then writes.
+
+    The read-check-write runs under a lease lock: two concurrent stop hooks
+    (multi-window Cursor) would otherwise both read a stale ``last`` and both
+    spawn rollup+dashboard. On lock contention we skip the spawn (the winner is
+    rolling up); without hook_runtime we degrade to the unlocked path.
+    """
     to_dir = _to_dir()
     if to_dir is None:
         return False
     state = to_dir / ".stop-rollup-last.json"
     now = time.time()
+    if lease_lock is not None:
+        lock_dir = to_dir / ".locks"
+        try:
+            lock_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            lock_dir = None
+        if lock_dir is not None:
+            with lease_lock(lock_dir / ".stop-rollup.lock",
+                            acquire_timeout=0.5, lease_seconds=30.0) as acquired:
+                if not acquired:
+                    return False
+                return _stop_rollup_due_locked(state, now)
+    return _stop_rollup_due_locked(state, now)
+
+
+def _stop_rollup_due_locked(state, now):
     last = None
     try:
         if state.exists():

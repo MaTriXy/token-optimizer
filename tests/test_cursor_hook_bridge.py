@@ -383,3 +383,20 @@ def test_pre_compact_survives_non_dict_payloads(bad, monkeypatch, tmp_path):
     compaction record was silently lost."""
     monkeypatch.setattr(bridge, "cursor_home", lambda: tmp_path)
     bridge.handle_pre_compact(bad)  # must not raise
+
+
+def test_stop_rollup_throttle_is_atomic_under_concurrency(monkeypatch, tmp_path):
+    """P1-3: two concurrent stop hooks must yield at most one 'due' verdict,
+    not two (each would spawn rollup+dashboard)."""
+    import threading
+    monkeypatch.setattr(bridge, "cursor_home", lambda: tmp_path)
+    results = []
+    barrier = threading.Barrier(2)
+
+    def run():
+        barrier.wait()
+        results.append(bridge._stop_rollup_due())
+
+    t1, t2 = threading.Thread(target=run), threading.Thread(target=run)
+    t1.start(); t2.start(); t1.join(); t2.join()
+    assert results.count(True) <= 1, results
