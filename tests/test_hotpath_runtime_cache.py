@@ -37,6 +37,8 @@ import time
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "skills" / "token-optimizer" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -68,6 +70,20 @@ _CONTROLLED_ENV = (
 _FAKE_PID = 5000
 _FAKE_PARENT = 4000
 _FAKE_GRANDPARENT = 3000
+
+# On Windows there is no `ps` to snapshot, so runtime_env deliberately disables
+# the whole process-tree scan (_load_proc_snapshot: ``disabled`` when
+# sys.platform starts with "win"). The scan/cache-mechanics tests below require
+# a real ps and are skipped there; the remaining tests (explicit override,
+# explicit TOKEN_OPTIMIZER_NO_PROC_SCAN, and ps failure) still run on Windows
+# and cover the platform-disabled contract. This is a per-test skip on the
+# POSIX-only mechanics, NOT a blanket skip of the file.
+_PLATFORM_DISABLES_PROC_SCAN = sys.platform.startswith("win")
+_requires_ps = pytest.mark.skipif(
+    _PLATFORM_DISABLES_PROC_SCAN,
+    reason="shared ps snapshot is platform-disabled on Windows (no ps); "
+           "scan/cache mechanics are POSIX-only",
+)
 
 
 def _ps_table(*rows):
@@ -150,6 +166,7 @@ def _stop(patch_pair):
         p.stop()
 
 
+@_requires_ps
 def test_snapshot_shared_by_both_scanners():
     """One ps spawn serves both the OpenCode (args) and Copilot (comm) scans."""
     with _Controlled():
@@ -168,6 +185,7 @@ def test_snapshot_shared_by_both_scanners():
             _stop(patches)
 
 
+@_requires_ps
 def test_opencode_ancestor_found_via_args_column():
     """OpenCode launched through node is recognized from the args column."""
     with _Controlled():
@@ -182,6 +200,7 @@ def test_opencode_ancestor_found_via_args_column():
             _stop(patches)
 
 
+@_requires_ps
 def test_negative_scan_is_cached_and_skips_ps():
     """A negative OpenCode scan writes the cache; the next process skips ps."""
     with _Controlled() as ctx:
@@ -203,6 +222,7 @@ def test_negative_scan_is_cached_and_skips_ps():
             _stop(patches2)
 
 
+@_requires_ps
 def test_positive_finding_is_never_cached():
     """An opencode ancestor is re-derived live; nothing is persisted."""
     with _Controlled() as ctx:
@@ -218,6 +238,7 @@ def test_positive_finding_is_never_cached():
         assert not ctx.cache_file().exists(), "positive finding must not be cached"
 
 
+@_requires_ps
 def test_cache_invalidated_by_env_signature():
     """A different runtime-signal env must not consume another env's negative."""
     with _Controlled():
@@ -233,6 +254,7 @@ def test_cache_invalidated_by_env_signature():
             _stop(patches)
 
 
+@_requires_ps
 def test_expired_cache_entry_is_ignored():
     with _Controlled() as ctx:
         table = _ps_table(*_hook_chain())
@@ -283,10 +305,25 @@ def test_ps_failure_behaves_as_no_ancestor():
             _stop(patches)
 
 
+# The direct-runner path mirrors the pytest skipif above; keep this list in
+# sync with the tests carrying @_requires_ps.
+_REQUIRE_PS = frozenset({
+    "test_snapshot_shared_by_both_scanners",
+    "test_opencode_ancestor_found_via_args_column",
+    "test_negative_scan_is_cached_and_skips_ps",
+    "test_positive_finding_is_never_cached",
+    "test_cache_invalidated_by_env_signature",
+    "test_expired_cache_entry_is_ignored",
+})
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
+            if _PLATFORM_DISABLES_PROC_SCAN and name in _REQUIRE_PS:
+                print(f"SKIP {name} (ps unavailable on this platform)")
+                continue
             try:
                 fn()
                 print(f"PASS {name}")
