@@ -350,18 +350,27 @@ def test_stale_reclaimer_cannot_move_a_successor_lease(tmp_path, monkeypatch):
     owner.release()
 
 
-def test_acquire_never_retries_after_timeout(tmp_path, monkeypatch):
+def test_acquire_stops_waiting_after_timeout(tmp_path, monkeypatch):
+    """After the deadline, acquire() makes at most ONE final attempt and never
+    sleeps again. The lease here stays HELD throughout, so the final attempt
+    must fail and the wait must stay bounded (contract updated 2026-09-02: the
+    final attempt itself is allowed and must succeed on a FREE lease -- see
+    tests/test_leaselock_acquire_free_retry.py; the old
+    test_acquire_never_retries_after_timeout pinned the give-up-on-free-lock
+    behavior that flaked the settings merge test ~1-in-5)."""
     lock = LeaseLock(tmp_path / "state.lease", acquire_timeout=0.075)
     now = 0.0
     attempts = 0
+    sleeps = []
 
     def try_create():
         nonlocal attempts
         attempts += 1
-        return attempts > 1
+        return False  # lease stays held by someone else
 
-    def advance_past_timeout(_seconds):
+    def advance_past_timeout(seconds):
         nonlocal now
+        sleeps.append(seconds)
         now = 0.08
 
     monkeypatch.setattr(lock, "_try_create", try_create)
@@ -370,7 +379,8 @@ def test_acquire_never_retries_after_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(time, "sleep", advance_past_timeout)
 
     assert not lock.acquire()
-    assert attempts == 1
+    assert attempts == 2, "one attempt before the deadline, one final attempt after"
+    assert len(sleeps) == 1, "no sleep may happen after the deadline"
 
 
 @pytest.mark.skipif(

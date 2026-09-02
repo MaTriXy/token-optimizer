@@ -436,11 +436,16 @@ class LeaseLock:
         if self.deadline is not None:
             wait_for = min(wait_for, self.deadline.remaining())
         stop = time.monotonic() + wait_for
-        first_attempt = True
+        # Attempt FIRST, check the deadline after a failed attempt. A waiter
+        # whose sleep overslept (loaded box, descheduling) must still take a
+        # lease that was released while it slept; checking the deadline before
+        # the attempt made acquire() give up on an observably free lock, which
+        # flaked test_cleanup_period_and_statusline_writers_merge_stale_reads
+        # ~1-in-5 (instrumented 2026-09-02: iters=2, acquire False at 0.0777s,
+        # lease free since 0.001s). The bottom-of-loop check still bounds the
+        # wait: the loop exits at `stop` after a failed attempt and never
+        # sleeps past it.
         while True:
-            if not first_attempt and time.monotonic() >= stop:
-                return False
-            first_attempt = False
             created = self._try_create()
             if created is True:
                 return True
