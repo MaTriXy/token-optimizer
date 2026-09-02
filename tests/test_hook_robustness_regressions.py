@@ -87,9 +87,17 @@ def test_stdin_partial_payload_returns_within_deadline(tmp_path):
         # Pin the deadline itself, not just "did not hang": the read must be
         # bounded near _STDIN_TIMEOUT (0.5s), with slack for interpreter
         # startup on slow runners. A reverted blocking read hangs instead.
+        # H-7: the old code set the deadline AFTER the first select, so the
+        # loop got a full additional _STDIN_TIMEOUT — measured 1098ms peak
+        # (2.2x). Assert against the imported constant so a regression that
+        # re-introduces the double-budget is a red test.
+        sys.path.insert(0, str(SCRIPTS))
+        from hook_io import _STDIN_TIMEOUT
         elapsed = float(out.split("after ")[1].split("s")[0])
-        assert elapsed < 3.0, (
-            f"stdin read took {elapsed:.2f}s, unbounded by the 0.5s deadline"
+        assert elapsed < _STDIN_TIMEOUT * 2, (
+            f"stdin read took {elapsed:.2f}s, exceeding {_STDIN_TIMEOUT * 2:.2f}s "
+            f"(2x the {_STDIN_TIMEOUT}s deadline — the deadline was likely set "
+            f"after the first select, giving the loop a full second budget)"
         )
     finally:
         if proc.poll() is None:

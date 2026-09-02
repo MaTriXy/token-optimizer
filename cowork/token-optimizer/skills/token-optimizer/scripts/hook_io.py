@@ -49,7 +49,14 @@ def read_stdin_hook_input(max_bytes: int = 1_048_576) -> dict:
             import os
             import select
             import time
-            if not select.select([sys.stdin], [], [], _STDIN_TIMEOUT)[0]:
+            # H-7: set the deadline BEFORE the first select. The old code set
+            # it after, so if the first select() consumed most of the 0.5s
+            # timeout, the read loop got a FULL additional 0.5s — measured
+            # 1098ms peak (2.2x the stated 0.5s). One deadline, used for all
+            # select() calls, so the total budget is _STDIN_TIMEOUT end to end.
+            deadline = time.monotonic() + _STDIN_TIMEOUT
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([sys.stdin], [], [], remaining)[0]:
                 return {}
             try:
                 fd = sys.stdin.fileno()
@@ -62,7 +69,6 @@ def read_stdin_hook_input(max_bytes: int = 1_048_576) -> dict:
                 # defeats the timeout. Read what is actually available in a loop
                 # bounded by the same deadline, assembling chunked payloads
                 # without ever blocking past _STDIN_TIMEOUT.
-                deadline = time.monotonic() + _STDIN_TIMEOUT
                 chunks = []
                 total = 0
                 while total < max_bytes:
