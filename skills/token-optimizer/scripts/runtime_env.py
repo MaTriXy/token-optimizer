@@ -651,6 +651,7 @@ def _ancestor_negative_cached() -> bool:
 
 def _store_ancestor_negative() -> None:
     """Persist a negative opencode-ancestor scan result. Best-effort, atomic."""
+    tmp = None
     try:
         path = _ancestor_cache_path()
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -665,10 +666,11 @@ def _store_ancestor_negative() -> None:
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
     except (OSError, ValueError):
-        try:
-            tmp.unlink(missing_ok=True)
-        except (OSError, UnboundLocalError):
-            pass
+        if tmp is not None:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _ancestor_in_process_tree(basenames: frozenset) -> bool:
