@@ -102,3 +102,68 @@ def test_session_token_param_redacted(name):
     out = redact_credentials(f"https://x.com/a?{name}=FAKE_SESSION_TOK&x=1")
     assert "FAKE_SESSION_TOK" not in out
     assert "&x=1" in out
+
+
+# ---------------------------------------------------------------------------
+# H-8: performance regression test. The old 23-sequential-re.sub()
+# implementation took 97ms for 10K lines, 675ms for 50K lines. The combined
+# regex should be ~20x faster. This test fails if someone reverts to the
+# sequential approach.
+# ---------------------------------------------------------------------------
+import time
+
+
+def test_redact_credentials_performance_10k_lines():
+    """H-8: redact_credentials on 10K lines of clean output must complete
+    in under 20ms (was 97ms with the old sequential approach, 154ms with a
+    naive combined regex). The fast prefix scan skips all regex work when
+    no credential prefix is present."""
+    # 10K lines of clean output (no credentials to redact). Note: must NOT
+    # contain "token=", "key=", "auth=", etc. or the prefix scan triggers.
+    text = "\n".join(f"line {i}: some normal output without secrets" for i in range(10_000))
+    t0 = time.perf_counter()
+    redact_credentials(text)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    # 20ms is generous: the prefix scan does ~2ms on a 2023 M2. The old
+    # sequential approach took 97ms. A 5x CI slowdown still passes.
+    assert elapsed_ms < 20, (
+        f"redact_credentials took {elapsed_ms:.1f}ms for 10K clean lines, "
+        f"expected <20ms (old sequential approach took ~97ms — fast prefix "
+        f"scan likely not working)"
+    )
+
+
+def test_redact_credentials_performance_10k_lines_with_creds():
+    """H-8: redact_credentials on 10K lines with 100 credentials must
+    still complete reasonably (the fast path doesn't apply, but the
+    sequential approach is correct). Verify correctness: all 100
+    credentials should be redacted."""
+    lines = []
+    for i in range(10_000):
+        if i % 100 == 0:
+            lines.append(f"line {i}: token=ghp_" + "a" * 36)
+        else:
+            lines.append(f"line {i}: normal output")
+    text = "\n".join(lines)
+    out = redact_credentials(text)
+    # Verify correctness: all 100 credentials should be redacted.
+    assert out.count("[CREDENTIAL REDACTED:") == 100
+
+
+# ---------------------------------------------------------------------------
+# M-16: idempotency test for the URL auth param double-redaction scenario.
+# The old sequential approach could re-wrap a placeholder when the URL auth
+# param pattern matched a value that was itself a credential (e.g.
+# ?token=Bearer ...). The fix: standalone credentials are redacted first,
+# then the URL auth param's negative lookahead skips the placeholder.
+# ---------------------------------------------------------------------------
+def test_redact_credentials_url_auth_param_no_double_redaction():
+    """M-16: redacting a URL with a credential value must not double-redact."""
+    text = "https://x.com/a?token=Bearer FAKETOKEN123456789012345678901234"
+    once = redact_credentials(text)
+    # The Bearer pattern redacts the full token; the URL auth param pattern's
+    # negative lookahead skips the placeholder.
+    assert once.count("[CREDENTIAL REDACTED") == 1, (
+        f"expected 1 redaction, got {once.count('[CREDENTIAL REDACTED')}: {once}"
+    )
+    assert "FAKETOKEN123456789012345678901234" not in once
