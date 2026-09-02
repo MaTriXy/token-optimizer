@@ -114,7 +114,7 @@ def test_trust_gate_accepts_system_prefix(c):
 def test_override_env_is_honored_when_trusted(c, monkeypatch):
     resolved = c._resolve_safe_python()  # a known-trusted absolute path on this host
     monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", resolved)
-    assert c._resolve_safe_python() == os.path.abspath(resolved)
+    assert c._resolve_safe_python() == os.path.realpath(resolved)
     # A bogus override is ignored: the resolver must never persist it. On hosts
     # with no trusted fallback (hosted-CI python is world-writable) it raises
     # instead -- either outcome proves the bogus path was not honoured.
@@ -152,7 +152,7 @@ def test_sys_executable_must_pass_the_trust_gate(c, monkeypatch):
 def test_sys_executable_returned_when_trusted(c, monkeypatch):
     monkeypatch.setattr(c, "_py_path_is_trusted", lambda p: True)
     monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", "")
-    assert c._resolve_safe_python() == os.path.abspath(sys.executable)
+    assert c._resolve_safe_python() == os.path.realpath(sys.executable)
 
 
 @pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
@@ -226,3 +226,33 @@ def test_gate_accepts_hosted_ci_self_group_writable_interpreter(c, monkeypatch, 
     monkeypatch.setattr(c.os, "stat",
                         _fake_stat(os.geteuid(), 0o777, os.geteuid(), 0o755))
     assert c._py_path_is_trusted(f) is False
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX symlink test")
+def test_resolver_persists_realpath_not_symlink(c, tmp_path, monkeypatch):
+    """B2-P1-1 (same bug as cursor_install): the resolver must persist the
+    resolved realpath, not the original symlink path. The gate validates
+    realpath(cand); persisting the symlink leaves a swap window."""
+    real_bin = tmp_path / "real-bin"
+    real_bin.mkdir(mode=0o755)
+    real_py = real_bin / "python3"
+    real_py.write_bytes(b"#!/bin/sh\n")
+    os.chmod(real_py, 0o755)
+    link_dir = tmp_path / "link-bin"
+    link_dir.mkdir(mode=0o755)
+    link_py = link_dir / "python3"
+    os.symlink(str(real_py), str(link_py))
+    monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", str(link_py))
+    resolved = c._resolve_safe_python()
+    assert resolved == str(real_py), (
+        f"resolver persisted {resolved} (symlink), expected {real_py} (realpath)"
+    )
+    assert not os.path.islink(resolved), "persisted path is still a symlink"
+
+
+def test_trust_gate_rejects_null_byte_path(c):
+    """B2-P3-1 (same as cursor_install): a null-byte path raises ValueError
+    from os.path.realpath, which must be caught alongside OSError."""
+    reason = c._py_trust_reason("/usr/bin/python3\x00/tmp/evil")
+    assert reason is not None, "null-byte path was not rejected"
+    assert "stat failed" in reason or "null" in reason.lower()
