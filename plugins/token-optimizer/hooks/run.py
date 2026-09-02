@@ -424,6 +424,32 @@ def main() -> int:
     # child's default open() encoding UTF-8; PYTHONIOENCODING covers its std streams.
     child_env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
 
+    # Hot-path latency (Track F lever 2): resolve the runtime HERE and hand the
+    # answer to the child via TOKEN_OPTIMIZER_RUNTIME, the override tier
+    # detect_runtime() already honors (the Copilot hook bridge uses the same
+    # mechanism). Without this, runtime detection runs twice per hook event —
+    # once in this process (during _check_consent's plugin_env import) and once
+    # in the child (during its own plugin_env import) — and each run pays the
+    # OpenCode ancestor `ps` scan (~100 ms measured). This process's parent is
+    # the long-lived host CLI, so runtime_env's negative-result ancestor cache
+    # (keyed by parent pid) makes the scan here near-free after the first hook
+    # of a session; the child's parent is this ephemeral process, so its cache
+    # can never hit and the export is the only way to spare it. The exported
+    # value IS detect_runtime()'s own resolution for this env — the child's
+    # process tree adds only this dispatcher and its child, never an
+    # opencode/copilot ancestor, so the child would always resolve identically.
+    # Fail-open: any error here leaves the child to detect normally.
+    try:
+        _scripts_dir = root_resolved / "skills" / "token-optimizer" / "scripts"
+        if _scripts_dir.is_dir():
+            if str(_scripts_dir) not in sys.path:
+                sys.path.insert(0, str(_scripts_dir))
+            import runtime_env as _runtime_env
+
+            child_env["TOKEN_OPTIMIZER_RUNTIME"] = _runtime_env.detect_runtime()
+    except Exception:
+        pass
+
     proc = None
     global _child_proc
     # Install SIGTERM/SIGINT handlers BEFORE spawning the child so an external

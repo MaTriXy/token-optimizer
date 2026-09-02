@@ -63,7 +63,8 @@ _BANNED_OS_ATTRS = {"system", "popen", "startfile"}
 # instead of the suite going green on zero findings.
 KNOWN_SITES = {
     "bash_compress.py": 1,   # the Bash-tool wrapper's subprocess.run
-    "runtime_env.py": 2,     # two `ps` ancestor scans (posix-only branches)
+    "runtime_env.py": 1,     # the shared `ps` process snapshot (one spawn serves
+                             # both ancestor scans; Track F hot-path merge)
     "utf8_io.py": 1,         # the UTF-8 re-exec Popen
     "spawn_utils.py": 2,     # primary Popen + the ACCESS_DENIED retry Popen
 }

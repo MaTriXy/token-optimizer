@@ -48,9 +48,12 @@ adapters grow feature-by-feature on top of it.
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 _RUNTIME_OVERRIDE = "TOKEN_OPTIMIZER_RUNTIME"
@@ -510,67 +513,198 @@ def _opencode_env_signal() -> bool:
     return any(os.environ.get(var) for var in _OPENCODE_ENV_SIGNALS)
 
 
+# ---------------------------------------------------------------------------
+# Shared process snapshot + negative-result ancestor-scan cache (hot path).
+#
+# Every hook invocation is a fresh Python process, and detect_runtime() used to
+# spawn one `ps` per ancestor scanner on the hot path (~100 ms each measured).
+# Two fixes, both behavior-preserving:
+#
+# 1. ONE `ps -Ao pid=,ppid=,comm=,args=` snapshot per process, shared by every
+#    scanner. A process's ancestor chain is fixed for its lifetime, so a single
+#    snapshot is exact; the OpenCode and Copilot scans read different columns
+#    of the same table.
+# 2. A short-TTL disk cache of the OpenCode scan's NEGATIVE result ("no
+#    opencode ancestor"), keyed by parent pid + runtime-signal env signature.
+#    Only the negative result is cached: a stale entry can then only ever
+#    reproduce the pre-#57 claude-tier fallback for at most one TTL window,
+#    never flip a genuine Claude/Codex session into another runtime's home.
+# ---------------------------------------------------------------------------
+
+_ANCESTOR_CACHE_TTL_SECONDS = 120
+_ANCESTOR_CACHE_VERSION = 1
+# Bound reads of the ancestor-scan cache file. The payload this module writes
+# is ~120 bytes; anything larger is corrupt or hostile and is ignored.
+_MAX_CACHE_BYTES = 4096
+
+# Every env var whose value can change which runtime a hook resolves to. The
+# cache key hashes their values so two sessions with different signals never
+# share an entry.
+_ANCESTOR_CACHE_ENV_VARS = (
+    _RUNTIME_OVERRIDE,
+    "CLAUDE_PLUGIN_ROOT",
+    "CLAUDE_PLUGIN_DATA",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ID",
+    _CODEX_HOME_ENV,
+    _HERMES_HOME_ENV,
+    _COPILOT_HOME_ENV,
+    _TO_COPILOT_HOME_ENV,
+    *_OPENCODE_ENV_SIGNALS,
+    _PROC_SCAN_DISABLE_ENV,
+)
+
+_PROC_SCAN_SNAPSHOT: dict | None = None
+
+
+def _load_proc_snapshot() -> dict:
+    """One process-table snapshot per process, shared by all ancestor scanners.
+
+    Returns a dict with keys: disabled (bool), parents {pid: ppid},
+    comms {pid: comm}, cmdlines {pid: args}. On any ps failure the tables are
+    empty, which makes every scanner walk find nothing — the same result the
+    previous per-scanner error handling produced.
+    """
+    global _PROC_SCAN_SNAPSHOT
+    if _PROC_SCAN_SNAPSHOT is not None:
+        return _PROC_SCAN_SNAPSHOT
+    disabled = bool(
+        os.environ.get(_PROC_SCAN_DISABLE_ENV, "").strip()
+    ) or sys.platform.startswith("win")
+    snapshot: dict = {
+        "disabled": disabled,
+        "parents": {},
+        "comms": {},
+        "cmdlines": {},
+    }
+    if not disabled:
+        try:
+            import subprocess
+
+            proc = subprocess.run(
+                ["ps", "-Ao", "pid=,ppid=,comm=,args="],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=2,
+                # Unreachable on Windows (the disabled guard above returns
+                # first), but carried anyway so every spawn in this file states
+                # the #107 no-flash intent. 0 on POSIX, so a no-op here.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if proc.returncode == 0:
+                for line in proc.stdout.splitlines():
+                    parts = line.split(None, 3)
+                    if len(parts) < 3:
+                        continue
+                    try:
+                        pid, ppid = int(parts[0]), int(parts[1])
+                    except ValueError:
+                        continue
+                    snapshot["parents"][pid] = ppid
+                    # Defunct/kernel rows can carry a comm but no args.
+                    snapshot["comms"][pid] = parts[2]
+                    if len(parts) > 3:
+                        snapshot["cmdlines"][pid] = parts[3]
+        except Exception:
+            pass
+    _PROC_SCAN_SNAPSHOT = snapshot
+    return snapshot
+
+
+def _ancestor_cache_path() -> Path:
+    """Runtime-neutral cache location (XDG cache), safe to compute pre-detection."""
+    return _xdg_base("XDG_CACHE_HOME", ".cache") / "token-optimizer" / "ancestor-scan.json"
+
+
+def _ancestor_cache_key() -> str:
+    """Key binding the cached negative result to this parent + signal env."""
+    raw = "\n".join(
+        f"{name}={os.environ.get(name, '')}" for name in _ANCESTOR_CACHE_ENV_VARS
+    )
+    return f"{os.getppid()}:{hashlib.sha256(raw.encode('utf-8', 'replace')).hexdigest()}"
+
+
+def _ancestor_negative_cached() -> bool:
+    """True when a fresh cache entry says this session had no opencode ancestor."""
+    try:
+        path = _ancestor_cache_path()
+        if not path.is_file() or path.stat().st_size > _MAX_CACHE_BYTES:
+            return False
+        with path.open("r", encoding="utf-8") as fh:
+            entry = json.load(fh)
+        if not isinstance(entry, dict):
+            return False
+        if entry.get("version") != _ANCESTOR_CACHE_VERSION:
+            return False
+        if entry.get("key") != _ancestor_cache_key():
+            return False
+        ts = entry.get("ts")
+        if not isinstance(ts, (int, float)):
+            return False
+        return (time.time() - ts) < _ANCESTOR_CACHE_TTL_SECONDS
+    except (OSError, ValueError, RecursionError):
+        return False
+
+
+def _store_ancestor_negative() -> None:
+    """Persist a negative opencode-ancestor scan result. Best-effort, atomic."""
+    try:
+        path = _ancestor_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        payload = json.dumps({
+            "version": _ANCESTOR_CACHE_VERSION,
+            "key": _ancestor_cache_key(),
+            "ts": time.time(),
+        })
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.write(payload)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except (OSError, ValueError):
+        try:
+            tmp.unlink(missing_ok=True)
+        except (OSError, UnboundLocalError):
+            pass
+
+
 def _ancestor_in_process_tree(basenames: frozenset) -> bool:
     """Best-effort: is one of ``basenames`` an ancestor of this process?
 
     Used only as a fallback signal when a host CLI runs this skill without
-    exporting an identifying env var. A single ``ps`` call is parsed in memory
-    and the parent chain is walked from this PID upward.
+    exporting an identifying env var. Reads the shared one-shot process
+    snapshot (``_load_proc_snapshot``) instead of spawning its own ``ps``:
+    a process's ancestor chain is fixed for its lifetime, so one snapshot
+    per process is exact for every scanner, and the OpenCode and Copilot
+    scans no longer pay two separate spawns (hot-path latency, Track F).
 
-    Never raises and never blocks for long: disabled on Windows, behind a short
-    timeout, and skippable via TOKEN_OPTIMIZER_NO_PROC_SCAN.
+    Never raises and never blocks for long: disabled on Windows, behind a
+    short timeout, and skippable via TOKEN_OPTIMIZER_NO_PROC_SCAN.
     """
-    if os.environ.get(_PROC_SCAN_DISABLE_ENV, "").strip():
+    snapshot = _load_proc_snapshot()
+    if snapshot["disabled"]:
         return False
-    if sys.platform.startswith("win"):
-        return False
-    try:
-        import subprocess
-
-        proc = subprocess.run(
-            ["ps", "-Ao", "pid=,ppid=,comm="],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=2,
-            # Unreachable on Windows (the sys.platform guard above returns
-            # first), but carried anyway so every spawn in this file states the
-            # #107 no-flash intent. 0 on POSIX, so a no-op here.
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if proc.returncode != 0:
-            return False
-        parents: dict[int, int] = {}
-        names: dict[int, str] = {}
-        for line in proc.stdout.splitlines():
-            parts = line.split(None, 2)
-            if len(parts) < 3:
-                continue
-            try:
-                pid, ppid = int(parts[0]), int(parts[1])
-            except ValueError:
-                continue
-            parents[pid] = ppid
-            names[pid] = parts[2]
-        pid = os.getpid()
-        seen: set[int] = set()
-        depth = 0
-        while pid and pid > 1 and pid not in seen and depth < 40:
-            seen.add(pid)
-            depth += 1
-            # Exact basename match, not a substring: an unrelated binary like
-            # "my-opencode-helper" or a repo dir named "opencode" in argv must
-            # not flip a genuine Claude Code session into another runtime's
-            # mode. The real CLIs run under their bare binary name (or
-            # name.exe on Windows).
-            comm = os.path.basename(names.get(pid, "")).lower()
-            if comm in basenames:
-                return True
-            pid = parents.get(pid, 0)
-        return False
-    except Exception:
-        return False
+    parents = snapshot["parents"]
+    comms = snapshot["comms"]
+    pid = os.getpid()
+    seen: set[int] = set()
+    depth = 0
+    while pid and pid > 1 and pid not in seen and depth < 40:
+        seen.add(pid)
+        depth += 1
+        # Exact basename match, not a substring: an unrelated binary like
+        # "my-opencode-helper" or a repo dir named "opencode" in argv must
+        # not flip a genuine Claude Code session into another runtime's
+        # mode. The real CLIs run under their bare binary name (or
+        # name.exe on Windows).
+        comm = os.path.basename(comms.get(pid, "")).lower()
+        if comm in basenames:
+            return True
+        pid = parents.get(pid, 0)
+    return False
 
 
 _OPENCODE_BASENAMES = frozenset({"opencode", "opencode.exe"})
@@ -677,57 +811,41 @@ def _is_opencode_command(args: str) -> bool:
 def _opencode_in_process_tree() -> bool:
     """Best-effort: is OpenCode an ancestor of this process?
 
-    Scans the parent chain using full command lines (``ps -o args``) so that
-    OpenCode launched through ``node``/``bun`` is recognized, not only a bare
-    ``opencode`` binary (issue #57). Same safety envelope as
+    Scans the parent chain using full command lines so that OpenCode launched
+    through ``node``/``bun`` is recognized, not only a bare ``opencode`` binary
+    (issue #57). Reads the shared one-shot process snapshot (one ``ps`` per
+    process, shared with the Copilot scanner). A fresh NEGATIVE result is
+    persisted to a short-TTL disk cache keyed by parent pid + signal-env
+    signature, so subsequent hook processes in the same session skip the scan
+    entirely; only the negative result is cached, so a stale entry can never
+    flip a session INTO another runtime (worst case: the pre-#57 claude-tier
+    fallback for at most one TTL window). Same safety envelope as
     ``_ancestor_in_process_tree``: disabled on Windows, behind a short timeout,
     skippable via TOKEN_OPTIMIZER_NO_PROC_SCAN, and never raises.
     """
-    if os.environ.get(_PROC_SCAN_DISABLE_ENV, "").strip():
+    if _ancestor_negative_cached():
         return False
-    if sys.platform.startswith("win"):
+    snapshot = _load_proc_snapshot()
+    if snapshot["disabled"]:
         return False
-    try:
-        import subprocess
-
-        proc = subprocess.run(
-            ["ps", "-Ao", "pid=,ppid=,args="],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=2,
-            # Unreachable on Windows (the sys.platform guard above returns
-            # first), but carried anyway so every spawn in this file states the
-            # #107 no-flash intent. 0 on POSIX, so a no-op here.
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if proc.returncode != 0:
-            return False
-        parents: dict[int, int] = {}
-        cmdlines: dict[int, str] = {}
-        for line in proc.stdout.splitlines():
-            parts = line.split(None, 2)
-            if len(parts) < 3:
-                continue
-            try:
-                pid, ppid = int(parts[0]), int(parts[1])
-            except ValueError:
-                continue
-            parents[pid] = ppid
-            cmdlines[pid] = parts[2]
-        pid = os.getpid()
-        seen: set[int] = set()
-        depth = 0
-        while pid and pid > 1 and pid not in seen and depth < 40:
-            seen.add(pid)
-            depth += 1
-            if _is_opencode_command(cmdlines.get(pid, "")):
-                return True
-            pid = parents.get(pid, 0)
-        return False
-    except Exception:
-        return False
+    parents = snapshot["parents"]
+    cmdlines = snapshot["cmdlines"]
+    pid = os.getpid()
+    seen: set[int] = set()
+    depth = 0
+    found = False
+    while pid and pid > 1 and pid not in seen and depth < 40:
+        seen.add(pid)
+        depth += 1
+        if _is_opencode_command(cmdlines.get(pid, "")):
+            found = True
+            break
+        pid = parents.get(pid, 0)
+    if not found and not snapshot["disabled"]:
+        # Cache only the negative outcome (see docstring): a positive finding
+        # is re-derived live on every scan so a runtime can never be sticky.
+        _store_ancestor_negative()
+    return found
 
 
 def _opencode_process_signal() -> bool:
