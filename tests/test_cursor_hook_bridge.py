@@ -400,3 +400,21 @@ def test_stop_rollup_throttle_is_atomic_under_concurrency(monkeypatch, tmp_path)
     t1, t2 = threading.Thread(target=run), threading.Thread(target=run)
     t1.start(); t2.start(); t1.join(); t2.join()
     assert results.count(True) <= 1, results
+
+
+def test_post_tool_use_nudge_in_single_locked_write(monkeypatch, tmp_path, capsys):
+    """P1-4: the nudge_level update is folded into the tally's one locked RMW;
+    a single postToolUse that crosses a threshold bumps tool_calls AND
+    nudge_level in the same file write and emits the nudge once."""
+    monkeypatch.setattr(bridge, "cursor_home", lambda: tmp_path)
+    payload = {"hook_event_name": "postToolUse", "tool_name": "Shell",
+               "tool_input": {"command": "ls"},
+               "conversation_id": "nudge-conv", "cursor_version": "3.18.9"}
+    for _ in range(bridge._NUDGE_TOOL_CALLS[0]):
+        bridge.handle_post_tool_use(payload)
+    tally = bridge._load_tally(bridge._tally_path({"conversation_id": "nudge-conv"}))
+    assert tally["tool_calls"] == bridge._NUDGE_TOOL_CALLS[0]
+    assert tally["nudge_level"] >= 1
+    assert "_nudge_emitted" not in tally  # consumed by the handler, never persisted
+    out = capsys.readouterr().out
+    assert out.count("additional_context") == 1

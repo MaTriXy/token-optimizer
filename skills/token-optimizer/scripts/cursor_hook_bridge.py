@@ -355,7 +355,8 @@ def _session_lock(to_dir, sid):
 
 
 def _update_tally(fields, *, terminal=False, end_reason=None,
-                  increment_turns=False, count_tool=False, compaction=None):
+                  increment_turns=False, count_tool=False, compaction=None,
+                  bump_nudge=False):
     """Read-modify-write the session tally; returns the tally or None.
 
     Non-terminal activity reopens an idle/sessionEnd-finalised tally (final set
@@ -418,7 +419,20 @@ def _update_tally(fields, *, terminal=False, end_reason=None,
             comps.append(compaction)
             tally["compactions"] = comps[-200:]
 
-        _atomic_write_json(path, tally)
+        # Context-growth nudge (R10), folded into THIS locked RMW: computing it
+        # in the caller needed a second lock (and a gap a concurrent stop/
+        # preCompact could exploit to clobber either the tool_calls increment
+        # or the nudge_level). preCompact gives real numbers; when it never
+        # fired the tool-call count is the honest available proxy.
+        if bump_nudge:
+            new_level = _nudge_level(int(tally.get("tool_calls", 0) or 0))
+            if new_level > int(tally.get("nudge_level", 0) or 0):
+                tally["nudge_level"] = new_level
+                tally["_nudge_emitted"] = True
+
+        # The marker is for the caller only; the persisted tally stays clean.
+        persist = {k: v for k, v in tally.items() if k != "_nudge_emitted"}
+        _atomic_write_json(path, persist)
         return tally
 
 
@@ -727,25 +741,10 @@ def handle_post_tool_use(payload):
                      tool_name=fields["tool_name"] or None,
                      rewrite=rewrite)
 
-    tally = _update_tally(fields, count_tool=True)
+    tally = _update_tally(fields, count_tool=True, bump_nudge=True)
     if tally is None:
         return
-
-    # Context-growth nudge (R10). preCompact gives real numbers; when it never
-    # fired the tool-call count is the honest available proxy.
-    tool_calls = int(tally.get("tool_calls", 0) or 0)
-    new_level = _nudge_level(tool_calls)
-    old_level = int(tally.get("nudge_level", 0) or 0)
-    if new_level > old_level:
-        with _session_lock(_to_dir(), fields["conversation_id"]) as acquired:
-            if not acquired:
-                return
-            # Re-read under the lock so the nudge_level write is not lost to a
-            # concurrent sibling chat writing the same tally.
-            tpath = _tally_path(fields)
-            t = _load_tally(tpath) or tally
-            t["nudge_level"] = new_level
-            _atomic_write_json(tpath, t)
+    if tally.pop("_nudge_emitted", False):
         _emit({"additional_context": _NUDGE_TEXT})
 
 
