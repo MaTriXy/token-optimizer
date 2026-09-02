@@ -83,6 +83,7 @@ import threading
 import tempfile
 import textwrap
 import time
+import types
 import platform
 import shutil
 from collections import deque
@@ -6837,15 +6838,18 @@ def _run_session_end_flush_worker(args):
                 pass
     except _HookTimeout:
         pass
-    # Optional local post-flush extensions (admin-placed, OFF by default).
-    # See _run_post_flush_extensions: nothing is loaded unless the file exists,
-    # every failure is swallowed, and extensions get the remaining flush budget.
-    try:
-        _run_post_flush_extensions(
-            time_left_fn=old_budget.remaining,
-            version=TOKEN_OPTIMIZER_VERSION)
-    except Exception:
-        pass
+    else:
+        # Optional local post-flush extensions (admin-placed, OFF by default).
+        # See _run_post_flush_extensions: nothing is loaded unless the file
+        # exists, every failure is swallowed, and extensions get the remaining
+        # flush budget. Runs in an else so a BaseException from the flush work
+        # still hits the finally below (lock + budget must always release).
+        try:
+            _run_post_flush_extensions(
+                time_left_fn=old_budget.remaining,
+                version=TOKEN_OPTIMIZER_VERSION)
+        except Exception:
+            pass
     finally:
         _clear_hook_budget(old_budget)
         _release_session_end_flush_lock(lock_dir)
@@ -6872,15 +6876,20 @@ def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
     """
     ext_path = CONFIG_DIR / "extensions" / "post_flush.py"
     try:
-        if not ext_path.is_file():
-            return None
-        st = ext_path.stat()
-        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-            return None
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("_to_post_flush_ext", str(ext_path))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        # Open once and judge the fd, not the path: a stat()-then-exec would
+        # leave a window where the file is swapped (or symlink-retargeted)
+        # between the permission check and the code actually executed.
+        fd = os.open(ext_path, os.O_RDONLY)
+        try:
+            st = os.fstat(fd)
+            if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                return None
+            source = os.read(fd, st.st_size if st.st_size > 0 else 1_048_576)
+        finally:
+            os.close(fd)
+        module = types.ModuleType("_to_post_flush_ext")
+        module.__file__ = str(ext_path)
+        exec(compile(source, str(ext_path), "exec"), module.__dict__)
         run = getattr(module, "run", None)
         if not callable(run):
             return None

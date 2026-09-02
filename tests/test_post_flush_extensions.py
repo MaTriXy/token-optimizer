@@ -87,6 +87,11 @@ def test_fail_open_on_missing_run(m):
     assert m._run_post_flush_extensions(time_left_fn=lambda: 10) is None
 
 
+def test_fail_open_on_non_callable_run(m):
+    _install_ext(m, "run = 'not a function'\n")
+    assert m._run_post_flush_extensions(time_left_fn=lambda: 10) is None
+
+
 def test_world_writable_extension_ignored(m):
     p = _install_ext(m, "def run(ctx):\n    return 'ran'\n")
     os.chmod(str(p), 0o666)
