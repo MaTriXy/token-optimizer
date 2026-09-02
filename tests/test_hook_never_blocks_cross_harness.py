@@ -220,7 +220,8 @@ def test_every_hooks_json_command_routes_through_launcher_and_exits_zero(hooks_p
 
 # ---- Bridge harnesses (Hermes, Copilot): source-level non-propagation guard ------
 
-@pytest.mark.parametrize("bridge", ["hermes_hook_bridge.py", "copilot_hook_bridge.py"])
+@pytest.mark.parametrize("bridge", ["hermes_hook_bridge.py", "copilot_hook_bridge.py",
+                                     "cursor_hook_bridge.py"])
 def test_bridge_swallows_subprocess_failure(bridge):
     path = SCRIPTS / bridge
     if not path.exists():

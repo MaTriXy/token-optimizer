@@ -70,6 +70,11 @@ BRIDGE_FILES = (
     "copilot_hook_bridge.py",
     "copilot_vscode.py",
     "copilot_state.py",
+    "cursor_install.py",
+    "cursor_doctor.py",
+    "cursor_session.py",
+    "cursor_hook_bridge.py",
+    "cursor_state.py",
 )
 
 # Files known to contain at least one process-creating call. Anything NOT in
@@ -80,6 +85,8 @@ SPAWNING_FILES = frozenset({
     "hermes_hook_bridge.py",
     "hermes_doctor.py",
     "copilot_hook_bridge.py",
+    "cursor_hook_bridge.py",
+    "cursor_doctor.py",
 })
 
 # Callables that actually create a process. `subprocess.list2cmdline` is
@@ -266,7 +273,9 @@ def test_detached_sites_still_route_through_spawn_utils():
     asserts the helper is still the path (the scan above catches the raw Popen).
     """
     # +1 each for the Gap-2 session-end dashboard regen (also via spawn_detached).
-    expected = {"hermes_hook_bridge.py": 3, "copilot_hook_bridge.py": 2}
+    # Cursor: one rollup + one dashboard spawn (stop shares both throttle paths).
+    expected = {"hermes_hook_bridge.py": 3, "copilot_hook_bridge.py": 2,
+                "cursor_hook_bridge.py": 2}
     for name, count in expected.items():
         tree = _parse(name)
         calls = [

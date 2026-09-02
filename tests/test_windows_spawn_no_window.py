@@ -646,6 +646,53 @@ def test_copilot_stop_posix_uses_start_new_session(copilot, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# cursor_hook_bridge.py: handle_stop -- spawn_detached
+# ---------------------------------------------------------------------------
+@pytest.fixture()
+def cursor(monkeypatch):
+    for _mod in ("cursor_hook_bridge", "spawn_utils", "runtime_env"):
+        if _mod in sys.modules:
+            del sys.modules[_mod]
+    mod = importlib.import_module("cursor_hook_bridge")
+    yield mod
+    for _mod in ("cursor_hook_bridge", "spawn_utils", "runtime_env"):
+        if _mod in sys.modules:
+            del sys.modules[_mod]
+
+
+def _cursor_stop_payload():
+    return {"hook_event_name": "stop", "conversation_id": "sid"}
+
+
+def _silence_cursor_stop_side_effects(cursor, monkeypatch):
+    # Isolate the spawn behaviour: the tally/ledger/throttle writes are covered
+    # in test_cursor_hook_bridge.py; force the stop throttle past so the two
+    # detached spawns actually run.
+    monkeypatch.setattr(cursor, "_update_tally", lambda fields, **k: {})
+    monkeypatch.setattr(cursor, "_record_observed", lambda event, **k: None)
+    monkeypatch.setattr(cursor, "_stop_rollup_due", lambda: True)
+
+
+def test_cursor_stop_nt_uses_creationflags(cursor, monkeypatch):
+    _set_nt_spawn_utils(monkeypatch)
+    cap = _capture_spawn_detached_popen(monkeypatch)
+    _silence_cursor_stop_side_effects(cursor, monkeypatch)
+    cursor.handle_stop(_cursor_stop_payload())
+    assert "creationflags" in cap
+    assert cap["creationflags"] == _DETACH_FLAGS
+    assert "start_new_session" not in cap
+
+
+def test_cursor_stop_posix_uses_start_new_session(cursor, monkeypatch):
+    _set_posix_spawn_utils(monkeypatch)
+    cap = _capture_spawn_detached_popen(monkeypatch)
+    _silence_cursor_stop_side_effects(cursor, monkeypatch)
+    cursor.handle_stop(_cursor_stop_payload())
+    assert cap.get("start_new_session") is True
+    assert "creationflags" not in cap
+
+
+# ---------------------------------------------------------------------------
 # hooks/run.py: SPECIAL spawn (inherits stdio) + tree reap
 # ---------------------------------------------------------------------------
 def _load_run_py():
