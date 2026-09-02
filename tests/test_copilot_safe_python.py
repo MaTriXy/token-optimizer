@@ -102,12 +102,11 @@ def test_trust_gate_accepts_owned_unwritable_file(c):
 
 
 def test_trust_gate_accepts_system_prefix(c):
-    """Root-owned system installs are trusted by prefix (they are not user-
-    writable), so the fallback never rejects a legitimate /usr/bin/python3."""
+    """Root/admin-owned system interpreters are trusted on ownership and
+    writability, so the fallback never rejects a legitimate /usr/bin/python3."""
     for p in ("/usr/bin/python3", "/opt/homebrew/bin/python3",
               "/opt/hostedtoolcache/Python/3.12/x64/bin/python"):
-        # only assert on prefixes that actually resolve to a file on this host;
-        # the point is the prefix logic, not that every path exists everywhere.
+        # only assert on paths that actually resolve to a file on this host.
         if os.path.isfile(p):
             assert c._py_path_is_trusted(p) is True, p
 
@@ -122,8 +121,10 @@ def test_override_env_is_honored_when_trusted(c, monkeypatch):
     monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", "/nonexistent/python3")
     try:
         fallback = c._resolve_safe_python()
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        # No trusted fallback on this host; the bogus override must still be
+        # named as rejected, never silently honoured.
+        assert "/nonexistent/python3" in str(exc)
     else:
         assert os.path.isfile(fallback)
         assert fallback != "/nonexistent/python3"
@@ -155,36 +156,6 @@ def test_sys_executable_returned_when_trusted(c, monkeypatch):
 
 
 @pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
-def test_trusted_prefix_still_checks_writability(c, monkeypatch, tmp_path):
-    """P1-6: the prefix allowlist no longer short-circuits before the
-    writability check -- a group/other-writable interpreter under a trusted
-    prefix is rejected."""
-    d = tmp_path / "homebrew-bin"
-    d.mkdir()
-    f = d / "python3"
-    f.write_text("", encoding="utf-8")
-    monkeypatch.setattr(c, "_TRUSTED_PY_PREFIXES", (str(d) + "/",))
-    os.chmod(d, 0o777); os.chmod(f, 0o755)
-    assert c._py_path_is_trusted(str(f)) is False
-    os.chmod(d, 0o755); os.chmod(f, 0o777)
-    assert c._py_path_is_trusted(str(f)) is False
-    os.chmod(f, 0o755)
-    assert c._py_path_is_trusted(str(f)) is True
-
-
-
-def _fake_stat(uid_file, mode_file, uid_dir, mode_dir):
-    import stat as _s
-    class R:
-        def __init__(self, uid, mode, gid=None):
-            self.st_uid = uid
-            self.st_gid = os.getegid() if gid is None else gid
-            self.st_mode = _s.S_IFREG | mode
-    def fake(path, *a, **k):
-        return R(uid_dir, mode_dir) if str(path).endswith("bin") else R(uid_file, mode_file)
-    return fake
-
-@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
 def test_gate_accepts_ci_and_admin_owned_layouts(c, monkeypatch, tmp_path):
     """Hosted-CI and admin layouts must be trusted: root-owned interpreter in a
     root-owned 0775 dir (hostedtoolcache-as-root), and euid-owned interpreter
@@ -210,7 +181,7 @@ def test_gate_rejects_third_party_group_writable_dir(c, monkeypatch, tmp_path):
     monkeypatch.setattr(c.os, "stat", _fake_stat(0, 0o755, 0, 0o777))
     assert c._py_path_is_trusted(f) is False
 
-def _fake_stat(uid_file, mode_file, uid_dir, mode_dir, gid=None):
+def _fake_stat(uid_file, mode_file, uid_dir, mode_dir, gid=None, gid_dir=None):
     import stat as _s
     class R:
         def __init__(self, uid, mode, gid=None):
@@ -218,9 +189,22 @@ def _fake_stat(uid_file, mode_file, uid_dir, mode_dir, gid=None):
             self.st_gid = os.getegid() if gid is None else gid
             self.st_mode = _s.S_IFREG | mode
     def fake(path, *a, **k):
-        return R(uid_dir, mode_dir) if str(path).endswith("bin") else R(uid_file, mode_file, gid)
+        return (R(uid_dir, mode_dir, gid_dir) if str(path).endswith("bin")
+                else R(uid_file, mode_file, gid))
     return fake
 
+
+@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
+def test_gate_rejects_foreign_group_writable_dir(c, monkeypatch, tmp_path):
+    """An euid-owned dir that is group-writable by a FOREIGN group lets that
+    group swap the interpreter; the dir's gid must be checked, not just its
+    owner (the file rule already checks gid; the dir rule must match)."""
+    f = str(tmp_path / "bin" / "python3")
+    other_gid = (os.getegid() or 1000) + 1
+    monkeypatch.setattr(c.os, "stat",
+                        _fake_stat(os.geteuid(), 0o755, os.geteuid(), 0o775,
+                                   gid_dir=other_gid))
+    assert c._py_path_is_trusted(f) is False
 
 
 @pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")

@@ -83,14 +83,6 @@ def _host_hooks_path(root: Path) -> Path:
     return root / "hooks.json"
 
 
-# System install dirs: root-owned and not user-writable, so trusted by prefix --
-# mirrors the launcher's _SAFE_PREFIXES and copilot_install._TRUSTED_PY_PREFIXES.
-_TRUSTED_PY_PREFIXES = (
-    "/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/", "/opt/homebrew/opt/",
-    "/home/linuxbrew/.linuxbrew/bin/", "/opt/hostedtoolcache/",
-)
-
-
 def _py_trust_reason(p: str) -> str | None:
     """None when trusted, else a short human-readable rejection reason."""
     try:
@@ -124,15 +116,20 @@ def _py_trust_reason(p: str) -> str | None:
         if not _admin_owned(st_file.st_uid):
             return f"{real} is owned by uid {st_file.st_uid}, not by us or root"
         # The containing DIR must not be world-writable. Group-writable is the
-        # admin-group case (Homebrew Cellar 0775, hostedtoolcache 0775 under
-        # the runner's own group) and is accepted only when the DIR itself is
-        # admin-owned -- a group-writable dir owned by a third party would let
-        # that party swap the interpreter.
+        # admin-group case (hostedtoolcache 0775 under the runner's own group)
+        # and is accepted only when root owns the dir, or when the owner is us
+        # AND the writable group is our own primary group -- a group-writable
+        # dir whose group is any other account would let that account swap the
+        # interpreter.
         if st_dir.st_mode & _stat.S_IWOTH:
             return f"{os.path.dirname(real)} is world-writable"
-        if st_dir.st_mode & _stat.S_IWGRP and not _admin_owned(st_dir.st_uid):
-            return (f"{os.path.dirname(real)} is group-writable and owned by "
-                    f"uid {st_dir.st_uid}")
+        if st_dir.st_mode & _stat.S_IWGRP and not (
+            st_dir.st_uid == 0
+            or (st_dir.st_uid == euid and st_dir.st_gid == os.getegid())
+        ):
+            return (f"{os.path.dirname(real)} is group-writable by a group "
+                    f"the user does not control (uid {st_dir.st_uid}, "
+                    f"gid {st_dir.st_gid})")
         return None
     except OSError as exc:
         return f"stat failed: {exc}"
@@ -141,9 +138,7 @@ def _py_trust_reason(p: str) -> str | None:
 def _py_path_is_trusted(p: str) -> bool:
     """Trusted iff the interpreter's bytes are admin-owned (euid or root) and
     not group/other-writable, and its dir is not world-writable and not
-    group-writable by a third party. Pure stat, never runs the target.
-    _TRUSTED_PY_PREFIXES documents the known system locations but is no longer
-    a bypass: the ownership+writability rule accepts them on its own. On
+    group-writable by a third party. Pure stat, never runs the target. On
     Windows, stat ownership is unreliable under Git-Bash, so require only that
     the path is a real file."""
     return _py_trust_reason(p) is None
@@ -161,23 +156,20 @@ def _resolve_safe_python() -> str:
     Raises RuntimeError rather than persist an unsafe command.
     """
     override = os.environ.get("TOKEN_OPTIMIZER_PYTHON", "").strip()
-    if override and _py_path_is_trusted(override):
-        return os.path.abspath(override)
-    if sys.executable and _py_path_is_trusted(sys.executable):
-        return os.path.abspath(sys.executable)
-    for name in ("python3", "python"):
-        cand = shutil.which(name)
-        if cand and _py_path_is_trusted(cand):
-            return os.path.abspath(cand)
-    reasons = []
+    candidates = []
     if override:
-        reasons.append(f"TOKEN_OPTIMIZER_PYTHON={override}: {_py_trust_reason(override) or 'accepted'}")
+        candidates.append(("TOKEN_OPTIMIZER_PYTHON", override))
     if sys.executable:
-        reasons.append(f"sys.executable={sys.executable}: {_py_trust_reason(sys.executable) or 'accepted'}")
+        candidates.append(("sys.executable", sys.executable))
     for name in ("python3", "python"):
         cand = shutil.which(name)
         if cand:
-            reasons.append(f"{name}={cand}: {_py_trust_reason(cand) or 'accepted'}")
+            candidates.append((name, cand))
+    for _label, cand in candidates:
+        if _py_path_is_trusted(cand):
+            return os.path.abspath(cand)
+    reasons = [f"{label}={cand}: {_py_trust_reason(cand)}"
+               for label, cand in candidates]
     raise RuntimeError(
         "no trusted python interpreter found for the Cursor hook; "
         "set TOKEN_OPTIMIZER_PYTHON to an absolute python3 path and re-run install. "
