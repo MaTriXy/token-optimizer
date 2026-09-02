@@ -210,7 +210,9 @@ def _ro_connect(path: Path) -> Iterator[sqlite3.Connection]:
     # interpolation. With uri=True, characters like ?, #, % and spaces in the
     # path are URI syntax, so a path containing '?' would start the query
     # string early and could drop or override mode=ro (opening read-write).
-    db_uri = Path(path).as_uri()
+    # N-4 (M-3 parity): resolve() first so a relative path doesn't raise an
+    # uncaught ValueError past callers that only catch (sqlite3.Error, OSError).
+    db_uri = Path(path).resolve().as_uri()
     conn = sqlite3.connect(
         f"{db_uri}?mode=ro&immutable=1",
         uri=True,
