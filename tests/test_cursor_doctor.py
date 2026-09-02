@@ -105,6 +105,11 @@ def test_probe_fires_all_installed_events(monkeypatch, tmp_path):
     cur.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("TOKEN_OPTIMIZER_CURSOR_HOME", str(cur))
+    # The probe now validates the persisted python through the trust gate
+    # (B2-P2-1). On hosted-CI runners sys.executable may be world-writable
+    # (hostedtoolcache), which the gate correctly rejects. This test is about
+    # probe execution, not trust validation, so bypass the gate.
+    monkeypatch.setattr(cd, "_py_path_is_trusted", lambda p: True)
     _write_hooks(cur)
 
     results = cd.run_probe()
@@ -175,3 +180,32 @@ def test_parse_hook_command_handles_platform_native_paths():
     bridge = str(Path(cd.__file__).parent / "cursor_hook_bridge.py")
     cmd = f"TOKEN_OPTIMIZER_RUNTIME=cursor {sys.executable} {bridge} stop"
     assert cd._parse_hook_command(cmd) == [sys.executable, bridge, "stop"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="probe is POSIX-only")
+def test_probe_refuses_untrusted_python(monkeypatch, tmp_path):
+    """B2-P2-1: a hooks.json entry with our bridge path but an untrusted python
+    (world-writable) must be reported as fail, never executed."""
+    home = tmp_path / "home"
+    home.mkdir()
+    cur = home / ".cursor"
+    cur.mkdir(parents=True)
+    monkeypatch.setattr(cd, "cursor_home", lambda: cur)
+    # Create an untrusted python: world-writable file in a world-writable dir
+    bad_dir = tmp_path / "bad-bin"
+    bad_dir.mkdir(mode=0o777)
+    bad_py = bad_dir / "python3"
+    bad_py.write_bytes(b"#!/bin/sh\n")
+    os.chmod(bad_py, 0o777)
+    bridge = str(SCRIPTS / "cursor_hook_bridge.py")
+    (cur / "hooks.json").write_text(json.dumps({"hooks": {
+        "stop": [{"command":
+                  f"TOKEN_OPTIMIZER_RUNTIME=cursor {bad_py} {bridge} stop",
+                  "type": "command", "timeout": 10}],
+    }}), encoding="utf-8")
+    # _installed_commands accepts it (bridge path matches ours), but the probe
+    # must refuse to execute because the python is untrusted.
+    results = cd.run_probe()
+    stop = next(r for r in results if r["event"] == "stop")
+    assert stop["status"] == "fail", f"expected fail, got {stop}"
+    assert "not trusted" in stop["detail"], f"detail: {stop['detail']}"

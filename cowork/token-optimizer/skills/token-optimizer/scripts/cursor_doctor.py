@@ -36,6 +36,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPT_DIR))
 
 from runtime_env import cursor_home  # noqa: E402
+from cursor_install import _py_path_is_trusted  # noqa: E402
 
 DAEMON_PORT = 24846
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -476,6 +477,13 @@ def _run_probe_command(command: str, payload: dict, probe_home: Path) -> dict:
         return {"event": None, "status": "fail",
                 "detail": "hook command is not the expected "
                           "TOKEN_OPTIMIZER_RUNTIME=cursor <abs-python> <abs-bridge> <event> shape; refusing to run it"}
+    # B2-P2-1: validate the persisted python interpreter through the same trust
+    # gate the installer uses. A corrupted/tampered hooks.json could point at an
+    # untrusted interpreter even with a legitimate bridge path; the probe must
+    # never execute an untrusted binary.
+    if not _py_path_is_trusted(argv[0]):
+        return {"event": None, "status": "fail",
+                "detail": f"persisted python {argv[0]} is not trusted (ownership/writability); refusing to execute it"}
     env = dict(os.environ)
     env.update({
         "PYTHONUTF8": "1",
