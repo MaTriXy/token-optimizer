@@ -326,3 +326,21 @@ def test_cursor_subcommand_refuses_without_runtime_pin(tmp_path, subcommand):
     assert out.returncode == 0
     assert "set TOKEN_OPTIMIZER_RUNTIME=cursor" in out.stderr
     assert not (snap / "trends.db").exists()
+
+
+def test_dashboard_management_data_does_not_fall_through_to_claude(monkeypatch):
+    """P1-8: under a Cursor runtime pin, _collect_management_data must return a
+    minimal cursor-mode dict, never scan CLAUDE_DIR/_backups for Claude data."""
+    import measure as m
+    monkeypatch.setattr(m, "detect_runtime", lambda: "cursor")
+    data = m._collect_management_data(components={})
+    assert data["mode"] == "cursor"
+    assert data["skills"] == {"active": [], "archived": []}
+
+
+def test_dashboard_health_data_does_not_probe_claude_under_cursor(monkeypatch):
+    import measure as m
+    monkeypatch.setattr(m, "detect_runtime", lambda: "cursor")
+    health = m._collect_health_data()
+    assert health["runtime"] == "cursor"
+    assert health["running_sessions"] == []

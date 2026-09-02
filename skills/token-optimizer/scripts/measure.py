@@ -5961,6 +5961,18 @@ def _collect_management_data(components=None, trends=None):
             "v5_features": _get_v5_feature_status(),
         }
 
+    # Cursor: same shape as Hermes — Cursor has no Claude-style skills/MCP/
+    # settings.json management surface, and falling through would silently
+    # collect CLAUDE_DIR/_backups and Claude skills/MCP under a Cursor pin.
+    if detect_runtime() == "cursor":
+        return {
+            "mode": "cursor",
+            "skills": {"active": [], "archived": []},
+            "mcp_servers": {"active": [], "disabled": [], "cloud": []},
+            "plugins": [],
+            "v5_features": _get_v5_feature_status(),
+        }
+
     backups_dir = CLAUDE_DIR / "_backups"
 
     # Active skills
@@ -21011,6 +21023,15 @@ def _collect_health_data():
             "running_sessions": [],
             "automated": [],
             "runtime": "hermes",
+        }
+    # Cursor: sessions are not `claude` processes either; probing the Claude
+    # CLI and `ps | grep claude` under a Cursor pin reports wrong data.
+    if runtime == "cursor":
+        return {
+            "installed_version": None,
+            "running_sessions": [],
+            "automated": [],
+            "runtime": "cursor",
         }
     process_name = "codex" if runtime == "codex" else "claude"
 
