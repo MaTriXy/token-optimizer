@@ -713,9 +713,88 @@ install_copilot() {
     exit 0
 }
 
-# Route --opencode / --hermes / --copilot / --cowork before the Claude Code
-# prerequisite checks (OpenCode needs bun; Hermes, Copilot, and the Cowork
-# packager need python3, not the Claude Code plugin env).
+install_cursor() {
+    command -v python3 &>/dev/null || fail "python3 not found. Token Optimizer for Cursor needs Python 3."
+
+    local script_dir measure_py
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    measure_py="${script_dir}/skills/token-optimizer/scripts/measure.py"
+
+    if [ ! -f "$measure_py" ] && [ -d "${script_dir}/.git" ]; then
+        warn "skills/ not in this checkout. Adding it to sparse-checkout..."
+        git -C "$script_dir" sparse-checkout add skills/ 2>/dev/null || true
+        git -C "$script_dir" pull --ff-only 2>/dev/null || true
+    fi
+    [ -f "$measure_py" ] || fail "$(printf 'Run install.sh from inside a token-optimizer checkout, not on its own. From any folder:\n    git clone --depth 1 %s\n    cd token-optimizer\n    bash install.sh --cursor' "$REPO_HTTPS")"
+
+    if [ -d "${script_dir}/.git" ]; then
+        local c_sha
+        c_sha="$(git -C "$script_dir" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        info "Installing from commit ${c_sha}"
+    else
+        warn "Not a git checkout — cannot verify source provenance."
+    fi
+
+    # Forward only recognized flags after --cursor.
+    local extra=()
+    for a in "$@"; do
+        case "$a" in
+            --dry-run) extra+=("$a") ;;
+        esac
+    done
+
+    local resolved_cursor_home
+    resolved_cursor_home="${TOKEN_OPTIMIZER_CURSOR_HOME:-${HOME}/.cursor}"
+
+    info "Installing Token Optimizer into Cursor (${resolved_cursor_home}/hooks.json)..."
+    if ! python3 "$measure_py" cursor-install "${extra[@]+"${extra[@]}"}"; then
+        fail "Cursor install failed."
+    fi
+
+    echo ""
+    printf "${BOLD}${GREEN}Token Optimizer for Cursor installed (beta)!${NC}\n"
+    echo ""
+    echo "  Hooks:    ${resolved_cursor_home}/hooks.json (merged into Cursor's shared user hooks)"
+    echo "  Verify:   python3 ${measure_py} cursor-doctor"
+    echo "  Probe:    python3 ${measure_py} cursor-doctor --probe"
+    echo "  Summary:  TOKEN_OPTIMIZER_RUNTIME=cursor python3 ${measure_py} cursor-summary"
+    echo "  Uninstall:  bash install.sh --cursor --uninstall"
+    echo "  Re-run this command after a git pull to update."
+    echo ""
+    exit 0
+}
+
+uninstall_cursor() {
+    command -v python3 &>/dev/null || fail "python3 not found. Token Optimizer uninstall needs Python 3."
+
+    local script_dir measure_py
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    measure_py="${script_dir}/skills/token-optimizer/scripts/measure.py"
+    [ -f "$measure_py" ] || fail "Run install.sh from inside a token-optimizer checkout."
+
+    local extra=()
+    for a in "$@"; do
+        case "$a" in
+            --dry-run) extra+=("$a") ;;
+        esac
+    done
+
+    info "Removing Token Optimizer from Cursor (~/.cursor/hooks.json)..."
+    if ! python3 "$measure_py" cursor-uninstall "${extra[@]+"${extra[@]}"}"; then
+        fail "Cursor uninstall failed."
+    fi
+
+    echo ""
+    echo "Token Optimizer removed from Cursor. Session data (if any) remains at:"
+    echo "  ${TOKEN_OPTIMIZER_CURSOR_HOME:-${HOME}/.cursor}/token-optimizer/"
+    echo "  Remove it manually with: rm -rf ${TOKEN_OPTIMIZER_CURSOR_HOME:-${HOME}/.cursor}/token-optimizer"
+    echo ""
+    exit 0
+}
+
+# Route --opencode / --hermes / --copilot / --cursor / --cowork before the
+# Claude Code prerequisite checks (OpenCode needs bun; Hermes, Copilot, Cursor,
+# and the Cowork packager need python3, not the Claude Code plugin env).
 
 # Allow tests to source this script for function unit-testing (e.g.
 # _copilot_wsl_root_warning) without triggering the install flow or
@@ -735,6 +814,13 @@ for arg in "$@"; do
             ;;
         --hermes) install_hermes "$@" ;;
         --copilot) install_copilot "$@" ;;
+        --cursor)
+            # Route --cursor --uninstall to the uninstaller; otherwise install.
+            for a in "$@"; do
+                [ "$a" = "--uninstall" ] && uninstall_cursor "$@"
+            done
+            install_cursor "$@"
+            ;;
         --cowork) install_cowork "$@" ;;
     esac
 done

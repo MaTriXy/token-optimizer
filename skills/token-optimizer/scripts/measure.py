@@ -45387,7 +45387,7 @@ if __name__ == "__main__":
         sys.exit(cursor_doctor.main(args[1:]))
     elif args[0] == "cursor-install":
         import cursor_install
-        sys.exit(cursor_install.main(args[1:]))
+        sys.exit(cursor_install.main(["install"] + args[1:]))
     elif args[0] == "cursor-uninstall":
         import cursor_install
         sys.exit(cursor_install.main(["uninstall"] + args[1:]))

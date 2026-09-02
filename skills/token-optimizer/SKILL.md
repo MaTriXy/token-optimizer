@@ -33,18 +33,26 @@ Audits a Claude Code or Codex setup, identifies context window waste, implements
 >   echo "Token Optimizer — OpenCode runtime detected."
 > elif [ "${TOKEN_OPTIMIZER_RUNTIME:-}" = "copilot" ]; then
 >   echo "Token Optimizer — GitHub Copilot runtime detected."
+> elif [ "${TOKEN_OPTIMIZER_RUNTIME:-}" = "cursor" ]; then
+>   echo "Token Optimizer — Cursor runtime detected."
 > elif [ -n "${CLAUDE_PLUGIN_ROOT:-}${CLAUDE_PLUGIN_DATA:-}" ]; then
 >   :  # genuine Claude Code session; fall through to measure.py (step 3 beats step 4)
 > elif [ -n "${OPENCODE_BIN:-}${OPENCODE_CONFIG_DIR:-}${OPENCODE_DATA_DIR:-}${OPENCODE_CONFIG:-}${OPENCODE_CLIENT:-}" ]; then
 >   echo "Token Optimizer — OpenCode runtime detected."
 > elif [ -n "${COPILOT_HOME:-}${TOKEN_OPTIMIZER_COPILOT_HOME:-}" ]; then
 >   echo "Token Optimizer — GitHub Copilot runtime detected."
+> elif [ -n "${TOKEN_OPTIMIZER_CURSOR_HOME:-}" ]; then
+>   echo "Token Optimizer — Cursor runtime detected."
+> elif [ -n "${CURSOR_PROJECT_DIR:-}" ] && [ -n "${CURSOR_VERSION:-}" ]; then
+>   echo "Token Optimizer — Cursor runtime detected."
 > fi
 > ```
 > - Prints **"… OpenCode runtime detected."** → **STOP. Do not resolve `measure.py`, do not run any
 >   phase below.** Read `references/opencode-workflow.md` (bundled with this skill) and follow it.
 >   On OpenCode, Token Optimizer runs as a native plugin; the Claude audit must not run.
 > - Prints **"… GitHub Copilot runtime detected."** → **STOP** and follow the Copilot guidance for the
+>   same reason.
+> - Prints **"… Cursor runtime detected."** → **STOP** and follow the Cursor guidance for the
 >   same reason.
 > - Prints nothing → continue to resolve `$MEASURE_PY` below. This env-only pre-gate does NOT
 >   check the process tree, so OpenCode launched without exporting `OPENCODE_*` env vars (e.g. a
