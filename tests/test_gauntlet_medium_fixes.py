@@ -233,11 +233,39 @@ class TestBearerIdempotency:
 # hermes/copilot _ro_connect copies.
 # ---------------------------------------------------------------------------
 class TestCursorRoConnectUriInjection:
-    def test_db_path_with_question_mark_opens_readonly(self, tmp_path):
+    def test_db_path_with_hash_opens_readonly(self, tmp_path):
         """N-1: cursor_state._ro_connect_vscdb must build the URI via as_uri().
-        With f"file:{path}?mode=ro" interpolation, a '?' in the path starts the
-        query string early, dropping mode=ro and silently opening a truncated
-        path READ-WRITE (the exact H-2 bug, in the Cursor-PR copy)."""
+        With f"file:{path}?mode=ro" interpolation, URI-significant characters
+        in the path truncate it before mode=ro, silently opening a truncated
+        path READ-WRITE (the exact H-2 bug, in the Cursor-PR copy). '#' is a
+        URI fragment delimiter and legal in filenames on both POSIX and
+        Windows, so it covers the escaping cross-platform."""
+        from cursor_state import _ro_connect_vscdb
+        db = tmp_path / "we#ird" / "state.vscdb"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE x (id INTEGER)")
+        conn.execute("INSERT INTO x VALUES (42)")
+        conn.commit()
+        conn.close()
+        with _ro_connect_vscdb(db) as conn:
+            row = conn.execute("SELECT id FROM x").fetchone()
+            assert row[0] == 42
+            with pytest.raises(sqlite3.OperationalError):
+                conn.execute("INSERT INTO x VALUES (99)")
+        # No stray truncated-path db may be created (the old bug created one).
+        assert not (tmp_path / "we").exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="'?' is illegal in Windows filenames; tested via '#' instead",
+    )
+    def test_db_path_with_question_mark_opens_readonly(self, tmp_path):
+        """N-1 (POSIX-only): the '?' variant of the URI-injection repro —
+        '?' starts the URI query string, which is the exact A3 live repro
+        that opened a truncated path read-write. '?' is illegal in Windows
+        filenames so this is skipped there; the '#' test covers the same
+        escaping cross-platform."""
         from cursor_state import _ro_connect_vscdb
         db = tmp_path / "we?ird" / "state.vscdb"
         db.parent.mkdir(parents=True, exist_ok=True)
@@ -251,7 +279,6 @@ class TestCursorRoConnectUriInjection:
             assert row[0] == 42
             with pytest.raises(sqlite3.OperationalError):
                 conn.execute("INSERT INTO x VALUES (99)")
-        # No stray truncated-path db may be created (the old bug created one).
         assert not (tmp_path / "we").exists()
 
     def test_relative_path_does_not_raise(self, tmp_path, monkeypatch):
