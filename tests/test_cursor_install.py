@@ -334,3 +334,14 @@ def test_locate_measure_py_rejects_crafted_locator(tmp_path, monkeypatch):
     good.write_text("ok", encoding="utf-8")
     (plugin / "measure-path").write_text(f"{good}\n", encoding="utf-8")
     assert bridge_mod._locate_measure_py() == good
+
+
+def test_install_sh_cursor_materializes_from_pinned_commit():
+    """P1-7: install_cursor must not `git pull` (moving branch => arbitrary
+    code into the plugin dir); it materializes skills/ from the pinned HEAD."""
+    sh = (REPO / "install.sh").read_text(encoding="utf-8")
+    cursor_fn = sh[sh.index("install_cursor() {"):]
+    cursor_fn = cursor_fn[:cursor_fn.index("\n}\n")]
+    assert "pull --ff-only" not in cursor_fn
+    assert 'rev-parse HEAD' in cursor_fn
+    assert 'checkout "$pin_sha" -- skills/' in cursor_fn
