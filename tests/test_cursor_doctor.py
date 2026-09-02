@@ -161,3 +161,12 @@ def test_probe_refuses_to_execute_injected_command(monkeypatch, tmp_path):
     # reported as a failure or a skip, but never executed.
     assert stop["status"] in ("fail", "skip")
     assert not marker.exists()
+
+
+def test_parse_hook_command_handles_platform_native_paths():
+    """Windows: shlex in POSIX mode eats backslashes, so a C:\\... python path
+    must parse via posix=False. Runs everywhere using the real sys.executable,
+    which carries backslashes exactly on Windows."""
+    bridge = str(Path(cd.__file__).parent / "cursor_hook_bridge.py")
+    cmd = f"TOKEN_OPTIMIZER_RUNTIME=cursor {sys.executable} {bridge} stop"
+    assert cd._parse_hook_command(cmd) == [sys.executable, bridge, "stop"]

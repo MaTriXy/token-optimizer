@@ -134,3 +134,41 @@ def test_trusted_prefix_still_checks_writability(c, monkeypatch, tmp_path):
     # owned, not group/other-writable under the prefix -> accepted
     os.chmod(f, 0o755)
     assert c._py_path_is_trusted(str(f)) is True
+
+
+def _fake_stat(uid_file, mode_file, uid_dir, mode_dir):
+    import stat as _s
+    class R:
+        def __init__(self, uid, mode):
+            self.st_uid = uid
+            self.st_mode = _s.S_IFREG | mode
+    def fake(path, *a, **k):
+        return R(uid_dir, mode_dir) if str(path).endswith("bin") else R(uid_file, mode_file)
+    return fake
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
+def test_gate_accepts_ci_and_admin_owned_layouts(c, monkeypatch, tmp_path):
+    """Hosted-CI and admin layouts must be trusted: root-owned interpreter in a
+    root-owned 0775 dir (hostedtoolcache-as-root), and euid-owned interpreter
+    in an euid-owned 0775 dir (runner/Homebrew group-writable-by-own-group)."""
+    f = str(tmp_path / "bin" / "python3")
+    # root-owned file+dir, dir group-writable (0775): CI root cache layout
+    monkeypatch.setattr(c.os, "stat", _fake_stat(0, 0o755, 0, 0o775))
+    assert c._py_path_is_trusted(f) is True
+    # euid-owned file+dir, dir group-writable (0775): runner / Homebrew layout
+    monkeypatch.setattr(c.os, "stat", _fake_stat(os.geteuid(), 0o755, os.geteuid(), 0o775))
+    assert c._py_path_is_trusted(f) is True
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
+def test_gate_rejects_third_party_group_writable_dir(c, monkeypatch, tmp_path):
+    """A group-writable dir owned by ANOTHER account lets that account swap the
+    interpreter even though the file bytes are clean."""
+    f = str(tmp_path / "bin" / "python3")
+    other = (os.geteuid() or 1000) + 1
+    monkeypatch.setattr(c.os, "stat", _fake_stat(os.geteuid(), 0o755, other, 0o775))
+    assert c._py_path_is_trusted(f) is False
+    # world-writable dir is rejected regardless of owner
+    monkeypatch.setattr(c.os, "stat", _fake_stat(0, 0o755, 0, 0o777))
+    assert c._py_path_is_trusted(f) is False

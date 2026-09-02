@@ -199,6 +199,7 @@ def test_install_aborts_on_missing_payload_module(home, monkeypatch):
     assert ci._host_hooks_path(home).exists() is False
 
 
+@needs_posix
 def test_install_refuses_symlinked_hooks_json(tmp_path):
     """P0-3: a pre-existing hooks.json symlink must never be written through."""
     import json as _json
@@ -239,6 +240,7 @@ def test_atomic_write_default_still_follows_symlink(tmp_path):
     assert target.read_text(encoding="utf-8") == "new"
 
 
+@needs_posix
 def test_concurrent_installs_both_survive(tmp_path, monkeypatch):
     """P0-3: two racing installs must not silently drop each other's entries.
     With the lease, the loser aborts loudly instead of clobbering."""

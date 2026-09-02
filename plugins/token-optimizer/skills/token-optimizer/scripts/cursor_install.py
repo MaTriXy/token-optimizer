@@ -92,34 +92,44 @@ _TRUSTED_PY_PREFIXES = (
 
 
 def _py_path_is_trusted(p: str) -> bool:
-    """Trusted iff the resolved interpreter is under a system prefix AND neither
-    it nor its dir is group/other-writable, OR (outside the prefixes) it and its
-    dir are owned by us and not group/other-writable. Pure stat, never runs the
-    target. On Windows, stat ownership is unreliable under Git-Bash, so require
-    only that the path is a real file."""
+    """Trusted iff the interpreter's bytes are admin-owned (euid or root) and
+    not group/other-writable, and its dir is not world-writable and not
+    group-writable by a third party. Pure stat, never runs the target.
+    _TRUSTED_PY_PREFIXES documents the known system locations but is no longer
+    a bypass: the ownership+writability rule accepts them on its own. On
+    Windows, stat ownership is unreliable under Git-Bash, so require only that
+    the path is a real file."""
     try:
         real = os.path.realpath(p)
         if not os.path.isfile(real):
             return False
         if os.name == "nt" or not hasattr(os, "geteuid"):
             return True
-        in_prefix = real.startswith(_TRUSTED_PY_PREFIXES)
         euid = os.geteuid()
-        # File + immediate dir only, deliberately NOT a full ancestor walk: the
-        # standard Homebrew interpreter lives under /opt/homebrew/Cellar (0775,
-        # admin-group-writable by Homebrew's own design) and is not under the
-        # /opt/homebrew/bin/ prefix, so walking ancestors would reject the most
-        # common macOS install. The replant vector requires a writable PARENT of
-        # the interpreter's dir, which the dirname check covers.
-        for i, target in enumerate((real, os.path.dirname(real))):
-            st = os.stat(target)
-            if not in_prefix and i < 2 and st.st_uid != euid:
-                # Root-owned system installs are trusted by prefix; anything
-                # else must be OURS, not another account's.
-                return False
-            if st.st_mode & (_stat.S_IWGRP | _stat.S_IWOTH):
-                # Group/other-writable file or dir is hijackable.
-                return False
+
+        def _admin_owned(uid: int) -> bool:
+            # euid (ours) or root/admin (0): an interpreter either we or the
+            # system controls. Hosted-CI caches (hostedtoolcache) and macOS
+            # Homebrew are euid/admin-owned; /usr/bin is root-owned.
+            return uid == euid or uid == 0
+
+        st_file = os.stat(real)
+        st_dir = os.stat(os.path.dirname(real))
+        # The interpreter's BYTES must never be group/other-writable, whoever
+        # owns it, and the file must be admin-owned.
+        if st_file.st_mode & (_stat.S_IWGRP | _stat.S_IWOTH):
+            return False
+        if not _admin_owned(st_file.st_uid):
+            return False
+        # The containing DIR must not be world-writable. Group-writable is the
+        # admin-group case (Homebrew Cellar 0775, hostedtoolcache 0775 under
+        # the runner's own group) and is accepted only when the DIR itself is
+        # admin-owned -- a group-writable dir owned by a third party would let
+        # that party swap the interpreter.
+        if st_dir.st_mode & _stat.S_IWOTH:
+            return False
+        if st_dir.st_mode & _stat.S_IWGRP and not _admin_owned(st_dir.st_uid):
+            return False
         return True
     except OSError:
         return False

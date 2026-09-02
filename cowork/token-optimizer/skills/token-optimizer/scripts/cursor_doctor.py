@@ -443,7 +443,9 @@ def _parse_hook_command(command: str) -> list | None:
     become an injection vector for a corrupted or malicious entry.
     """
     try:
-        tokens = shlex.split(command)
+        # posix=False on Windows: shlex's POSIX mode eats backslashes, so
+        # C:\Python314\python.exe would parse as "C:Python314python.exe".
+        tokens = shlex.split(command, posix=(os.name != "nt"))
     except ValueError:
         return None
     if len(tokens) != 4:
