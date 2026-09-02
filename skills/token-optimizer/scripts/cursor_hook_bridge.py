@@ -179,6 +179,11 @@ def decode_payload(payload):
         "transcript_path": None,
         "model": None,
         "timestamp": None,
+        # preCompact numbers (0/0.0 when absent or the payload is not a dict)
+        "context_tokens": 0,
+        "context_window_size": 0,
+        "context_usage_percent": 0.0,
+        "trigger": "",
     }
     if not isinstance(payload, dict):
         return out
@@ -221,6 +226,19 @@ def decode_payload(payload):
         out["model"] = model[:128]
 
     out["timestamp"] = payload.get("timestamp")
+
+    for key in ("context_tokens", "context_window_size"):
+        try:
+            out[key] = int(payload.get(key) or 0)
+        except (TypeError, ValueError):
+            out[key] = 0
+    try:
+        out["context_usage_percent"] = float(payload.get("context_usage_percent") or 0.0)
+    except (TypeError, ValueError):
+        out["context_usage_percent"] = 0.0
+    trigger = payload.get("trigger")
+    if isinstance(trigger, str):
+        out["trigger"] = trigger
     return out
 
 
@@ -713,25 +731,13 @@ def handle_pre_compact(payload):
     """Record Cursor's real context numbers and compaction trigger."""
     fields = decode_payload(payload)
     _record_observed("preCompact", conversation_id=fields["conversation_id"] or None)
-    try:
-        ctx_tokens = int(payload.get("context_tokens") or 0)
-    except (TypeError, ValueError):
-        ctx_tokens = 0
-    try:
-        ctx_window = int(payload.get("context_window_size") or 0)
-    except (TypeError, ValueError):
-        ctx_window = 0
-    try:
-        usage_pct = float(payload.get("context_usage_percent") or 0.0)
-    except (TypeError, ValueError):
-        usage_pct = 0.0
     _update_tally(
         fields,
         compaction={
-            "trigger": str(payload.get("trigger") or "")[:64],
-            "context_tokens": ctx_tokens,
-            "context_window_size": ctx_window,
-            "context_usage_percent": usage_pct,
+            "trigger": fields["trigger"][:64],
+            "context_tokens": fields["context_tokens"],
+            "context_window_size": fields["context_window_size"],
+            "context_usage_percent": fields["context_usage_percent"],
             "ts": time.time(),
         },
     )

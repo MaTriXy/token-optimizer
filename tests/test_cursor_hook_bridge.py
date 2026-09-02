@@ -374,3 +374,12 @@ def test_ledger_records_event_and_cursor_version(cursor_dir, monkeypatch):
     entry = _read_last_observed(cursor_dir)
     assert entry["event"] == "stop"
     assert entry["cursor_version"] == "3.18.9"
+
+
+@pytest.mark.parametrize("bad", [None, [1, 2, 3], "x", 42])
+def test_pre_compact_survives_non_dict_payloads(bad, monkeypatch, tmp_path):
+    """P1-2: handle_pre_compact was the one handler reading payload.get()
+    directly; None/list/str/int payloads crashed with AttributeError and the
+    compaction record was silently lost."""
+    monkeypatch.setattr(bridge, "cursor_home", lambda: tmp_path)
+    bridge.handle_pre_compact(bad)  # must not raise
