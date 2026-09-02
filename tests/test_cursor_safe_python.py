@@ -112,3 +112,25 @@ def test_sys_executable_returned_when_trusted(c, monkeypatch):
     monkeypatch.setattr(c, "_py_path_is_trusted", lambda p: True)
     monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", "")
     assert c._resolve_safe_python() == os.path.abspath(sys.executable)
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
+def test_trusted_prefix_still_checks_writability(c, monkeypatch, tmp_path):
+    """P1-6: the prefix allowlist no longer short-circuits before the
+    writability check -- a group/other-writable interpreter under a trusted
+    prefix is rejected."""
+    d = tmp_path / "homebrew-bin"
+    d.mkdir()
+    f = d / "python3"
+    f.write_text("", encoding="utf-8")
+    real_prefix = "/opt/homebrew/bin/"
+    monkeypatch.setattr(c, "_TRUSTED_PY_PREFIXES", (str(d) + "/",))
+    # world-writable dir under an (asserted) trusted prefix -> rejected
+    os.chmod(d, 0o777); os.chmod(f, 0o755)
+    assert c._py_path_is_trusted(str(f)) is False
+    # world-writable file under a trusted prefix -> rejected
+    os.chmod(d, 0o755); os.chmod(f, 0o777)
+    assert c._py_path_is_trusted(str(f)) is False
+    # owned, not group/other-writable under the prefix -> accepted
+    os.chmod(f, 0o755)
+    assert c._py_path_is_trusted(str(f)) is True
