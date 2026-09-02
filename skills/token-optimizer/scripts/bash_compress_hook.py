@@ -96,22 +96,26 @@ def main() -> None:
     # Runs BEFORE every eligibility gate below because thrash is exactly the
     # small-output / failing-command case those gates skip, and before the
     # already-compressed marker check so PreToolUse-compressed repeats are
-    # counted too.
+    # counted too. The nudge is saved and appended at whichever exit point
+    # the compression pipeline reaches, so compression/dedup still runs on
+    # nudge-firing runs (a large thrashing output is deduped, not skipped).
+    _nudge = None
     try:
         from thrash_guard import check as _thrash_check
         _nudge = _thrash_check(command, stdout)
-        if _nudge:
-            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
-            return
     except Exception:
         pass  # Fail open: the raw output stands
 
     # Too small to compress
     if not stdout or len(stdout) < 100:
+        if _nudge:
+            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
         return
 
     # Detect if the output was ALREADY compressed by PreToolUse bash_hook.
     if "[Full result archived" in stdout or "[bash_compress]" in stdout:
+        if _nudge:
+            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
         return
 
     # Check pipeline read-only eligibility
@@ -119,8 +123,12 @@ def main() -> None:
         from pipeline_analyzer import is_read_only_pipeline
         is_ro, reason = is_read_only_pipeline(command)
         if not is_ro:
+            if _nudge:
+                _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
             return  # Not eligible, pass through raw
     except Exception:
+        if _nudge:
+            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
         return  # Fail open
 
     # Compression
@@ -140,6 +148,8 @@ def main() -> None:
 
         # --- check stderr for failure patterns ---
         if _looks_like_failure(0, stderr):
+            if _nudge:
+                _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
             return  # Don't compress failure output
 
         # Clean ANSI escape codes before compression
@@ -150,6 +160,8 @@ def main() -> None:
         # on stdout. If the pipeline exits 0 but stdout contains error
         # patterns, pass through raw so the model sees the errors.
         if _stdout_has_error_patterns(cleaned_stdout):
+            if _nudge:
+                _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
             return  # Error on stdout: pass through raw
 
         # Run the standard compression pipeline
@@ -174,6 +186,8 @@ def main() -> None:
             _log_feature = "crossturn_dedup"
 
         if not comp_helped:
+            if _nudge:
+                _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
             return  # nothing shrank the output -> pass through raw
         compressed = best
 
@@ -217,10 +231,15 @@ def main() -> None:
         # Log compression event to trends.db
         _log_event(command, cleaned_stdout, compressed, feature=_log_feature)
 
-        # Emit updatedToolOutput to replace what Claude sees
+        # Emit updatedToolOutput to replace what Claude sees, with the
+        # thrash nudge appended if present (compression + nudge, not either/or).
+        if _nudge:
+            compressed = compressed + "\n" + _nudge
         _emit_updated_tool_output(compressed, stderr)
 
     except Exception:
+        if _nudge:
+            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
         return  # Fail open: any error → pass through raw
 
 

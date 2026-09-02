@@ -711,6 +711,18 @@ class SessionStore:
         last_ts: float,
     ) -> None:
         if self._is_over_size_cap():
+            # Cap hit: delete the stale row so the thrash guard fails open to
+            # "no streak" (streak=1, no nudge) rather than re-reading a frozen
+            # row that breaks the cooldown invariant.
+            try:
+                conn = self._connect()
+                conn.execute(
+                    "DELETE FROM command_run_streaks WHERE command_hash = ?",
+                    (command_hash,),
+                )
+                conn.commit()
+            except Exception:
+                pass
             return
         conn = self._connect()
         conn.execute(
