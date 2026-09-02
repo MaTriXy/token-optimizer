@@ -84,6 +84,13 @@ def test_stdin_partial_payload_returns_within_deadline(tmp_path):
             pytest.fail("read_stdin_hook_input hung past 8s on a partial payload "
                         "with the pipe held open (deadline not enforced end to end)")
         assert "returned" in out, f"child crashed instead of timing out: {out!r}"
+        # Pin the deadline itself, not just "did not hang": the read must be
+        # bounded near _STDIN_TIMEOUT (0.5s), with slack for interpreter
+        # startup on slow runners. A reverted blocking read hangs instead.
+        elapsed = float(out.split("after ")[1].split("s")[0])
+        assert elapsed < 3.0, (
+            f"stdin read took {elapsed:.2f}s, unbounded by the 0.5s deadline"
+        )
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -101,6 +108,11 @@ def test_stdin_partial_payload_returns_within_deadline(tmp_path):
     sys.platform == "win32",
     reason="os.mkfifo is POSIX-only; the planted-FIFO attack shape requires a "
     "filesystem with FIFO semantics.",
+)
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root passes os.access(W_OK) on a 0o555 dir, so the read-only "
+    "branch (and the marker logic under test) is never reached.",
 )
 def test_planted_fifo_marker_does_not_hang_the_hook(tmp_path):
     """A reader-less FIFO planted at the marker path (backdated to defeat the
@@ -193,25 +205,33 @@ def test_expired_outer_budget_is_delivered_not_disarmed():
 
     def outer_handler(_signum, _frame):
         events.append("outer-fired")
-        raise ptr._HandlerBudgetExceeded(0.2)
+        raise ptr._HandlerBudgetExceeded(1.0)
 
+    # _handler_deadline short-circuits to a bare yield while _RUNNER_DEADLINE
+    # is None (it is only armed by main()); a dummy object forces the real
+    # save/restore branch this test pins.
+    ptr._RUNNER_DEADLINE = object()
     previous = signal.getsignal(signal.SIGALRM)
     signal.signal(signal.SIGALRM, outer_handler)
-    signal.setitimer(signal.ITIMER_REAL, 0.2)
+    signal.setitimer(signal.ITIMER_REAL, 1.0)
     try:
         try:
             with ptr._handler_deadline(5.0):
-                time.sleep(0.5)  # outer expires mid-inner; inner masks the signal
+                time.sleep(2.0)  # outer expires mid-inner; inner masks the signal
             events.append("inner-exited-cleanly")
         except ptr._HandlerBudgetExceeded:
             events.append("budget-exceeded")
         remaining = signal.getitimer(signal.ITIMER_REAL)[0]
-        # The outer budget must have been DELIVERED (its handler ran, raising
-        # its own budget exception), not silently disarmed for later handlers.
-        assert "outer-fired" in events, (
+        # The outer budget must have been DELIVERED (its handler ran via the
+        # fix's os.kill re-delivery, raising its own budget exception), not
+        # silently disarmed for later handlers. Pre-fix, the inner handler
+        # masks the outer SIGALRM and the finally disarms it, so "outer-fired"
+        # never appears.
+        assert "outer-fired" in events and "budget-exceeded" in events, (
             f"expired outer budget was disarmed instead of delivered: {events}; "
             f"outer timer remaining after inner exit: {remaining:.3f}s"
         )
     finally:
+        ptr._RUNNER_DEADLINE = None
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
