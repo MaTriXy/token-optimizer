@@ -69,12 +69,20 @@ def measure(monkeypatch):
     tmp = tempfile.mkdtemp(prefix="to-qfa-")
     monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", tmp)
     monkeypatch.setenv("TOKEN_OPTIMIZER_PRICING_AS_OF", "2026-08-29")
+    # These tests exercise the Anthropic-billing estimator. Runtime detection is
+    # memoized per process, so pin it explicitly: a test that ran earlier under a
+    # Cursor/Copilot environment would otherwise leave the estimator in its
+    # "unsupported billing" branch and every count here reads zero.
+    monkeypatch.setenv("TOKEN_OPTIMIZER_RUNTIME", "claude")
     sys.path.insert(0, str(SCRIPTS))
+    import runtime_env as _runtime_env
+    _runtime_env.detect_runtime.cache_clear()
     if "measure" in sys.modules:
         del sys.modules["measure"]
     mod = importlib.import_module("measure")
     importlib.reload(mod)
     yield mod, tmp
+    _runtime_env.detect_runtime.cache_clear()
     if "measure" in sys.modules:
         del sys.modules["measure"]
 
