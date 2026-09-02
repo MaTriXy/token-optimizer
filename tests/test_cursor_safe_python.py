@@ -108,8 +108,17 @@ def test_override_env_is_honored_when_trusted(c, monkeypatch):
     resolved = c._resolve_safe_python()
     monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", resolved)
     assert c._resolve_safe_python() == os.path.abspath(resolved)
+    # A bogus override is ignored: the resolver must never persist it. On hosts
+    # with no trusted fallback (hosted-CI python is world-writable) it raises
+    # instead -- either outcome proves the bogus path was not honoured.
     monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", "/nonexistent/python3")
-    assert os.path.isfile(c._resolve_safe_python())
+    try:
+        fallback = c._resolve_safe_python()
+    except RuntimeError:
+        pass
+    else:
+        assert os.path.isfile(fallback)
+        assert fallback != "/nonexistent/python3"
 
 
 @pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
