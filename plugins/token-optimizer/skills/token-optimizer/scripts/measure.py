@@ -6999,8 +6999,10 @@ def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
     OFF by default: with no file present this function does nothing (no import,
     no I/O beyond one existence check). The file is loaded ONLY from that exact
     path — never from the repo, the snapshot dir, or an env override — and only
-    when it is not group/world-writable (a writable extension file would be
-    local code injection). Everything is fail-open: any exception the extension
+    when it is safe to execute: owned by the current user, not
+    group/world-writable, and with extensions/config directories that are not
+    group/world-writable either (a peer able to write the file or its parent
+    directory can inject code). Everything is fail-open: any exception the extension
     raises (or the load itself) is swallowed; the hook always completes. The
     extension receives the remaining flush budget via ``context["time_left_fn"]``
     and should defer work that does not fit; the watchdog may hard-exit the
@@ -7024,7 +7026,8 @@ def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
     time_left_fn. Token Optimizer ships no extensions and takes no
     responsibility for third-party ones; they run with the user's privileges.
     """
-    ext_path = CONFIG_DIR / "extensions" / "post_flush.py"
+    ext_dir = CONFIG_DIR / "extensions"
+    ext_path = ext_dir / "post_flush.py"
     try:
         # Open once and judge the fd, not the path: a stat()-then-exec would
         # leave a window where the file is swapped (or symlink-retargeted)
@@ -7087,6 +7090,21 @@ def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
                 os.close(fd)
             except OSError:
                 pass
+        # Directory gates (POSIX): a group/world-writable extensions or config
+        # directory lets a peer replace post_flush.py before the open above, so
+        # refuse those too. Directories are judged by stat (they cannot be
+        # opened like a regular file); Windows mode bits are unreliable so the
+        # check is skipped there just like the file check above.
+        if os.name != "nt":
+            for directory in (ext_dir, CONFIG_DIR):
+                try:
+                    if directory.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                        sys.stderr.write(
+                            f"[Token Optimizer] post-flush extension refused: "
+                            f"directory {directory} is group/world-writable\n")
+                        return None
+                except OSError:
+                    pass
         module = types.ModuleType("_to_post_flush_ext")
         module.__file__ = str(ext_path)
         try:

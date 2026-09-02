@@ -14,6 +14,14 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "token-optimizer" / "scripts"
 
+# Ownership + group/world-writable directory gates are POSIX-only for the same
+# reason as the existing file-mode guard: Windows fstat/st_stat report 0o666 and
+# no POSIX uid. On Windows the config directory's own ACLs are the protection.
+POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="ownership + group/world-writable directory guards are POSIX-only",
+)
+
 
 @pytest.fixture()
 def m(tmp_path, monkeypatch):
@@ -128,6 +136,34 @@ def test_group_writable_extension_ignored(m):
     """
     p = _install_ext(m, "def run(ctx):\n    return 'ran'\n")
     os.chmod(str(p), 0o660)
+    assert m._run_post_flush_extensions(time_left_fn=lambda: 10) is None
+
+
+@POSIX_ONLY
+def test_group_writable_extensions_dir_ignored(m):
+    """Directory gate: a group-writable extensions directory lets a peer
+    replace post_flush.py before the open, so refuse execution."""
+    _install_ext(m, "def run(ctx):\n    return 'ran'\n")
+    os.chmod(str(m.CONFIG_DIR / "extensions"), 0o775)
+    assert m._run_post_flush_extensions(time_left_fn=lambda: 10) is None
+
+
+@POSIX_ONLY
+def test_world_writable_config_dir_ignored(m):
+    """Directory gate: a world-writable config directory lets a peer replace
+    the extensions directory itself, so refuse execution."""
+    _install_ext(m, "def run(ctx):\n    return 'ran'\n")
+    os.chmod(str(m.CONFIG_DIR), 0o777)
+    assert m._run_post_flush_extensions(time_left_fn=lambda: 10) is None
+
+
+@POSIX_ONLY
+def test_foreign_owner_extension_ignored(m, monkeypatch):
+    """Ownership gate: a file owned by another uid is attacker code with
+    benign 0600 bits. No real process uid is negative, so this guarantees
+    the ownership gate sees a different owner than the running user."""
+    _install_ext(m, "def run(ctx):\n    return 'ran'\n")
+    monkeypatch.setattr(os, "getuid", lambda: -1)
     assert m._run_post_flush_extensions(time_left_fn=lambda: 10) is None
 
 
