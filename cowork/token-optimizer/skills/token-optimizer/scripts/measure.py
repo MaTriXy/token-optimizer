@@ -6882,7 +6882,10 @@ def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
         fd = os.open(ext_path, os.O_RDONLY)
         try:
             st = os.fstat(fd)
-            if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            # POSIX mode bits only: Windows reports 0o666 for every writable
+            # file (no group/other split), so this check would reject every
+            # extension there. Same hasattr-style POSIX gate as os.fchmod.
+            if os.name != "nt" and st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
                 return None
             source = os.read(fd, st.st_size if st.st_size > 0 else 1_048_576)
         finally:
