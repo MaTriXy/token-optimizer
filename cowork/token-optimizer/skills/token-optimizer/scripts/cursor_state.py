@@ -201,8 +201,16 @@ def state_vscdb_path() -> Path:
 
 def _ro_connect_vscdb(path: Path):
     """Open state.vscdb read-only. ``mode=ro`` only — not ``immutable=1``."""
+    # Build the file: URI via Path.as_uri() rather than string interpolation
+    # (same fix as codex_state._ro_connect, H-2/N-1): with uri=True, characters
+    # like ?, #, % and spaces in the path are URI syntax, so a path containing
+    # '?' would start the query string early and drop mode=ro — silently
+    # opening a truncated path read-write. as_uri() percent-encodes those.
+    # resolve() first (M-3) so a relative path doesn't raise an uncaught
+    # ValueError past callers that only catch (sqlite3.Error, OSError).
+    db_uri = Path(path).resolve().as_uri()
     conn = sqlite3.connect(
-        f"file:{path}?mode=ro",
+        f"{db_uri}?mode=ro",
         uri=True,
         timeout=0.25,
     )

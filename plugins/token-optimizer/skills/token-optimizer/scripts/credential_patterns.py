@@ -59,7 +59,10 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     )),
     # M-12: mysql -p<password> (inline password after -p with no space).
     # The -p flag is special: the password immediately follows with no = or space.
-    ("MySQL password flag",     re.compile(r"(?P<keep>\bmysql\s+.*?-p)(?!\s)(?!\[CREDENTIAL REDACTED:)[^\s\"']+")),
+    # N-3: re.I so "MySQL -pSECRET" (capitalized client name, as MySQL ships
+    # it) is redacted too; the anchor gate already lowercases, so gating is
+    # unaffected.
+    ("MySQL password flag",     re.compile(r"(?P<keep>\bmysql\s+.*?-p)(?!\s)(?!\[CREDENTIAL REDACTED:)[^\s\"']+", re.I)),
     # M-12: PGPASSWORD=, MYSQL_PWD=, and similar *_PASSWORD= / *_PWD= env assignments.
     # These appear as shell command prefixes (FOO=bar cmd ...) or in config output.
     ("Database env password",   re.compile(
