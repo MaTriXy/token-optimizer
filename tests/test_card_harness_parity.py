@@ -6,10 +6,10 @@ Copilot unsupported_billing early return), no foreign-runtime early return —
 so it prices whatever is in session_log. Correctness depends entirely on
 whether each harness fills session_log with the right shape.
 
-For each of Codex marketplace, Codex CLI standalone, Copilot, Cowork, and
-Hermes, this file builds a fixture matching that harness's session_log shape,
-runs the REAL _estimate_before_after_savings function against it, and checks
-the result.
+For each of Codex marketplace, Codex CLI standalone, Copilot, Cowork, Cursor,
+and Hermes, this file builds a fixture matching that harness's session_log
+shape, runs the REAL _estimate_before_after_savings function against it, and
+checks the result.
 
 The card's _session_token_vector assumes:
   input_tokens = TOTAL billed input (fresh + cache_read + cache_write)
@@ -229,6 +229,19 @@ def test_copilot_vector_reconstruction(m):
     assert cr == pytest.approx(CACHE_READ, abs=1)
 
 
+def test_cursor_vector_reconstruction(m):
+    """Cursor: same vector math (the adapter rolls tokenCount up to total
+    billed input, cache_create=0, hit=cr/total). The card returns early with
+    unsupported_billing, but the vector itself must still reconstruct correctly."""
+    total_input = FRESH + CACHE_READ + CACHE_WRITE
+    hit = CACHE_READ / total_input
+    row = (total_input, OUTPUT, 0, CACHE_WRITE, hit)
+    fi, cw, cr, out = m._session_token_vector(row)
+    assert fi == pytest.approx(FRESH, abs=1)
+    assert cw == pytest.approx(CACHE_WRITE, abs=1)
+    assert cr == pytest.approx(CACHE_READ, abs=1)
+
+
 # ---------------------------------------------------------------------------
 # TESTS: per-harness card output
 # ---------------------------------------------------------------------------
@@ -310,6 +323,29 @@ def _build_copilot_fixture(m, monkeypatch):
         ))
     _build_db(m, rows)
     monkeypatch.setattr(m, "detect_runtime", lambda: "copilot")
+
+
+def _build_cursor_fixture(m, monkeypatch):
+    """Build a Cursor session_log fixture.
+
+    The Cursor adapter rolls tokenCount up to total billed input the same way
+    Copilot does; the difference is the card's unsupported_billing early return
+    (Cursor stores no local billing data), which this fixture exercises.
+    """
+    _make_baseline(m.SNAPSHOT_DIR, bfi=FRESH, bcr=CACHE_READ, bcw=CACHE_WRITE, bout=OUTPUT)
+    dates = _recent_dates(N_SESSIONS)
+    rows = []
+    for d in dates:
+        rows.append(dict(
+            date=d, input_tokens=CLAUDE_TOTAL_INPUT, output_tokens=OUTPUT,
+            cache_create_5m=CACHE_WRITE, cache_create_1h=0,
+            cache_hit_rate=round(CLAUDE_HIT, 4),
+            duration_minutes=5.0, message_count=10, api_calls=5,
+            model_usage_json=json.dumps({"cursor-default": CLAUDE_TOTAL_INPUT + OUTPUT}),
+            platform="cursor",
+        ))
+    _build_db(m, rows)
+    monkeypatch.setattr(m, "detect_runtime", lambda: "cursor")
 
 
 def test_card_claude_code(m, monkeypatch):
@@ -401,6 +437,19 @@ def test_card_copilot_returns_unsupported_billing(m, monkeypatch):
     result = m._estimate_before_after_savings(days=30)
     assert result["reason"] == "unsupported_billing", \
         f"Copilot must return unsupported_billing, got: {result['reason']}"
+    assert result["monthly_savings_usd"] == 0.0
+    assert result["counterfactual_monthly_usd"] == 0.0
+    assert result["actual_monthly_usd"] == 0.0
+
+
+def test_card_cursor_returns_unsupported_billing(m, monkeypatch):
+    """Cursor: the card returns early with reason='unsupported_billing'.
+    Cursor stores no local billing data, so a token-priced counterfactual has
+    no meaning; the card shows NOTHING."""
+    _build_cursor_fixture(m, monkeypatch)
+    result = m._estimate_before_after_savings(days=30)
+    assert result["reason"] == "unsupported_billing", \
+        f"Cursor must return unsupported_billing, got: {result['reason']}"
     assert result["monthly_savings_usd"] == 0.0
     assert result["counterfactual_monthly_usd"] == 0.0
     assert result["actual_monthly_usd"] == 0.0

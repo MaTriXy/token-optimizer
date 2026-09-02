@@ -125,6 +125,36 @@ def test_copilot_insert_writes_platform_not_token_source():
     )
 
 
+def test_cursor_collector_writes_platform_and_cursor_dedup_key():
+    """Source inspection: the Cursor path must write the platform column and a
+    cursor: dedup-key prefix, never a token_source into the platform column."""
+    src = Path(SCRIPTS, "measure.py").read_text(encoding="utf-8")
+
+    # _insert_normalized_session owns the shared INSERT and must list platform.
+    insert_start = src.index("def _insert_normalized_session")
+    insert_end = src.index("\ndef ", insert_start + 1)
+    insert_section = src[insert_start:insert_end]
+    assert "platform" in insert_section, (
+        "shared normalized INSERT must include the platform column"
+    )
+
+    # _collect_cursor_sessions must build `cursor:<conversation_id>` dedup keys
+    # and pass the cursor platform literal into that INSERT helper.
+    coll_start = src.index("def _collect_cursor_sessions")
+    coll_end = src.index("\ndef ", coll_start + 1)
+    cursor_section = src[coll_start:coll_end]
+    assert '"cursor"' in cursor_section or "'cursor'" in cursor_section, (
+        "Cursor collector must pass platform='cursor' to the normalized INSERT"
+    )
+    assert "cursor:" in cursor_section, (
+        "Cursor collector must prefix dedup keys with 'cursor:' so backfill "
+        "can infer the platform from jsonl_path"
+    )
+    assert "token_source" not in cursor_section, (
+        "Cursor collector must not write token_source into the platform column"
+    )
+
+
 def test_main_claude_insert_includes_platform():
     """Source inspection: the main Claude/Codex INSERT must include the platform column."""
     src = Path(SCRIPTS, "measure.py").read_text(encoding="utf-8")
@@ -211,6 +241,7 @@ def test_backfill_infers_platform_from_jsonl_path(tmp_path, monkeypatch):
         ("/home/user/.codex/archived_sessions/rollout-456.jsonl", None),
         ("hermes:my-slug", None),
         ("copilot:vscode-abcd-1234", None),
+        ("cursor:composer-abc-1234", None),
         ("/some/ambiguous/path.jsonl", None),
     ]
     for jpath, _ in test_rows:
@@ -237,5 +268,6 @@ def test_backfill_infers_platform_from_jsonl_path(tmp_path, monkeypatch):
     assert results["/home/user/.codex/archived_sessions/rollout-456.jsonl"] == "codex"
     assert results["hermes:my-slug"] == "hermes"
     assert results["copilot:vscode-abcd-1234"] == "copilot"
+    assert results["cursor:composer-abc-1234"] == "cursor"
     # Ambiguous path stays NULL
     assert results["/some/ambiguous/path.jsonl"] is None

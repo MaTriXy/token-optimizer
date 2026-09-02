@@ -148,6 +148,7 @@ import codex_io
 import codex_session
 import codex_state
 import copilot_session
+import cursor_session
 import hermes_session
 
 CHARS_PER_TOKEN = 4.0
@@ -212,7 +213,7 @@ _OPENCODE_CLAUDE_TARGET_CMDS = _CLAUDE_TARGET_CMDS
 # before this, trends/savings/quality/drift/coach fell through to the
 # CLAUDE_DIR scan path in measure_components()/_find_all_jsonl_files() and
 # produced empty output against the wrong tree (the #57 isolation leak).
-_FOREIGN_RUNTIMES = frozenset({"opencode", "copilot", "hermes"})
+_FOREIGN_RUNTIMES = frozenset({"opencode", "copilot", "hermes", "cursor"})
 
 # Per-runtime exemptions: foreign-runtime subcommands that a NATIVE flow
 # invokes as a TOP-LEVEL subcommand AND that are runtime-aware (do not scan
@@ -229,6 +230,12 @@ _FOREIGN_RUNTIMES = frozenset({"opencode", "copilot", "hermes"})
 # from state.db via hermes-rollup, not ~/.claude/projects JSONL). So allowing
 # it does not violate the #57 isolation principle.
 #
+# Cursor exempts ``dashboard`` for the same reason as Hermes: its hook bridge
+# shells to ``measure.py dashboard`` on session-end, the daemon is runtime-
+# suffixed (port 24846), measure_components() routes to _measure_cursor_
+# components() and _find_all_jsonl_files() returns [] under cursor — sessions
+# come from the tally + cursor-rollup, never ~/.claude/projects JSONL.
+#
 # OpenCode and Copilot exempt NOTHING: their native flows (the OpenCode TS
 # plugin; copilot_hook_bridge.py) never invoke a _CLAUDE_TARGET_CMDS
 # subcommand as a top-level command — they shell to copilot-rollup /
@@ -236,6 +243,7 @@ _FOREIGN_RUNTIMES = frozenset({"opencode", "copilot", "hermes"})
 # which are outside _CLAUDE_TARGET_CMDS. Verified by grep of the hook bridges.
 _FOREIGN_RUNTIME_EXEMPTIONS: dict[str, frozenset[str]] = {
     "hermes": frozenset({"dashboard"}),
+    "cursor": frozenset({"dashboard"}),
 }
 
 
@@ -261,6 +269,22 @@ def _copilot_audit_notice() -> None:
     print("To force this skill onto a specific runtime, set TOKEN_OPTIMIZER_RUNTIME.")
 
 
+def _cursor_audit_notice() -> None:
+    """Explain why the Claude audit does not run under Cursor, and where to go."""
+    print("Token Optimizer — Cursor runtime detected.")
+    print()
+    print("This audit targets a Claude Code / Codex setup (it scans ~/.claude), so it")
+    print("will not run here and will not modify ~/.claude or your Cursor config.")
+    print()
+    print("On Cursor, use the Cursor-native commands instead:")
+    print("  measure.py cursor-summary    — session token/quality summary")
+    print("  measure.py cursor-rollup     — collect sessions into trends")
+    print("  measure.py cursor-doctor     — readiness + hook firing probe")
+    print("  measure.py cursor-install    — wire Token Optimizer into ~/.cursor/hooks.json")
+    print()
+    print("To force this skill onto a specific runtime, set TOKEN_OPTIMIZER_RUNTIME.")
+
+
 def _foreign_audit_notice() -> None:
     """Route to the right per-runtime notice for blocked Claude-target commands.
 
@@ -271,6 +295,7 @@ def _foreign_audit_notice() -> None:
         "opencode": _opencode_audit_notice,
         "copilot": _copilot_audit_notice,
         "hermes": _hermes_audit_notice,
+        "cursor": _cursor_audit_notice,
     }
     handler = notices.get(detect_runtime())
     if handler is not None:
@@ -548,6 +573,11 @@ def _use_hermes_session_adapter():
 def _use_copilot_session_adapter():
     """True when sessions should be loaded from the Copilot adapters."""
     return detect_runtime() == "copilot"
+
+
+def _use_cursor_session_adapter():
+    """True when sessions should be loaded from the Cursor adapters."""
+    return detect_runtime() == "cursor"
 
 # Tokens per skill frontmatter (loaded at startup)
 TOKENS_PER_SKILL_APPROX = 100
@@ -1995,6 +2025,8 @@ def measure_components():
         return _measure_codex_components()
     if runtime == "hermes":
         return _measure_hermes_components()
+    if runtime == "cursor":
+        return _measure_cursor_components()
 
     components = {}
     seen_real_paths = set()
@@ -2694,6 +2726,29 @@ def _measure_codex_components():
         "note": "Codex base instructions and built-in tools. Fixed overhead, not user-configurable.",
     }
     return components
+
+
+def _measure_cursor_components():
+    """Minimal component dict for Cursor, without reading ~/.claude.
+
+    Cursor has no Claude-style CLAUDE.md / skills / MCP / settings.json startup
+    overhead: its only wiring is the shared ~/.cursor/hooks.json, which is not a
+    token-measurable surface (it is the host's own file, merged, never owned by
+    TO). Returns a minimal dict so ``calculate_totals`` /
+    ``detect_calibration_gap`` / the dashboard template render without
+    CLAUDE_DIR access (the dashboard is the one _CLAUDE_TARGET_CMDS subcommand
+    Cursor exempts — see _FOREIGN_RUNTIME_EXEMPTIONS).
+    """
+    hooks_path = runtime_home() / "hooks.json"
+    return {
+        "cursor_hooks": {
+            "path": str(hooks_path),
+            "exists": hooks_path.is_file(),
+            "tokens": 0,
+            "lines": 0,
+            "note": "shared host hooks.json — not a Token Optimizer token surface",
+        }
+    }
 
 
 def _measure_hermes_components():
@@ -5277,6 +5332,8 @@ def _collect_hook_status_for_dashboard():
         return _collect_hermes_hook_status_for_dashboard()
     if detect_runtime() == "copilot":
         return _collect_copilot_hook_status_for_dashboard()
+    if detect_runtime() == "cursor":
+        return _collect_cursor_hook_status_for_dashboard()
 
     settings, _ = _read_settings_json()
 
@@ -5432,6 +5489,59 @@ def _collect_copilot_hook_status_for_dashboard():
             "partial": by_name.get("VS Code data plane", {}).get("status") == "warn",
             "label": "VS Code Copilot Data",
             "description": "Per-request AI-credit cost from Copilot Chat debug logs (authoritative), or the OTel trace DB as fallback. One active source at a time — never summed.",
+            "install_cmd": doctor_cmd,
+            "uninstall_cmd": doctor_cmd,
+        },
+    }
+
+
+def _collect_cursor_hook_status_for_dashboard():
+    """Hook status for the dashboard toggle panel under the Cursor runtime.
+
+    Mirrors _collect_copilot_hook_status_for_dashboard(). cursor_doctor uses
+    lowercase statuses ("ok"/"warn"/"fail") and check names from
+    cursor_doctor.py; the toggles surface install, payload, and data readiness.
+    """
+    import cursor_doctor  # noqa: PLC0415
+
+    mp_cmd = shlex.quote(str(Path(__file__).resolve()))
+    checks = cursor_doctor.run_checks()
+    by_name = {check["name"]: check for check in checks}
+
+    def _ok(name):
+        return by_name.get(name, {}).get("status") == "ok"
+
+    install_cmd = f"TOKEN_OPTIMIZER_RUNTIME=cursor python3 {mp_cmd} cursor-install"
+    doctor_cmd = f"TOKEN_OPTIMIZER_RUNTIME=cursor python3 {mp_cmd} cursor-doctor"
+
+    return {
+        "cursor_hooks": {
+            "installed": _ok("TO hook config"),
+            "partial": by_name.get("TO hook config", {}).get("status") == "warn",
+            "label": "Cursor Hooks",
+            "description": "Merges Token Optimizer into ~/.cursor/hooks.json: sessionStart continuity restore, preToolUse Shell bash compression, postToolUse tally + nudges, preCompact capture, stop-time rollup and session-end dashboard refresh.",
+            "install_cmd": install_cmd,
+            "uninstall_cmd": f"TOKEN_OPTIMIZER_RUNTIME=cursor python3 {mp_cmd} cursor-uninstall",
+        },
+        "cursor_payload": {
+            "installed": _ok("hook payload"),
+            "partial": any(
+                by_name.get(n, {}).get("status") == "warn"
+                for n in ("measure-path locator", "persisted python")
+            ),
+            "label": "Cursor Hook Payload",
+            "description": "The installed hook bridge plus its measure-path locator and a trusted absolute Python interpreter (never a bare python3).",
+            "install_cmd": install_cmd,
+            "uninstall_cmd": doctor_cmd,
+        },
+        "cursor_data": {
+            "installed": _ok("transcript data") or _ok("state.vscdb data"),
+            "partial": any(
+                by_name.get(n, {}).get("status") == "warn"
+                for n in ("transcript data", "state.vscdb data")
+            ),
+            "label": "Cursor Session Data",
+            "description": "Best-effort token counts from state.vscdb (IDE) with a chars-over-four transcript estimate as fallback; the hook tally is always authoritative for calls/turns/compactions.",
             "install_cmd": doctor_cmd,
             "uninstall_cmd": doctor_cmd,
         },
@@ -8850,6 +8960,13 @@ def _find_all_jsonl_files(days=30):
     if _use_hermes_session_adapter():
         return []
 
+    # Cursor (issue #57 cross-platform universality, same as Hermes): sessions
+    # live in the hook tally and are ingested via cursor-rollup, not
+    # ~/.claude/projects JSONL. Returning [] keeps the JSONL fallback path of
+    # the cursor-exempted dashboard command from scanning ~/.claude.
+    if _use_cursor_session_adapter():
+        return []
+
     projects_base = CLAUDE_DIR / "projects"
     if not projects_base.exists():
         return []
@@ -10513,6 +10630,11 @@ def _init_trends_db():
             "UPDATE session_log SET platform = 'copilot' "
             "WHERE platform IS NULL "
             "AND jsonl_path LIKE 'copilot:%'"
+        )
+        conn.execute(
+            "UPDATE session_log SET platform = 'cursor' "
+            "WHERE platform IS NULL "
+            "AND jsonl_path LIKE 'cursor:%'"
         )
         conn.commit()
     except sqlite3.Error:
@@ -17290,6 +17412,11 @@ _CACHE_COVERAGE_GAP_REASONS = {
         "detail (cached-token counts are not surfaced), so cache-TTL waste "
         "cannot be computed — only credit consumption is visible."
     ),
+    "cursor": (
+        "Cursor transcripts carry no usage fields and state.vscdb tokenCount "
+        "is best-effort (staff: often zero, no cache split) — so cache-TTL "
+        "waste cannot be measured, only a chars-over-four estimate is visible."
+    ),
 }
 
 
@@ -18220,6 +18347,122 @@ def _is_file_collected(conn, jsonl_path):
     return cur.fetchone() is not None
 
 
+def _insert_normalized_session(conn, dedup_key, parsed, platform, project_fallback, quiet=False):
+    """Insert or upgrade one normalized session row; returns 1 on new/upgraded.
+
+    Owns the 33-column session_log INSERT and the in-place upgrade. An existing
+    row is upgraded whenever its stored ``incomplete`` flag differs from the
+    incoming one (0/1), so:
+      - an idle-finalized row (incomplete=0) whose chat resumes activity
+        (incomplete=1) flips back, instead of freezing (the review finding on
+        long-lived IDE chats);
+      - a crashed/active row (incomplete=1) that later sees sessionEnd flips to
+        complete (incomplete=0) with refreshed totals.
+    Uses INSERT OR IGNORE so the dedup key (`<platform>:<slug>`) is idempotent.
+    """
+    slug = parsed.get("slug") or ""
+    if not slug:
+        return 0
+
+    first_ts = parsed.get("first_ts")
+    date = datetime.now().strftime("%Y-%m-%d")
+    if first_ts:
+        try:
+            dt = datetime.fromisoformat(first_ts)
+            date = dt.astimezone().strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            date = datetime.now().strftime("%Y-%m-%d")
+
+    project_name = str(parsed.get("cwd") or project_fallback)
+    is_incomplete = 1 if parsed.get("incomplete") else 0
+
+    values = (
+        date,
+        project_name,
+        parsed["duration_minutes"],
+        parsed["total_input_tokens"],
+        parsed["total_output_tokens"],
+        parsed["message_count"],
+        parsed.get("api_calls", 0),
+        parsed["cache_hit_rate"],
+        parsed.get("total_cache_create_1h", 0),
+        parsed.get("total_cache_create_5m", 0),
+        1,
+        parsed.get("avg_call_gap_seconds"),
+        parsed.get("max_call_gap_seconds"),
+        parsed.get("p95_call_gap_seconds"),
+        json.dumps(parsed.get("skills_used", {})),
+        json.dumps(parsed.get("subagents_used", {})),
+        json.dumps(parsed.get("tool_calls", {})),
+        json.dumps(parsed.get("model_usage", {})),
+        json.dumps(parsed.get("model_usage", {})),
+        json.dumps(parsed.get("model_usage_breakdown", {})),
+        parsed.get("version"),
+        parsed.get("slug"),
+        parsed.get("topic"),
+        datetime.now().isoformat(),
+        parsed.get("quality_score", 0),
+        parsed.get("quality_grade", "F"),
+        0,
+        parsed.get("cost_usd", 0.0),
+        parsed.get("cost_source"),
+        parsed.get("credits"),
+        platform,
+        is_incomplete,
+    )
+
+    if _is_file_collected(conn, dedup_key):
+        try:
+            existing = conn.execute(
+                "SELECT incomplete FROM session_log WHERE jsonl_path = ?",
+                (dedup_key,),
+            ).fetchone()
+        except sqlite3.Error:
+            existing = None
+        if existing is not None and int(existing[0]) == is_incomplete:
+            return 0  # idempotent — stored completeness already matches
+        try:
+            conn.execute(
+                """UPDATE session_log SET
+                     date=?, project=?, duration_minutes=?, input_tokens=?,
+                     output_tokens=?, message_count=?, api_calls=?, cache_hit_rate=?,
+                     cache_create_1h_tokens=?, cache_create_5m_tokens=?, cache_ttl_scanned=?,
+                     avg_call_gap_seconds=?, max_call_gap_seconds=?, p95_call_gap_seconds=?,
+                     skills_json=?, subagents_json=?, tool_calls_json=?, model_usage_json=?,
+                     all_model_usage_json=?, model_usage_breakdown_json=?, version=?, slug=?,
+                     topic=?, collected_at=?, quality_score=?, quality_grade=?,
+                     stale_waste_tokens=?, cost_usd=?, cost_source=?, credits=?,
+                     platform=?, incomplete=?
+                   WHERE jsonl_path=?""",
+                values + (dedup_key,),
+            )
+            return 1
+        except sqlite3.Error as exc:
+            if not quiet:
+                print(f"[Token Optimizer] could not upgrade a {platform} session: {exc}")
+            return 0
+
+    try:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO session_log
+               (jsonl_path, date, project, duration_minutes, input_tokens,
+                output_tokens, message_count, api_calls, cache_hit_rate,
+                cache_create_1h_tokens, cache_create_5m_tokens, cache_ttl_scanned,
+                avg_call_gap_seconds, max_call_gap_seconds, p95_call_gap_seconds,
+                skills_json, subagents_json, tool_calls_json, model_usage_json,
+                all_model_usage_json, model_usage_breakdown_json, version, slug, topic, collected_at,
+                quality_score, quality_grade, stale_waste_tokens,
+                cost_usd, cost_source, credits, platform, incomplete)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (dedup_key,) + values,
+        )
+    except sqlite3.Error as exc:
+        if not quiet:
+            print(f"[Token Optimizer] skipped a {platform} session: {exc}")
+        return 0
+    return 1 if cur.rowcount == 1 else 0
+
+
 def _safe_json_dict(raw):
     try:
         data = json.loads(raw) if raw else {}
@@ -18836,6 +19079,211 @@ def _collect_copilot_sessions(days=90, quiet=False, rebuild=False):
     return new_count
 
 
+def _write_cursor_restore_context(sessions, quiet=False):
+    """Maintain per-workspace continuity files the sessionStart hook injects.
+
+    Unlike Copilot (one terminal, one session), the Cursor IDE runs many
+    concurrent chats across repos. A single global restore file would seed every
+    new chat with whichever conversation rolled up last — unrelated context paid
+    on a platform with no savings headline. So files are keyed by workspace root
+    (``sha1(workspace_root)``) under ``restore-context/``; the bridge injects only
+    the file matching its own workspace root.
+    """
+    try:
+        import hashlib  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
+        from runtime_env import cursor_home as _ch  # noqa: PLC0415
+
+        # Group the most recent COMPLETE session per workspace root (cwd).
+        by_ws: dict = {}
+        for s in sessions:
+            if s.get("incomplete"):
+                continue  # never seed continuity from a crash/kill session
+            root = str(s.get("cwd") or s.get("slug") or "")
+            if not root:
+                continue
+            by_ws.setdefault(root, []).append(s)
+
+        def _clean(value):
+            text = str(value or "")
+            text = "".join(ch for ch in text if ch == " " or ch.isprintable())
+            return text[:200]
+
+        base = _ch() / "token-optimizer" / "restore-context"
+        base.mkdir(parents=True, exist_ok=True)
+        for root, group in by_ws.items():
+            latest = max(group, key=lambda s: (s.get("first_ts") is not None, s.get("first_ts") or ""))
+            lines = [f"[Token Optimizer] Continuity from your previous Cursor session in {_clean(root)}:"]
+            if latest.get("model"):
+                lines.append(
+                    f"- Model: {_clean(latest['model'])}; "
+                    f"{latest.get('total_input_tokens', 0):,} in / "
+                    f"{latest.get('total_output_tokens', 0):,} out tokens"
+                )
+            digest = hashlib.sha1(root.encode("utf-8", "replace")).hexdigest()
+            path = base / f"{digest}.md"
+            fd, tmp_name = tempfile.mkstemp(prefix=".restore-context.", suffix=".tmp", dir=str(base))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write("\n".join(lines) + "\n")
+                os.replace(tmp_name, str(path))
+            except OSError:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+    except Exception as exc:
+        if not quiet:
+            print(f"[Token Optimizer] Cursor restore-context update skipped: {exc}")
+
+
+def _cursor_summary():
+    """Token/quality session summary for Cursor (honest: no local cost)."""
+    try:
+        from runtime_env import cursor_home as _ch  # noqa: PLC0415
+    except ImportError:
+        _ch = None
+    import cursor_state as _cst  # noqa: PLC0415
+
+    home = _ch() if _ch is not None else Path.home() / ".cursor"
+    tallies = [t for p in _cst.find_tallies(home) if (t := _cst.read_tally(p)) is not None]
+    normalized = [s for t in tallies if (s := cursor_session.normalize_session(t))]
+
+    print("Token Optimizer — Cursor summary")
+    if not normalized:
+        print()
+        print("  No Cursor sessions found yet.")
+        print("  Upgrade to ships-hooks Cursor, then run:")
+        print("    bash install.sh --cursor")
+        print("  and start a session. The hook tally appears after the first tool call.")
+        return
+
+    total_in = sum(s.get("total_input_tokens", 0) for s in normalized)
+    total_out = sum(s.get("total_output_tokens", 0) for s in normalized)
+    incomplete = sum(1 for s in normalized if s.get("incomplete"))
+    estimated = sum(1 for s in normalized if s.get("estimated"))
+    compactions = sum(s.get("compactions", 0) for s in normalized)
+    surfaces = {}
+    for s in normalized:
+        sur = s.get("surface") or "unknown"
+        surfaces[sur] = surfaces.get(sur, 0) + 1
+
+    print(f"  {len(normalized)} session(s)")
+    print(f"    Tokens: {total_in:,} in / {total_out:,} out")
+    if compactions:
+        print(f"    Compactions captured: {compactions}")
+    if surfaces:
+        print("    Surfaces: " + ", ".join(f"{k} ({v})" for k, v in sorted(surfaces.items())))
+    if incomplete:
+        print(f"    {incomplete} session(s) still active (hook tally only)")
+    if estimated:
+        print(
+            f"    {estimated} session(s) use estimated token counts "
+            "(state.vscdb tokenCount is best-effort; transcripts carry no usage)"
+        )
+    print()
+    print("  Cost: Cursor stores no local billing data — no savings headline is")
+    print("  rendered here by design (bash compression events are still counted).")
+    print("  Full trends: measure.py cursor-rollup.")
+
+
+def _collect_cursor_sessions(days=90, quiet=False, rebuild=False):
+    """Collect Cursor sessions (hook tally + data planes) into the trends DB.
+
+    Mirrors _collect_copilot_sessions. The hook tally is authoritative for
+    calls/turns/compactions/model/cwd/timestamps; tokens come from state.vscdb
+    (best-effort) or a chars-over-four transcript estimate. Idempotent via the
+    jsonl_path dedup column (`cursor:<conversation_id>`), with in-place upgrade
+    via _insert_normalized_session.
+    """
+    import cursor_state as _cst  # noqa: PLC0415
+
+    try:
+        from runtime_env import cursor_home as _ch  # noqa: PLC0415
+    except ImportError:
+        _ch = None
+
+    try:
+        conn = _init_trends_db()
+    except sqlite3.DatabaseError:
+        if TRENDS_DB.exists():
+            try:
+                stamp = int(datetime.now().timestamp())
+                TRENDS_DB.rename(TRENDS_DB.with_suffix(f".db.corrupt.{stamp}"))
+            except OSError:
+                pass
+        conn = _init_trends_db()
+    try:
+        if rebuild:
+            if not quiet:
+                print("[Token Optimizer] Rebuilding Cursor trends DB...")
+            conn.execute("PRAGMA user_version = 3")
+            conn.execute("DELETE FROM session_log WHERE jsonl_path LIKE 'cursor:%'")
+            conn.commit()
+
+        home = _ch() if _ch is not None else Path.home() / ".cursor"
+        tallies = []
+        for p in _cst.find_tallies(home):
+            t = _cst.read_tally(p)
+            if t is not None:
+                tallies.append(_cst.idle_finalise(t))
+
+        cutoff = datetime.now().timestamp() - days * 86400
+        composer_ids = [
+            str(t.get("conversation_id") or t.get("session_id") or "") for t in tallies
+        ]
+        try:
+            bubble_tokens = _cst.read_state_vscdb_tokens(composer_ids)
+        except Exception:
+            bubble_tokens = {}
+
+        new_count = 0
+        normalized = []
+        for t in tallies:
+            cid = str(t.get("conversation_id") or t.get("session_id") or "")
+            if not cid:
+                continue
+            t = dict(t)
+            t["bubble_tokens"] = bubble_tokens.get(cid)
+            try:
+                t["transcript_tokens"] = _cst.transcript_estimate(t.get("transcript_path"), home)
+            except Exception:
+                t["transcript_tokens"] = None
+            parsed = cursor_session.normalize_session(t)
+            if not parsed:
+                continue
+            normalized.append(parsed)
+
+            first_ts = parsed.get("first_ts")
+            if first_ts:
+                try:
+                    dt = datetime.fromisoformat(first_ts)
+                    if dt.timestamp() < cutoff:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+
+            dedup_key = f"cursor:{cid}"
+            if _insert_normalized_session(conn, dedup_key, parsed, "cursor", "cursor", quiet=quiet):
+                new_count += 1
+
+        if new_count > 0:
+            _rebuild_aggregate_tables(conn)
+        conn.commit()
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+    finally:
+        conn.close()
+
+    _write_cursor_restore_context(normalized, quiet=quiet)
+
+    if not quiet:
+        print(f"[Token Optimizer] Collected {new_count} new Cursor sessions.")
+    return new_count
+
+
 def collect_sessions(days=90, quiet=False, rebuild=False):
     """Parse new JSONL files and insert into SQLite. Zero token cost.
 
@@ -18848,6 +19296,9 @@ def collect_sessions(days=90, quiet=False, rebuild=False):
 
     if _use_copilot_session_adapter():
         return _collect_copilot_sessions(days=days, quiet=quiet, rebuild=rebuild)
+
+    if _use_cursor_session_adapter():
+        return _collect_cursor_sessions(days=days, quiet=quiet, rebuild=rebuild)
 
     conn = _init_trends_db()
 
@@ -21981,8 +22432,8 @@ _DASHBOARD_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'uns
 # (matching copilot_doctor.DAEMON_PORT); the `dashboard` command is also blocked
 # for foreign runtimes in _CLAUDE_TARGET_CMDS, so this is defense-in-depth.
 _DAEMON_RUNTIME = detect_runtime()
-_DAEMON_SUFFIX_BY_RUNTIME = {"codex": "codex", "hermes": "hermes", "copilot": "copilot"}
-_DAEMON_PORT_BY_RUNTIME = {"codex": 24843, "hermes": 24844, "copilot": 24845}
+_DAEMON_SUFFIX_BY_RUNTIME = {"codex": "codex", "hermes": "hermes", "copilot": "copilot", "cursor": "cursor"}
+_DAEMON_PORT_BY_RUNTIME = {"codex": 24843, "hermes": 24844, "copilot": 24845, "cursor": 24846}
 _DAEMON_RUNTIME_SUFFIX = _DAEMON_SUFFIX_BY_RUNTIME.get(_DAEMON_RUNTIME, "claude")
 DAEMON_LABEL = (
     f"com.token-optimizer.{_DAEMON_RUNTIME_SUFFIX}-dashboard"
@@ -22062,7 +22513,7 @@ DAEMON_IDENTITY_MAGIC = (
 # not just the currently-resolved runtime's. The per-runtime label/unit/task
 # names are derived from the suffix the same way DAEMON_LABEL /
 # SYSTEMD_UNIT_NAME / WINDOWS_TASK_NAME are above.
-_DAEMON_ALL_SUFFIXES = ("claude", "codex", "hermes", "copilot")
+_DAEMON_ALL_SUFFIXES = ("claude", "codex", "hermes", "copilot", "cursor")
 _ALL_LAUNCH_AGENT_LABELS = tuple(
     "com.token-optimizer.dashboard" if s == "claude"
     else f"com.token-optimizer.{s}-dashboard"
@@ -41241,11 +41692,11 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
             "short_session_counterfactual_usd": 0.0,
             "short_session_count": 0}
     try:
-        # GitHub Copilot meters premium requests / AI credits, not tokens, so a
-        # token-priced counterfactual has no meaning in that billing model. The
-        # transformation renders NOTHING under Copilot (reason discloses why);
-        # the measured tiers still pass through Copilot's own cost figures.
-        if detect_runtime() == "copilot":
+        # GitHub Copilot meters premium requests / AI credits, not tokens; Cursor
+        # stores no local billing data at all. In both cases a token-priced
+        # counterfactual has no meaning, so the transformation renders NOTHING
+        # (reason discloses why); bash compression events are still counted.
+        if detect_runtime() in ("copilot", "cursor"):
             return {**zero, "reason": "unsupported_billing"}
         if not TRENDS_DB.exists():
             return zero
@@ -41281,7 +41732,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
         # Baseline (pre-TO) model mix: floor to ~95% Opus ONLY for an Anthropic runtime
         # with no usable measured baseline. A real frozen baseline share is trusted as-is;
         # a non-Anthropic user is priced at their own measured mix, never fabricated Opus.
-        anthropic = detect_runtime() not in {"codex", "hermes", "copilot", "opencode"}
+        anthropic = detect_runtime() not in {"codex", "hermes", "copilot", "opencode", "cursor"}
         if anthropic and frozen_opus and frozen_opus > 0:
             # A real measured baseline share exists -> trust it (e.g. an Anthropic
             # user with a frozen ~0.95 Opus share resolves to ~0.95). Gated on
@@ -44931,6 +45382,46 @@ if __name__ == "__main__":
     elif args[0] == "copilot-summary":
         _copilot_summary()
         sys.exit(0)
+    elif args[0] == "cursor-doctor":
+        import cursor_doctor
+        sys.exit(cursor_doctor.main(args[1:]))
+    elif args[0] == "cursor-install":
+        import cursor_install
+        sys.exit(cursor_install.main(args[1:]))
+    elif args[0] == "cursor-uninstall":
+        import cursor_install
+        sys.exit(cursor_install.main(["uninstall"] + args[1:]))
+    elif args[0] == "cursor-rollup":
+        # The bridge always pins TOKEN_OPTIMIZER_RUNTIME=cursor. A bare manual
+        # run must refuse (not silently collect under the default runtime).
+        if detect_runtime() != "cursor":
+            print(
+                "[Token Optimizer] cursor-rollup runs only under the Cursor runtime; "
+                "set TOKEN_OPTIMIZER_RUNTIME=cursor.",
+                file=sys.stderr,
+            )
+            sys.exit(0)
+        quiet = "--quiet" in args or "-q" in args
+        _tok_hook_deadline = _install_hook_budget(60)
+        try:
+            _collect_cursor_sessions(days=90, quiet=quiet)
+        except _HookTimeout:
+            pass
+        except Exception:
+            pass
+        finally:
+            _clear_hook_budget(_tok_hook_deadline)
+        sys.exit(0)
+    elif args[0] == "cursor-summary":
+        if detect_runtime() != "cursor":
+            print(
+                "[Token Optimizer] cursor-summary reads only the Cursor runtime; "
+                "set TOKEN_OPTIMIZER_RUNTIME=cursor.",
+                file=sys.stderr,
+            )
+            sys.exit(0)
+        _cursor_summary()
+        sys.exit(0)
     elif args[0] == "hermes-doctor":
         import hermes_doctor
         sys.exit(hermes_doctor.main(args[1:]))
@@ -47112,6 +47603,10 @@ if __name__ == "__main__":
         print("  python3 measure.py copilot-home          # Print resolved Copilot home (honors COPILOT_HOME)")
         print("  python3 measure.py copilot-summary       # Credits-led Copilot session summary")
         print("  python3 measure.py copilot-rollup        # Ingest Copilot sessions into trends DB")
+        print("  python3 measure.py cursor-doctor         # Cursor adapter readiness check")
+        print("  python3 measure.py cursor-install        # Install Cursor hooks (merged into ~/.cursor/hooks.json)")
+        print("  python3 measure.py cursor-summary        # Token/quality Cursor session summary")
+        print("  python3 measure.py cursor-rollup         # Ingest Cursor sessions into trends DB")
         print("  python3 measure.py codex-compact-prompt # Render/install Codex compact prompt")
         print("  python3 measure.py drift                # Drift report: compare against last snapshot")
         print("  python3 measure.py drift --json          # Machine-readable drift output")

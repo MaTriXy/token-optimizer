@@ -20,9 +20,10 @@ honestly on a platform must render nothing there. Concretely:
      Claude Code statusline writes. Its path must be runtime-scoped so a
      foreign runtime never reads Claude's meter, and the card renders nothing
      when the meter is absent.
-  4. GitHub Copilot meters premium requests, not tokens; the `savings` /
-     `dashboard` commands (the estimated tier's only surfaces) must stay
-     dispatch-blocked there, printing the runtime notice instead of numbers.
+  4. GitHub Copilot meters premium requests, not tokens, and Cursor stores no
+     local billing data at all; the `savings` / `dashboard` commands (the
+     estimated tier's only surfaces) must stay dispatch-blocked there,
+     printing the runtime notice instead of numbers.
 
 Run: python3 -m pytest tests/test_platform_savings_isolation.py -v
 """
@@ -43,7 +44,7 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "token-optimizer" 
 OPUS = "claude-opus-4-7"
 GPT = "gpt-5"
 
-FOREIGN_RUNTIMES = ("codex", "hermes", "copilot", "opencode")
+FOREIGN_RUNTIMES = ("codex", "hermes", "copilot", "opencode", "cursor")
 
 # Frozen typical session with NO measured Opus-era mix (opus_share 0): the shape a
 # non-Anthropic runtime's own history produces, and the mix-tracking shape on Claude.
@@ -309,12 +310,13 @@ def test_estimated_tier_surfaces_blocked_for_foreign_runtimes(monkeypatch, tmp_p
     mod, _snap, _claude = _import_measure(monkeypatch, tmp_path, "claude")
     for cmd in ("savings", "dashboard", "trends", "report", "validate-impact"):
         assert cmd in mod._CLAUDE_TARGET_CMDS
-    assert {"copilot", "opencode", "hermes"} <= set(mod._FOREIGN_RUNTIMES)
-    # Copilot and OpenCode exempt nothing; Hermes exempts only its own
-    # runtime-aware dashboard.
+    assert {"copilot", "opencode", "hermes", "cursor"} <= set(mod._FOREIGN_RUNTIMES)
+    # Copilot, OpenCode and Cursor exempt nothing except the runtimes' own
+    # runtime-aware dashboard; Hermes exempts only its own dashboard.
     assert not mod._FOREIGN_RUNTIME_EXEMPTIONS.get("copilot")
     assert not mod._FOREIGN_RUNTIME_EXEMPTIONS.get("opencode")
     assert mod._FOREIGN_RUNTIME_EXEMPTIONS.get("hermes") == frozenset({"dashboard"})
+    assert mod._FOREIGN_RUNTIME_EXEMPTIONS.get("cursor") == frozenset({"dashboard"})
 
 
 def test_copilot_transformation_renders_nothing_even_with_data(monkeypatch, tmp_path):
@@ -351,4 +353,43 @@ def test_copilot_savings_command_prints_notice_not_numbers(tmp_path):
         capture_output=True, text=True, env=env, timeout=180)
     assert out.returncode == 0
     assert "Copilot runtime detected" in out.stdout
+    assert "monthly_savings_usd" not in out.stdout
+
+
+# ---------------------------------------------------------------------------
+# 5. Cursor (no local billing data): estimated tier stays dispatch-blocked.
+# ---------------------------------------------------------------------------
+
+def test_cursor_transformation_renders_nothing_even_with_data(monkeypatch, tmp_path):
+    """Cursor stores no local billing data, so the token-dollar transformation
+    must refuse even when session_log has rows (the Dashboards can be seeded
+    internally). Renders the zero payload with reason=unsupported_billing."""
+    mod, snap, _claude = _import_measure(monkeypatch, tmp_path, "cursor")
+    frozen = dict(BASELINE_NO_OPUS_ERA)
+    frozen.update({"opus_share": 0.95, "opus_share_source": "pretool_baseline"})
+    _seed_db(snap, model="claude-sonnet-4-6", baseline=frozen)
+    res = mod._estimate_before_after_savings(days=30)
+    assert res["reason"] == "unsupported_billing"
+    assert res["monthly_savings_usd"] == 0.0
+    assert res["counterfactual_monthly_usd"] == 0.0
+    assert res["actual_monthly_usd"] == 0.0
+    assert res["short_session_actual_usd"] == 0.0
+    assert res["breakdown"] == []
+
+
+def test_cursor_savings_command_prints_notice_not_numbers(tmp_path):
+    """`measure.py savings` under Cursor must print the runtime notice and no
+    token-dollar figures: Cursor stores no local billing data, so a
+    token-savings number is not claimable there."""
+    env = os.environ.copy()
+    env.update({
+        "TOKEN_OPTIMIZER_RUNTIME": "cursor",
+        "TOKEN_OPTIMIZER_SNAPSHOT_DIR": str(tmp_path / "snap"),
+        "TOKEN_OPTIMIZER_NO_PROC_SCAN": "1",
+    })
+    out = subprocess.run(
+        [sys.executable, str(SCRIPTS / "measure.py"), "savings", "--json"],
+        capture_output=True, text=True, env=env, timeout=180)
+    assert out.returncode == 0
+    assert "Cursor runtime detected" in out.stdout
     assert "monthly_savings_usd" not in out.stdout

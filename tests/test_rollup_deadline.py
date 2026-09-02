@@ -1,7 +1,8 @@
-"""Bug A regression: copilot-rollup and hermes-rollup arm a wall-clock deadline.
+"""Bug A regression: copilot/hermes/cursor rollups arm a wall-clock deadline.
 
 The rollup subcommands are spawned fire-and-forget by the Stop hook bridges
-(`copilot_hook_bridge.handle_stop` / `hermes_hook_bridge.run_rollup`) with
+(`copilot_hook_bridge.handle_stop` / `hermes_hook_bridge.run_rollup` /
+`cursor_hook_bridge._spawn_rollup`) with
 ``start_new_session=True`` and no PID tracking, so the parent hook's 20s
 ceiling never reaches the detached grandchild.  Before this fix neither
 rollup branch installed a ``HookDeadline``, so a stuck SQLite / pathological
@@ -95,6 +96,10 @@ def _run_rollup_subprocess(subcommand, collect_name, tmp_path, *, block, budget)
     env["PYTHONPATH"] = str(SCRIPTS)
     env["PYTHONUTF8"] = "1"
     env["TOKEN_OPTIMIZER_SNAPSHOT_DIR"] = str(tmp_path)
+    if subcommand.startswith("cursor-"):
+        # The cursor-rollup dispatch refuses unless the cursor runtime is pinned,
+        # exactly as the real cursor_hook_bridge does when it spawns the rollup.
+        env["TOKEN_OPTIMIZER_RUNTIME"] = "cursor"
     code = _rollup_dispatch_code(
         subcommand, collect_name, tmp_path,
         collect_block_seconds=block, budget_seconds=budget,
@@ -110,6 +115,7 @@ def _run_rollup_subprocess(subcommand, collect_name, tmp_path, *, block, budget)
 @pytest.mark.parametrize("subcommand,collect_name", [
     ("copilot-rollup", "_collect_copilot_sessions"),
     ("hermes-rollup", "_collect_hermes_sessions"),
+    ("cursor-rollup", "_collect_cursor_sessions"),
 ])
 @pytest.mark.skipif(
     sys.platform == "win32",
@@ -142,6 +148,7 @@ def test_rollup_bounded_on_blocking_collect(subcommand, collect_name, tmp_path):
 @pytest.mark.parametrize("subcommand,collect_name", [
     ("copilot-rollup", "_collect_copilot_sessions"),
     ("hermes-rollup", "_collect_hermes_sessions"),
+    ("cursor-rollup", "_collect_cursor_sessions"),
 ])
 def test_rollup_normal_completion_exits_zero_no_diagnostic(subcommand, collect_name, tmp_path):
     """A fast collect completes, exits 0, and clears the budget -- no spurious
@@ -164,7 +171,7 @@ def test_both_rollup_branches_install_and_clear_budget_source():
     _install_hook_budget( and _clear_hook_budget( (mirrors the
     test_all_three_user_prompt_handlers_install_and_clear_budgets pattern)."""
     source = MEASURE.read_text(encoding="utf-8")
-    names = ["copilot-rollup", "hermes-rollup"]
+    names = ["copilot-rollup", "hermes-rollup", "cursor-rollup"]
     blocks = []
     for name in names:
         start = source.index(f'elif args[0] == "{name}":')

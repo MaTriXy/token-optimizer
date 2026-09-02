@@ -12,7 +12,7 @@ fix along axes the regression tests do not cover:
       returned fast for some other reason.
     * normal completion is not spuriously killed (re-probed).
     * the budget is literally ``60`` (not 0 / negative / a typo) by source
-      inspection of both rollup branches.
+      inspection of all three rollup branches.
 
   Bug B
     * a young/live candidate is never reaped while a sweep runs concurrently
@@ -186,6 +186,10 @@ def _run_rollup_subprocess(subcommand, collect_name, tmp_path, *, block, budget)
     env["PYTHONPATH"] = str(SCRIPTS)
     env["PYTHONUTF8"] = "1"
     env["TOKEN_OPTIMIZER_SNAPSHOT_DIR"] = str(tmp_path)
+    if subcommand.startswith("cursor-"):
+        # cursor-rollup refuses unless the cursor runtime is pinned, exactly as
+        # the real cursor_hook_bridge does when it spawns the rollup.
+        env["TOKEN_OPTIMIZER_RUNTIME"] = "cursor"
     code = _rollup_dispatch_code(
         subcommand, collect_name, tmp_path,
         collect_block_seconds=block, budget_seconds=budget,
@@ -201,6 +205,7 @@ def _run_rollup_subprocess(subcommand, collect_name, tmp_path, *, block, budget)
 @pytest.mark.parametrize("subcommand,collect_name", [
     ("copilot-rollup", "_collect_copilot_sessions"),
     ("hermes-rollup", "_collect_hermes_sessions"),
+    ("cursor-rollup", "_collect_cursor_sessions"),
 ])
 @pytest.mark.skipif(
     sys.platform == "win32",
@@ -241,6 +246,7 @@ def test_defeat_bug_a_deadline_fires_emits_diagnostic(subcommand, collect_name, 
 @pytest.mark.parametrize("subcommand,collect_name", [
     ("copilot-rollup", "_collect_copilot_sessions"),
     ("hermes-rollup", "_collect_hermes_sessions"),
+    ("cursor-rollup", "_collect_cursor_sessions"),
 ])
 def test_defeat_bug_a_normal_completion_spared(subcommand, collect_name, tmp_path):
     """ADVERSARIAL: a fast collect must NOT be spuriously killed.  A 5s budget
@@ -260,12 +266,12 @@ def test_defeat_bug_a_normal_completion_spared(subcommand, collect_name, tmp_pat
 
 
 def test_defeat_bug_a_budget_value_is_60_source():
-    """ADVERSARIAL: source-inspect that BOTH rollup branches arm
+    """ADVERSARIAL: source-inspect that all three rollup branches arm
     ``_install_hook_budget(60)`` -- not 0, not negative, not a typo.  A budget
     of 0 would fire instantly (kill normal completion); a missing/negative
     budget would be a regression.  The literal 60 is the contract."""
     source = MEASURE.read_text(encoding="utf-8")
-    for name in ("copilot-rollup", "hermes-rollup"):
+    for name in ("copilot-rollup", "hermes-rollup", "cursor-rollup"):
         start = source.index(f'elif args[0] == "{name}":')
         nxt = source.find('elif args[0] ==', start + 1)
         end = nxt if nxt != -1 else len(source)
