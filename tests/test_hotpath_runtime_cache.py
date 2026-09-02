@@ -7,9 +7,11 @@ What changed:
   snapshot per process, shared by the OpenCode (args) and Copilot (comm)
   ancestor scanners, which previously spawned one `ps` each.
 - runtime_env._opencode_in_process_tree(): persists a NEGATIVE scan result to
-  a short-TTL disk cache keyed by parent pid + runtime-signal env signature so
-  subsequent hook processes skip the scan. Only negatives are cached, so a
-  stale entry can never flip a session INTO another runtime.
+  a short-TTL disk cache keyed by parent pid + parent start time (Linux
+  /proc only) + runtime-signal env signature so subsequent hook processes
+  skip the scan. Only negatives are cached, so a stale entry can never flip
+  a Claude/Codex session into another runtime. On Linux the start-time
+  binding prevents PID reuse from flipping an OpenCode session into claude.
 - hooks/run.py: exports detect_runtime()'s resolution to the dispatched child
   via TOKEN_OPTIMIZER_RUNTIME so the child (whose parent is the ephemeral
   dispatcher, making its own cache useless) never re-scans.
@@ -24,6 +26,9 @@ Contracts guarded here:
 7. detect_runtime() honors an exported TOKEN_OPTIMIZER_RUNTIME without any
    process scan (the run.py child contract).
 8. A failing `ps` behaves as "no ancestor found" and never raises.
+9. PID reuse with a different parent start time does not suppress a live
+   OpenCode ancestor (the cache key binds to the parent's incarnation).
+10. Same parent start time (same incarnation) still allows a cache hit.
 
 Run directly:  python3 tests/test_hotpath_runtime_cache.py
 Exits non-zero on first failure.
@@ -272,6 +277,74 @@ def test_expired_cache_entry_is_ignored():
             _stop(patches)
 
 
+@_requires_ps
+def test_pid_reuse_does_not_suppress_live_opencode_ancestor():
+    """A stale negative from a prior incarnation (different parent start time)
+    must not suppress a live OpenCode ancestor scan when the PID is reused.
+
+    This is the brief's top concern (runtime misdetection via PID reuse).
+    On Linux the cache key includes /proc/<ppid>/stat starttime, so a reused
+    PID with a different incarnation produces a different key. On non-Linux
+    the start time is "" for both incarnations, so the test mocks
+    _parent_starttime to simulate the Linux behavior portably.
+    """
+    with _Controlled() as ctx:
+        # Phase 1: prior Claude session writes a negative cache entry with
+        # parent start time "1000" (old incarnation).
+        table_no_opencode = _ps_table(*_hook_chain())
+        with mock.patch.object(runtime_env, "_parent_starttime", return_value="1000"):
+            calls, patches = _patch_ps(table_no_opencode)
+            try:
+                assert runtime_env._opencode_in_process_tree() is False
+                assert calls["n"] == 1
+            finally:
+                _stop(patches)
+        assert ctx.cache_file().is_file(), "negative result not persisted"
+
+        # Phase 2: PID is reused by a new OpenCode session. The parent start
+        # time is now "2000" (new incarnation). The cache key differs, so the
+        # stale entry is a miss and the live scan runs, finding the opencode
+        # ancestor.
+        table_with_opencode = _ps_table(
+            (_FAKE_PID, _FAKE_PARENT, "python3", "python3 run.py"),
+            (_FAKE_PARENT, 1, "node", "node /opt/x/node_modules/opencode-ai/dist/index.js"),
+        )
+        runtime_env._PROC_SCAN_SNAPSHOT = None
+        with mock.patch.object(runtime_env, "_parent_starttime", return_value="2000"):
+            calls2, patches2 = _patch_ps(table_with_opencode)
+            try:
+                assert runtime_env._opencode_in_process_tree() is True, (
+                    "PID reuse with different start time must re-scan and find the opencode ancestor"
+                )
+                assert calls2["n"] == 1, "stale cache from prior incarnation must not suppress scan"
+            finally:
+                _stop(patches2)
+
+
+@_requires_ps
+def test_same_start_time_allows_cache_hit():
+    """When the parent start time is unchanged (same incarnation), the cache
+    hit still works — the start-time binding does not break the normal cache."""
+    with _Controlled() as ctx:
+        table = _ps_table(*_hook_chain())
+        with mock.patch.object(runtime_env, "_parent_starttime", return_value="1000"):
+            calls, patches = _patch_ps(table)
+            try:
+                assert runtime_env._opencode_in_process_tree() is False
+                assert calls["n"] == 1
+            finally:
+                _stop(patches)
+        assert ctx.cache_file().is_file()
+        runtime_env._PROC_SCAN_SNAPSHOT = None
+        with mock.patch.object(runtime_env, "_parent_starttime", return_value="1000"):
+            calls2, patches2 = _patch_ps(table)
+            try:
+                assert runtime_env._opencode_in_process_tree() is False
+                assert calls2["n"] == 0, "same start time must allow cache hit"
+            finally:
+                _stop(patches2)
+
+
 def test_no_proc_scan_disables_scan_and_cache_write():
     with _Controlled(env={"TOKEN_OPTIMIZER_NO_PROC_SCAN": "1"}) as ctx:
         calls, patches = _patch_ps()
@@ -314,6 +387,8 @@ _REQUIRE_PS = frozenset({
     "test_positive_finding_is_never_cached",
     "test_cache_invalidated_by_env_signature",
     "test_expired_cache_entry_is_ignored",
+    "test_pid_reuse_does_not_suppress_live_opencode_ancestor",
+    "test_same_start_time_allows_cache_hit",
 })
 
 

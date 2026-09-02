@@ -525,10 +525,13 @@ def _opencode_env_signal() -> bool:
 #    snapshot is exact; the OpenCode and Copilot scans read different columns
 #    of the same table.
 # 2. A short-TTL disk cache of the OpenCode scan's NEGATIVE result ("no
-#    opencode ancestor"), keyed by parent pid + runtime-signal env signature.
-#    Only the negative result is cached: a stale entry can then only ever
-#    reproduce the pre-#57 claude-tier fallback for at most one TTL window,
-#    never flip a genuine Claude/Codex session into another runtime's home.
+#    opencode ancestor"), keyed by parent pid + parent process start time
+#    (Linux /proc only) + runtime-signal env signature. Only the negative
+#    result is cached: a stale entry can then only ever reproduce the
+#    pre-#57 claude-tier fallback for at most one TTL window, never flip a
+#    genuine Claude/Codex session into another runtime's home. The start-time
+#    component prevents PID reuse from suppressing a live OpenCode ancestor:
+#    a reused PID has a different incarnation and produces a different key.
 # ---------------------------------------------------------------------------
 
 _ANCESTOR_CACHE_TTL_SECONDS = 120
@@ -619,12 +622,47 @@ def _ancestor_cache_path() -> Path:
     return _xdg_base("XDG_CACHE_HOME", ".cache") / "token-optimizer" / "ancestor-scan.json"
 
 
+def _parent_starttime() -> str:
+    """Best-effort parent process start time (incarnation marker for PID-reuse safety).
+
+    On Linux, reads ``/proc/<ppid>/stat`` field 22 (starttime in clock ticks
+    since boot) — a cheap file read with no ``ps`` spawn. On non-Linux the
+    start time is unavailable cheaply; returns "" so the cache key falls back
+    to ``pid:env_hash`` (the pre-fix behavior, no regression). Never raises.
+    """
+    if not sys.platform.startswith("linux"):
+        return ""
+    try:
+        ppid = os.getppid()
+        data = Path(f"/proc/{ppid}/stat").read_text()
+        # comm is in parentheses and can contain spaces; split after the last ')'.
+        rparen = data.rfind(")")
+        if rparen < 0:
+            return ""
+        fields = data[rparen + 2:].split()
+        # After comm: state ppid pgrp session tty_nr tpgid flags minflt cminflt
+        # majflt cmajflt utime stime cutime cstime priority nice num_threads
+        # itrealvalue starttime ...  — starttime is field 22, index 19 here.
+        if len(fields) > 19:
+            return fields[19]
+    except (OSError, ValueError, IndexError):
+        pass
+    return ""
+
+
 def _ancestor_cache_key() -> str:
-    """Key binding the cached negative result to this parent + signal env."""
+    """Key binding the cached negative result to this parent + signal env.
+
+    Includes the parent's process start time (Linux ``/proc`` only) so a
+    reused PID with a different incarnation produces a different key and
+    cannot suppress a live ancestor scan. On non-Linux the start time is
+    unavailable cheaply; the key falls back to ``pid:env_hash``.
+    """
     raw = "\n".join(
         f"{name}={os.environ.get(name, '')}" for name in _ANCESTOR_CACHE_ENV_VARS
     )
-    return f"{os.getppid()}:{hashlib.sha256(raw.encode('utf-8', 'replace')).hexdigest()}"
+    start = _parent_starttime()
+    return f"{os.getppid()}:{start}:{hashlib.sha256(raw.encode('utf-8', 'replace')).hexdigest()}"
 
 
 def _ancestor_negative_cached() -> bool:
@@ -817,11 +855,16 @@ def _opencode_in_process_tree() -> bool:
     through ``node``/``bun`` is recognized, not only a bare ``opencode`` binary
     (issue #57). Reads the shared one-shot process snapshot (one ``ps`` per
     process, shared with the Copilot scanner). A fresh NEGATIVE result is
-    persisted to a short-TTL disk cache keyed by parent pid + signal-env
-    signature, so subsequent hook processes in the same session skip the scan
-    entirely; only the negative result is cached, so a stale entry can never
-    flip a session INTO another runtime (worst case: the pre-#57 claude-tier
-    fallback for at most one TTL window). Same safety envelope as
+    persisted to a short-TTL disk cache keyed by parent pid + parent start
+    time (Linux /proc only) + signal-env signature, so subsequent hook
+    processes in the same session skip the scan entirely; only the negative
+    result is cached, so a stale entry can never flip a Claude/Codex session
+    into another runtime. On Linux the start-time binding also prevents PID
+    reuse from flipping an OpenCode session into claude: a reused PID has a
+    different incarnation and produces a different key. On non-Linux the
+    start time is unavailable cheaply; a stale entry can flip an OpenCode
+    session into claude for at most one TTL window (worst case: the pre-#57
+    claude-tier fallback). Same safety envelope as
     ``_ancestor_in_process_tree``: disabled on Windows, behind a short timeout,
     skippable via TOKEN_OPTIMIZER_NO_PROC_SCAN, and never raises.
     """
