@@ -72,7 +72,7 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     # Use a context prefix to avoid false positives on random 40-char base64
     # strings. No trailing \b because the secret may end with = or + (non-word).
     ("AWS secret key",          re.compile(
-        r"(?P<keep>\b(?:aws_secret|secret_access_key|SecretAccessKey)[\"\'\s:=]+)"
+        r"(?P<keep>\b(?:aws_secret_access_key|aws_secret|secret_access_key|SecretAccessKey)[\"\'\s:=]+)"
         r"(?!\[CREDENTIAL REDACTED:)[A-Za-z0-9/+=]{40}",
         re.I,
     )),
@@ -166,6 +166,30 @@ def scan_for_credentials(text: str) -> List[Tuple[str, str, int]]:
 _PLACEHOLDER_RE = re.compile(r"\[CREDENTIAL REDACTED: [^\]]+\]")
 _PLACEHOLDER_SENTINEL = "\x00\x01REDACTED\x00\x01"
 
+# Per-pattern literal anchors (checked on a lowercased copy of the ORIGINAL
+# text, once, before the loop). A pattern whose anchors are all absent cannot
+# match, so its re.sub() is skipped. This is what makes clean-but-URL-bearing
+# output cheap: the global prefix scan above fires on any "https://", after
+# which the three M-12 patterns and the two URI patterns used to cost more
+# than everything else combined (measured 24ms -> 55ms per 10K realistic
+# lines on the first H-8 attempt). Substitutions only remove secrets and add
+# placeholders, never new anchors, so a pre-loop check stays sound.
+_PATTERN_ANCHORS = {
+    # Only the patterns that are expensive to run (case-insensitive
+    # alternations, or a scheme scan) are gated. The literal-prefix patterns
+    # (AKIA..., ghp_..., xoxb-...) are already a fast scan in the regex engine
+    # and cost less than an extra anchor check would.
+    "Bearer token": ("bearer",),
+    "Database URI": ("://",),
+    "HTTP basic auth URL": ("://",),
+    "URL auth param": ("=",),
+    "MySQL password flag": ("mysql",),
+    "Database env password": ("password=", "pwd=", "passwd=",
+                              "password='", "password=\"", "pwd='", "pwd=\"",
+                              "passwd='", "passwd=\""),
+    "AWS secret key": ("aws_secret", "secret_access_key", "secretaccesskey"),
+}
+
 
 def redact_credentials(text: str) -> str:
     """Replace credential matches with [CREDENTIAL REDACTED: <type>] placeholders.
@@ -196,12 +220,11 @@ def redact_credentials(text: str) -> str:
         text = _PLACEHOLDER_RE.sub(_save_placeholder, text)
 
     # H-8: fast path — skip all regex work if no credential prefix is present.
-    if not _text_may_contain_credentials(text):
-        # Restore placeholders before returning.
-        for ph in placeholders:
-            text = text.replace(_PLACEHOLDER_SENTINEL, ph, 1)
-        return text
+    lowered = text.lower()
     for label, pat in CREDENTIAL_PATTERNS:
+        anchors = _PATTERN_ANCHORS.get(label)
+        if anchors and not any(a in lowered for a in anchors):
+            continue
         if "keep" in pat.groupindex:
             text = pat.sub(rf"\g<keep>[CREDENTIAL REDACTED: {label}]", text)
         else:
