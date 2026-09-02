@@ -57,6 +57,10 @@ def _gate_env(tmp_path: Path) -> dict:
     env.pop("CODEX_HOME", None)
     env.pop("HERMES_HOME", None)
     env.pop("COPILOT_HOME", None)
+    env.pop("TOKEN_OPTIMIZER_COPILOT_HOME", None)
+    env.pop("TOKEN_OPTIMIZER_CURSOR_HOME", None)
+    env.pop("CURSOR_PROJECT_DIR", None)
+    env.pop("CURSOR_VERSION", None)
     env.pop("CLAUDE_PLUGIN_DATA", None)
     env.pop("TOKEN_OPTIMIZER_PLUGIN_DATA", None)
     return env
