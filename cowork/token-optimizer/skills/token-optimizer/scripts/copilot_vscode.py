@@ -624,8 +624,13 @@ def read_sessions(
 @contextmanager
 def _ro_connect_otel(path: Path) -> Iterator[sqlite3.Connection]:
     """Open an OTel db read-only; always close even on error."""
+    # H-2: build the file: URI via Path.as_uri() rather than string
+    # interpolation. With uri=True, characters like ?, #, % and spaces in the
+    # path are URI syntax, so a path containing '?' would start the query
+    # string early and could drop or override mode=ro (opening read-write).
+    db_uri = Path(path).as_uri()
     conn = sqlite3.connect(
-        f"file:{path}?mode=ro&immutable=1",
+        f"{db_uri}?mode=ro&immutable=1",
         uri=True,
         timeout=0.25,
     )

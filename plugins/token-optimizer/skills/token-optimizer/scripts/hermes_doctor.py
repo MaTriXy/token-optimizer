@@ -358,7 +358,10 @@ def _state_db_checks() -> list[dict[str, str]]:
 
     conn = None
     try:
-        uri = f"file:{db_path}?mode=ro&immutable=1"
+        # H-2: build the file: URI via Path.as_uri() rather than string
+        # interpolation. A path containing '?' would start the query string
+        # early and could drop or override mode=ro (opening read-write).
+        uri = f"{Path(db_path).as_uri()}?mode=ro&immutable=1"
         conn = sqlite3.connect(uri, uri=True, timeout=5)
         conn.execute("PRAGMA query_only = ON")
         conn.execute("PRAGMA busy_timeout=3000")
