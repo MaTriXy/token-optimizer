@@ -207,6 +207,92 @@ class TestStageReadOnly:
         ok, reason = _is_stage_read_only(["git", "branch", "-D", "old-branch"])
         assert not ok
 
+    # --- H-3: combined short flags bypass the exact-match check ---
+
+    def test_git_branch_Df_combined_rejected(self):
+        """H-3: `git branch -Df` = -D + -f. The token '-Df' is not in the
+        frozenset, so the exact-match check bypasses it."""
+        ok, reason = _is_stage_read_only(["git", "branch", "-Df", "old-branch"])
+        assert not ok
+
+    def test_git_branch_fv_combined_rejected(self):
+        """H-3: `git branch -fv` contains -f (harmless) + -v (verbose, harmless)
+        but the expansion check should NOT reject it since neither f nor v is
+        destructive. This verifies -f is excluded from the destructive char set."""
+        ok, reason = _is_stage_read_only(["git", "branch", "-fv", "topic"])
+        assert ok, f"git branch -fv should be read-only: {reason}"
+
+    def test_git_branch_df_combined_rejected(self):
+        """H-3: `git branch -df` = -d + -f. The -d is destructive."""
+        ok, reason = _is_stage_read_only(["git", "branch", "-df", "old-branch"])
+        assert not ok
+
+    def test_git_branch_md_combined_rejected(self):
+        """H-3: `git branch -md` = -m + -d. Both are destructive."""
+        ok, reason = _is_stage_read_only(["git", "branch", "-md", "old", "new"])
+        assert not ok
+
+    def test_git_branch_cf_combined_rejected(self):
+        """H-3: `git branch -cf` = -c + -f. The -c is destructive (copy)."""
+        ok, reason = _is_stage_read_only(["git", "branch", "-cf", "old", "new"])
+        assert not ok
+
+    def test_git_branch_fm_combined_rejected(self):
+        """H-3: `git branch -fm` = -f + -m. The -m is destructive (rename)."""
+        ok, reason = _is_stage_read_only(["git", "branch", "-fm", "old", "new"])
+        assert not ok
+
+    # --- H-4: all new destructive flags have tests ---
+
+    def test_git_branch_m_flag_rejected(self):
+        ok, reason = _is_stage_read_only(["git", "branch", "-m", "old", "new"])
+        assert not ok
+
+    def test_git_branch_M_flag_rejected(self):
+        ok, reason = _is_stage_read_only(["git", "branch", "-M", "old", "new"])
+        assert not ok
+
+    def test_git_branch_move_long_rejected(self):
+        ok, reason = _is_stage_read_only(["git", "branch", "--move", "old", "new"])
+        assert not ok
+
+    def test_git_branch_c_flag_rejected(self):
+        ok, reason = _is_stage_read_only(["git", "branch", "-c", "old", "new"])
+        assert not ok
+
+    def test_git_branch_C_flag_rejected(self):
+        ok, reason = _is_stage_read_only(["git", "branch", "-C", "old", "new"])
+        assert not ok
+
+    def test_git_branch_copy_long_rejected(self):
+        ok, reason = _is_stage_read_only(["git", "branch", "--copy", "old", "new"])
+        assert not ok
+
+    def test_git_branch_delete_long_rejected(self):
+        ok, reason = _is_stage_read_only(["git", "branch", "--delete", "old"])
+        assert not ok
+
+    # --- M-14: -f on legitimate non-destructive use ---
+
+    def test_git_branch_f_force_create_allowed(self):
+        """M-14: `git branch -f <branchname> <startpoint>` is a legitimate
+        non-destructive operation (force-create/reset a branch pointer). -f
+        was removed from the destructive set; combined forms like -Df are
+        caught by the short-flag expansion check."""
+        ok, reason = _is_stage_read_only(["git", "branch", "-f", "topic", "main"])
+        assert ok, f"git branch -f <branch> <startpoint> should be read-only: {reason}"
+
+    def test_git_branch_force_long_allowed(self):
+        """M-14: --force alone is also legitimate for force-create."""
+        ok, reason = _is_stage_read_only(["git", "branch", "--force", "topic", "main"])
+        assert ok, f"git branch --force <branch> <startpoint> should be read-only: {reason}"
+
+    def test_git_branch_f_with_delete_still_rejected(self):
+        """M-14: -f combined with -D in separate tokens is still rejected
+        because -D is in the destructive set."""
+        ok, reason = _is_stage_read_only(["git", "branch", "-f", "-D", "old"])
+        assert not ok
+
     def test_git_gc_prune_not_in_allowlist(self):
         ok, reason = _is_stage_read_only(["git", "gc", "--prune=now"])
         assert not ok
@@ -447,6 +533,9 @@ READ_ONLY_PIPELINES = [
     ("du -sh * | sort -rh | head -10", "du + sort + head"),
     ("cat file.txt | tr '[:lower:]' '[:upper:]'", "cat + tr"),
     ("git branch -a | grep -v '^*' | sort", "git branch + grep + sort"),
+    ("git branch -f topic main", "git branch -f force-create is non-destructive"),
+    ("git branch --force topic main", "git branch --force force-create is non-destructive"),
+    ("git branch -fv topic", "git branch -fv verbose is non-destructive"),
     ("npm test 2>&1 | grep -E '(passing|failing)'", "npm test with stderr redirect"),
     ("git status && ls -la", "git status && ls"),
     ("echo 'build info' && git log -1", "echo && git log"),
@@ -475,6 +564,15 @@ SIDE_EFFECTING = [
     ("git fetch && git checkout main", "git fetch is a side effect"),
     ("git branch -d old-branch", "git branch -d is destructive"),
     ("git branch -D old-branch", "git branch -D is destructive"),
+    ("git branch -Df old-branch", "git branch -Df combined is destructive"),
+    ("git branch -df old-branch", "git branch -df combined is destructive"),
+    ("git branch -m old new", "git branch -m is destructive"),
+    ("git branch -M old new", "git branch -M is destructive"),
+    ("git branch -c old new", "git branch -c is destructive"),
+    ("git branch -C old new", "git branch -C is destructive"),
+    ("git branch --move old new", "git branch --move is destructive"),
+    ("git branch --copy old new", "git branch --copy is destructive"),
+    ("git branch --delete old", "git branch --delete is destructive"),
     ("git gc --prune=now", "git gc not in allow-list"),
     ("git config user.name evil", "git config not in allow-list"),
     ("git update-ref -d ref", "git update-ref not in allow-list"),

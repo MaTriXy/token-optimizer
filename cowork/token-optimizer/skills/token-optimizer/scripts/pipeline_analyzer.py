@@ -348,14 +348,27 @@ _GIT_READ_ONLY_SUBCMDS = frozenset({
 
 # git branch destructive flags. Covers delete (-d/-D/--delete), rename
 # (-m/-M/--move) and copy (-c/-C/--copy, which are copy/force-copy, not
-# "create"), plus --force/-f. All are state-changing and must not pass the
-# read-only gate.
+# "create"). All are state-changing and must not pass the read-only gate.
+#
+# M-14: -f/--force is NOT in this set. `git branch -f <branchname>
+# <startpoint>` is a legitimate non-destructive operation (force-create/
+# reset a branch pointer). -f only forces a destructive operation when
+# combined with -d/-D/-m/-M/-c/-C (e.g. `git branch -Df`), and those
+# combined forms are caught by the short-flag expansion check below.
 _GIT_BRANCH_DESTRUCTIVE_FLAGS = frozenset({
     "-d", "-D", "--delete",
     "-m", "-M", "--move",
     "-c", "-C", "--copy",
-    "-f", "--force",
 })
+
+# H-3: destructive short-flag characters for combined-flag expansion. Git
+# allows bundling short flags: `git branch -Df` = -D + -f. The token "-Df"
+# is NOT in the frozenset above, so the exact-match check bypasses it. For
+# any token starting with a single dash (not --) with len > 2, check if
+# any character after the dash is in this set. -f is deliberately excluded
+# (M-14): -f alone is non-destructive, and -f combined with a destructive
+# flag is caught by the destructive character in the same token.
+_GIT_BRANCH_DESTRUCTIVE_SHORT_CHARS = frozenset({"d", "D", "m", "M", "c", "C"})
 
 # find destructive flags.
 _FIND_DESTRUCTIVE_FLAGS = frozenset({"-delete", "-exec", "-execdir", "-ok", "-okdir",
@@ -439,8 +452,19 @@ def _is_stage_read_only(tokens: list[str]) -> tuple[bool, str]:
         # Special guard: git branch with destructive flags.
         if subcmd == "branch":
             for tok in remaining:
+                # Exact match against long flags and single short flags.
                 if tok in _GIT_BRANCH_DESTRUCTIVE_FLAGS:
                     return False, f"git-branch-destructive-flag:{tok}"
+                # H-3: expand combined short flags. Git allows bundling:
+                # `git branch -Df` = -D + -f. The token "-Df" is not in
+                # the frozenset, so the exact-match check above bypasses
+                # it. For any single-dash token with len > 2, check if any
+                # character after the dash is a destructive short flag.
+                if (len(tok) > 2 and tok.startswith("-")
+                        and not tok.startswith("--")):
+                    for ch in tok[1:]:
+                        if ch in _GIT_BRANCH_DESTRUCTIVE_SHORT_CHARS:
+                            return False, f"git-branch-destructive-flag:{tok}"
         return True, "git-read-only"
 
     # -------------------------------------------------------------------
