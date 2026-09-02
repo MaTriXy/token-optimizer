@@ -234,16 +234,20 @@ def _get_combined_error_re():
         return _COMBINED_ERROR_RE
     try:
         from bash_compress import _ERROR_STDERR_PATTERNS
-        # Join all patterns into a single alternation. Each pattern's
-        # flags are preserved via scoped inline flags (?i:...) so the
-        # combined regex matches exactly what the individual patterns did.
+        # Join all patterns into a single alternation. N-2: each pattern's
+        # case sensitivity is preserved by wrapping only the originally
+        # case-insensitive patterns in a scoped inline (?i:...) group. The
+        # first attempt compiled the combined regex with a global re.I, which
+        # silently upgraded the case-sensitive patterns (\bFAILED\b,
+        # \bTraceback\b) and made benign output containing lowercase
+        # "failed"/"traceback" trip the error-density gate.
         parts = []
         for pat in _ERROR_STDERR_PATTERNS:
             if pat.flags & re.I:
-                parts.append(f"(?:{pat.pattern})")  # re.I applied to the whole combined regex
+                parts.append(f"(?i:{pat.pattern})")
             else:
                 parts.append(f"(?:{pat.pattern})")
-        _COMBINED_ERROR_RE = re.compile("|".join(parts), re.I)
+        _COMBINED_ERROR_RE = re.compile("|".join(parts))
     except Exception:
         _COMBINED_ERROR_RE = False  # sentinel: build failed
     return _COMBINED_ERROR_RE

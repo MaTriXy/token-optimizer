@@ -135,3 +135,34 @@ def test_stdout_error_patterns_performance_10k_with_errors():
         f"errors, expected <150ms (early exit not working — likely reverted to "
         f"full scan without early termination)"
     )
+
+
+def test_case_sensitive_patterns_not_upgraded():
+    """N-2: the combined error regex must preserve each pattern's original
+    case sensitivity. The first combined-regex attempt compiled with a global
+    re.I, silently upgrading \\bFAILED\\b and \\bTraceback\\b so benign output
+    containing lowercase "failed"/"traceback" at >=10% line density tripped
+    the error gate (skipping compression) where the per-pattern loop passed
+    it through."""
+    # Lowercase "failed" at ~11% density: must NOT trip (was a false positive
+    # under the global-re.I build; the original case-sensitive \\bFAILED\\b
+    # never matched lowercase).
+    lines = [f"2026-09-02 10:{i % 60:02d}:00 INFO request {i} handled ok"
+             for i in range(89)]
+    lines += [f"retry policy: {i} tasks failed retry=ok recovered"
+              for i in range(11)]
+    assert _stdout_has_error_patterns("\n".join(lines)) is False
+
+    # Lowercase "traceback" in help text at ~11% density: must NOT trip.
+    lines = [f"option --show-traceback-{i}: print the traceback and exit"
+             for i in range(15)]
+    lines += [f"regular help line {i} with usage text here" for i in range(120)]
+    assert _stdout_has_error_patterns("\n".join(lines)) is False
+
+    # Uppercase FAILED must still trip (case-sensitive pattern intact).
+    lines = [f"step {i} ok" for i in range(85)] + ["STEP FAILED"] * 15
+    assert _stdout_has_error_patterns("\n".join(lines)) is True
+
+    # Case-insensitive patterns must still match lowercase ("error:").
+    lines = [f"step {i} ok" for i in range(85)] + ["error: boom"] * 15
+    assert _stdout_has_error_patterns("\n".join(lines)) is True
