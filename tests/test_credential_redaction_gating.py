@@ -74,6 +74,10 @@ SECRETS = [
     _j("PGPASSWORD=", "hunter22 psql -h db"),
     _j("aws_secret_access_key = ", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
     _j('"SecretAccessKey": "', "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", '"'),
+    _j("psql --password=", "hunter23 -h db"),
+    _j("some-tool --auth-token ", "tok3nvalue --verbose"),
+    _j("sshpass -p ", "hunter24 ssh box"),
+    _j("redis-cli -a ", "hunter25 ping"),
 ]
 
 

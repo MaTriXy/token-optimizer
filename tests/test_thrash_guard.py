@@ -129,6 +129,56 @@ def test_persisted_command_is_redacted(guard):
     assert "FAKE_SECRET_VALUE_123" not in row["command_text"], row["command_text"]
 
 
+@pytest.mark.parametrize("cmd,secret", [
+    ("mysql -u root -pSecretPass123 -e 'SELECT 1'", "SecretPass123"),
+    ("sshpass -p mysecret ssh user@host", "mysecret"),
+    ("redis-cli -a myredisauth GET foo", "myredisauth"),
+    ("psql --password=hunter2 -U user", "hunter2"),
+    ("psql --password hunter2 -U user", "hunter2"),
+    ("mysql -p SecretPass -e 'SELECT 1'", "SecretPass"),
+    ("mariadb -u root -pMypass -e 'SELECT 1'", "Mypass"),
+])
+def test_inline_cli_password_redacted_in_streak_store(guard, cmd, secret):
+    """Inline CLI password flags must be redacted before persisting to
+    command_run_streaks (the thrash guard's streak store)."""
+    out = "ok\nok\n"
+    guard.check(cmd, out)
+    from session_store import SessionStore
+    from delta_diff import content_hash
+    store = SessionStore(os.environ["CLAUDE_SESSION_ID"])
+    row = store.get_command_streak(content_hash(cmd.strip()))
+    store.close()
+    assert row is not None, "streak row must exist"
+    assert secret not in row["command_text"], (
+        f"secret {secret!r} leaked into streak store: {row['command_text']!r}"
+    )
+
+
+@pytest.mark.parametrize("cmd,secret", [
+    ("mysql -u root -pSecretPass123 -e 'SELECT 1'", "SecretPass123"),
+    ("sshpass -p mysecret ssh user@host", "mysecret"),
+    ("redis-cli -a myredisauth GET foo", "myredisauth"),
+    ("psql --password=hunter2 -U user", "hunter2"),
+])
+def test_inline_cli_password_redacted_in_command_outputs(guard, cmd, secret):
+    """Inline CLI password flags must be redacted before persisting to
+    command_outputs (the cross-turn dedup store, written by
+    bash_compress_hook._crossturn_dedup)."""
+    out = "ok\nok\n"
+    # Run twice so the cross-turn dedup path stores the command
+    guard.check(cmd, out)
+    guard.check(cmd, out)
+    from session_store import SessionStore
+    from delta_diff import content_hash
+    store = SessionStore(os.environ["CLAUDE_SESSION_ID"])
+    row = store.get_command_output(content_hash(cmd.strip()))
+    store.close()
+    if row is not None:
+        assert secret not in row["command_text"], (
+            f"secret {secret!r} leaked into command_outputs: {row['command_text']!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Integration: through bash_compress_hook.main() — nudge appended, never denied
 # ---------------------------------------------------------------------------
