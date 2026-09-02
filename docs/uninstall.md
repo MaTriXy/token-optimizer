@@ -174,6 +174,26 @@ For VS Code Copilot per-request cost tracking, disable the two
 `github.copilot.chat.agentDebugLog` settings in VS Code. See
 [`docs/copilot.md`](copilot.md).
 
+## Cursor
+
+```bash
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 skills/token-optimizer/scripts/measure.py cursor-uninstall
+```
+
+Removes only the Token Optimizer hook entries from `~/.cursor/hooks.json`
+and the payload directory `~/.cursor/token-optimizer/plugin/`. Other tools'
+hooks in the shared `hooks.json` are left intact. **Cursor session data
+(`~/.cursor/token-optimizer/sessions/`, `restore-context/`,
+`observed-events.jsonl`) is left in place by design.** Token Optimizer reads
+Cursor's state and transcript files read-only but never moves or owns them.
+To purge Token Optimizer's own data too:
+
+```bash
+rm -rf ~/.cursor/token-optimizer
+```
+
+See [`docs/cursor.md`](cursor.md).
+
 ## OpenCode
 
 ```bash

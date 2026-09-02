@@ -22,7 +22,7 @@ export default defineConfig({
     starlight({
       title: "Token Optimizer",
       description:
-        "Cut the tokens you waste. Keep the work you'd lose. A fully local context optimizer for Claude Code, Codex, OpenCode, OpenClaw, Hermes, and Copilot.",
+        "Cut the tokens you waste. Keep the work you'd lose. A fully local context optimizer for Claude Code, Codex, OpenCode, OpenClaw, Hermes, Copilot, and Cursor.",
       tagline: "Cut the tokens you waste. Keep the work you'd lose.",
       logo: {
         src: "./src/assets/logo.png",
@@ -129,6 +129,7 @@ export default defineConfig({
             { label: "OpenCode", slug: "install/opencode" },
             { label: "OpenClaw", slug: "install/openclaw" },
             { label: "Hermes", slug: "install/hermes" },
+            { label: "Cursor", slug: "install/cursor" },
           ],
         },
         {
@@ -141,6 +142,7 @@ export default defineConfig({
             { label: "OpenCode", slug: "platforms/opencode" },
             { label: "OpenClaw", slug: "platforms/openclaw" },
             { label: "Hermes", slug: "platforms/hermes" },
+            { label: "Cursor", slug: "platforms/cursor" },
             { label: "Cowork", slug: "platforms/cowork" },
           ],
         },

@@ -18,6 +18,7 @@
   <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/codex.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.codex-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Codex&color=orange" alt="Codex 版本"></a>
   <a href="https://github.com/alexgreensh/token-optimizer/tree/main/hermes"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Hermes&color=0d9488" alt="Hermes 版本"></a>
   <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/copilot.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Copilot&color=6e40c9&logo=githubcopilot&logoColor=white" alt="GitHub Copilot 版本"></a>
+  <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/cursor.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Cursor&color=0c0c0c&logo=cursor&logoColor=white" alt="Cursor 版本"></a>
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/cuts%20context%20waste-3fb950" alt="减少上下文浪费">
@@ -56,7 +57,7 @@ Token Optimizer 砍掉你的 AI 编程助手浪费的 token，让你的工作在
 
 **为什么不直接用 Headroom 或 RTK?** 它们压缩命令输出，只覆盖你上下文的 15-25%。Token Optimizer 覆盖这部分加上另外 75%:臃肿的配置、未使用的 skill、陈旧的记忆、压缩损失、模型误路由、行为浪费。每一项节省都对缓存安全且经过测量。仪表盘在每个会话后自动更新。
 
-可在 **Claude Code**(CLI 和 VS Code)、**OpenCode**、**OpenClaw**、**Codex**、**Hermes** 和 **GitHub Copilot** 上运行。Windsurf 和 Cursor 是路线图的下一站。
+可在 **Claude Code**(CLI 和 VS Code)、**OpenCode**、**OpenClaw**、**Codex**、**Hermes**、**GitHub Copilot** 和 **Cursor** 上运行。Windsurf 是路线图的下一站。
 
 <p align="center">
   <img src="skills/token-optimizer/assets/hero-terminal.svg" alt="Token Optimizer 快速扫描" width="800">
@@ -112,6 +113,14 @@ cd token-optimizer
 bash install.sh --copilot
 ```
 参见 [`docs/copilot.md`](docs/copilot.md)。
+
+**Cursor:**
+```bash
+git clone --depth 1 https://github.com/alexgreensh/token-optimizer.git
+cd token-optimizer
+bash install.sh --cursor
+```
+参见 [`docs/cursor.md`](docs/cursor.md)。
 
 **macOS/Linux 脚本安装(插件的替代):**
 ```bash
@@ -232,7 +241,7 @@ RTK 和 Boost 到达第一个面。Headroom 到达第一个和第三个。Token 
 | 零基线上下文开销 | 🟢 外部进程,无上下文注入 | 🔴 注入指令 | 🟢 仅 shell 级 | 🟢 仅 shell 级 | 🔴 MCP 服务器开销 | 🟢 原生 |
 | 零运行时依赖 | 🟢 纯标准库(Python/TypeScript) | 🟡 Python + Rust + 可选模型 | 🟢 单个 Rust 二进制 | 🟢 单个二进制 | 🟡 需要 SQLite 适配器 | 🟢 N/A |
 | 零遥测 | 🟢 不离开机器 | 🟡 `HEADROOM_TELEMETRY` opt-in,默认关 | 🟡 opt-in | 🔴 收集调用的命令、命令参数、退出码、时长、CI 属性、IP | 🟡 各异 | 🟢 |
-| 多平台 | 🟢 Claude Code、VS Code、Codex、OpenClaw、OpenCode、Hermes、Copilot | 🟢 Claude Code、Cursor、Codex、Aider、Copilot | 🟢 15 个集成 | 🟡 Cursor、Claude Code、Copilot、Codex CLI | 🟢 17 个集成 | 🔴 仅 Claude Code |
+| 多平台 | 🟢 Claude Code、VS Code、Codex、OpenClaw、OpenCode、Hermes、Copilot、Cursor | 🟢 Claude Code、Cursor、Codex、Aider、Copilot | 🟢 15 个集成 | 🟡 Cursor、Claude Code、Copilot、Codex CLI | 🟢 17 个集成 | 🔴 仅 Claude Code |
 | 按任务的模型和力度建议 | 🟢 `route` 在你花钱前衡量任务 | — | — | — | — | — |
 | Keep-Warm(缓存 TTL 刷新) | 🟢 缓存过期前 opt-in ping,绊线自动关 | 🔴 | 🔴 | — | 🔴 | 🔴 |
 | 端到端任务结果基准 | 🔴 仅输出 token A/B | — | — | 🟢 厂商报告 Terminal-Bench 2.0 相同通过率和约 12% 更低成本 | — | N/A |

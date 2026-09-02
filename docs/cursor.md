@@ -1,0 +1,173 @@
+# Token Optimizer for Cursor (beta)
+
+Token Optimizer's Cursor adapter. One adapter, two surfaces:
+
+- **Cursor IDE** — the Composer and its per-request token fields in `state.vscdb`
+- **Cursor CLI (`agent`)** — the same six-event hooks plus a transcript path
+
+The value prop is **token accounting and continuity without a second dashboard
+to watch**: Cursor shows context usage natively but does not persist per-request
+token totals in one place, and it ships no hook-surfaced cost figure. Token
+Optimizer reads Cursor's own stored token fields read-only, never a re-derived
+pricing table — and where Cursor exposes no cost number, it says so instead of
+inventing one.
+
+## Install
+
+Run from any folder. The clone creates a `token-optimizer/` folder; `cd` into it before running the installer:
+
+```bash
+git clone --depth 1 https://github.com/alexgreensh/token-optimizer.git
+cd token-optimizer
+bash install.sh --cursor
+# verify (from inside the token-optimizer folder)
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 skills/token-optimizer/scripts/measure.py cursor-doctor
+```
+
+**Already have Token Optimizer installed** (Claude Code plugin, script install,
+or a checkout under `~/.claude/skills/token-optimizer`)? You don't need a fresh
+clone, and you won't find `install.sh` inside the skill folder — it only exists
+at the repo root. Run the installer module you already have, directly:
+
+```bash
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 ~/.claude/skills/token-optimizer/scripts/measure.py cursor-install
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 ~/.claude/skills/token-optimizer/scripts/measure.py cursor-doctor
+```
+
+Adjust the path if your `measure.py` lives elsewhere — any up-to-date copy
+works. Script installs can equivalently run
+`bash ~/.claude/token-optimizer/install.sh --cursor`.
+
+This read-merges user-level hooks into `~/.cursor/hooks.json` and copies the
+adapter into `~/.cursor/token-optimizer/plugin/`. Cursor has **one shared**
+`hooks.json` (unlike Copilot's per-plugin file), so the installer merges rather
+than overwrites: entries owned by other tools are preserved verbatim, and only
+the entries whose `command` points at our bridge are replaced on re-install or
+removed on uninstall.
+
+### Windows
+
+Install from **WSL or a POSIX shell** — the installer refuses native Windows
+(`os.name == "nt"`). The persisted hook `command` is POSIX-shell quoted and
+`cmd.exe` would not parse it, so the adapter intentionally fails rather than
+silently writing a no-op hook. Native-Windows Cursor hooks are deferred. The
+matching cells stay red in the
+[capability matrix](https://alexgreensh.github.io/token-optimizer/reference/capability-matrix/)
+until a Windows quoting path is verified, not assumed.
+
+## No capability map — hooks are observed, not version-gated
+
+Copilot's CLI ships weekly and its hook fields regress, so that adapter gates
+features on a per-version capability map. Cursor's hooks are structured
+differently: every handler appends one line to
+`~/.cursor/token-optimizer/observed-events.jsonl`, and each event records whether
+the Shell rewrite was `attempted`, `honoured`, or `ignored`. `cursor-doctor
+--probe` replays the documented payloads through the installed `command`, so on
+any given build you can prove exactly which of the six events fire — no version
+table to rot.
+
+If a hook field upstream changes, the evidence is on disk, and
+`cursor-doctor` reports the toggles directly rather than trusting a stale map.
+
+## What Cursor hands a companion, and what it keeps
+
+| Event | TO uses it for | Output shape |
+|---|---|---|
+| `sessionStart` | per-workspace continuity restore (`additional_context`) | `{"additional_context": "..."}` |
+| `preToolUse` (Shell matcher) | bash output compression (`updated_input`) | `{"permission": "allow", "updated_input": {...}}` |
+| `postToolUse` | tally update + Shell rewrite-honoured evidence + context nudge | `{"additional_context": "..."}` |
+| `preCompact` | record real `context_tokens` / `context_window_size` / `context_usage_percent` | none |
+| `stop` | per-turn tally + throttled rollup/dashboard refresh | none |
+| `sessionEnd` | finalise tally + unthrottled rollup/dashboard | none |
+
+The bridge always exits 0 and never blocks a Cursor session. The `Shell`
+rewrite inherits `bash_hook.py`'s whitelist and dangerous-character exclusions
+and **fails closed** (emits nothing) on any uncertainty.
+
+### Honest gaps
+
+| Gap | Why | Tracking |
+|---|---|---|
+| Per-session cost | Cursor exposes no billing figure to hooks or state files; there is no number to pass through, so cost-source is `cursor_no_cost_data` and no savings headline is shown rather than a wrong one | marked red in the capability matrix |
+| Native Windows hooks | persisted `command` is POSIX-shell quoted; `cmd.exe` would not parse it | deferred, not silently broken |
+| Compaction steering | Cursor compacts server-side/model-side; `preCompact` is observational (we record its numbers), not an injection point | — |
+| Database parity surfaces | Cursor moves token fields across `state.vscdb` releases; the reader maps the known shapes and falls back instead of guessing | read-only, never writes |
+
+Consequences and mitigations:
+
+- **Crash-killed / killed-composer sessions** never fire a clean `sessionEnd`.
+  The `postToolUse` hook maintains an in-flight tally and the rollup recovers
+  partial data flagged as `~est.` — never silently dropped, never silently exact.
+- **Token figures have a strict ordering**, highest trust first: Cursor's own
+  `state.vscdb` token fields (`cursor_state_vscdb`), then a transcript-derived
+  estimate (`cursor_transcript_estimate`), then the in-flight tally alone
+  (`cursor_tally_only`). The doctor and summary name which source was active for
+  a session; sources are never summed.
+- **Chat-only sessions** (no tool calls) still get continuity restore at
+  session start; the postToolUse context nudge needs tool activity to fire.
+- **Continuity restore is per workspace**, keyed by `sha1(workspace_root)`, so a
+  busy IDE with many concurrent chats never seeds a new chat with another
+  repo's rollup. Restore is skipped while a sibling chat in the same workspace
+  is still active.
+
+## Data sources, one active per session
+
+| Source | What it gives | Role |
+|---|---|---|
+| `state.vscdb` → `cursorDiskKV` | per-request token fields Cursor persists | authoritative when present |
+| `transcript_path` | transcript file for the conversation | estimate fallback |
+| `<cursor_home>/token-optimizer/sessions/<id>.json` | our durable in-flight tally | crash recovery |
+
+`cursor-doctor` names which source is active on this install.
+
+## Commands
+
+```bash
+measure.py cursor-install     # read-merge hooks.json + copy the payload
+measure.py cursor-doctor      # readiness + hook-firing probe (--probe)
+measure.py cursor-summary     # token/quality session summary (reads tallies)
+measure.py cursor-rollup      # ingest sessions into trends.db (auto on stop/sessionEnd)
+measure.py cursor-uninstall   # remove only what we installed
+```
+
+Run them with `TOKEN_OPTIMIZER_RUNTIME=cursor` set (the installer and hooks set
+it for you). `cursor-rollup` and `cursor-summary` refuse with a hint unless the
+runtime is pinned to `cursor` — the bridge always pins it, so the refusal only
+catches a stray manual run.
+
+## Uninstall
+
+```bash
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 skills/token-optimizer/scripts/measure.py cursor-uninstall
+```
+
+Removes only the Token Optimizer hook entries from `~/.cursor/hooks.json` and
+the payload directory `~/.cursor/token-optimizer/plugin/`. Other tools' hooks
+are left intact. The uninstall is idempotent; running it on a clean config is a
+no-op.
+
+**Cursor session data is left in place by design.** Token Optimizer reads
+Cursor's state and transcript files read-only and never moves or owns them. To
+purge Token Optimizer's own data (tallies, restore context, the observed-events
+ledger, and the trends rows) too:
+
+```bash
+rm -rf ~/.cursor/token-optimizer
+```
+
+## Live-smoke runbook (first run on a machine with Cursor)
+
+1. Install Cursor (`agent` CLI or the IDE) and open a project.
+2. `bash install.sh --cursor`
+3. `measure.py cursor-doctor --probe` — expect the six wired events to replay
+   green, and the data-source check to name what this install can read.
+4. Run one short Cursor session that executes a whitelisted shell command
+   (e.g. `git status`).
+5. Confirm: `observed-events.jsonl` gained `sessionStart`, `preToolUse`,
+   `postToolUse`, and either `stop` or `sessionEnd` lines; a
+   `sessions/<id>.json` tally appeared and (on a clean exit) is marked final;
+   `cursor-summary` shows the session with its active token source; the trends
+   DB gained a row after the stop/sessionEnd rollup.
+6. If the whitelisted command ran bare (not through `bash_compress.py`), the
+   `postToolUse` line records `rewrite: ignored` — file it against the hook
+   contract, and `cursor-doctor` will show the observed toggle for it.

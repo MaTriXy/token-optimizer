@@ -5,7 +5,7 @@ description: "Platform support: Token Optimizer ships a native adapter per platf
 
 import { Aside } from '@astrojs/starlight/components';
 
-Token Optimizer runs natively on seven coding surfaces. Each platform gets its own adapter built against that platform's real hook API, not a lowest-common-denominator wrapper. Where an upstream API cannot do something, the page for that platform names the gap and the reason instead of pretending parity.
+Token Optimizer runs natively on eight coding surfaces. Each platform gets its own adapter built against that platform's real hook API, not a lowest-common-denominator wrapper. Where an upstream API cannot do something, the page for that platform names the gap and the reason instead of pretending parity.
 
 ## Supported platforms
 
@@ -19,11 +19,12 @@ Claude Code is the reference platform. Every feature ships there first, and ever
 | [OpenClaw](/platforms/openclaw/) | Plugin | Stable |
 | [Hermes](/platforms/hermes/) | Slash command, CLI | Beta |
 | [GitHub Copilot](/platforms/copilot/) | CLI, VS Code | Beta |
+| [Cursor](/platforms/cursor/) | IDE (Composer), CLI | Beta |
 | [Cowork](/platforms/cowork/) | Plugin, org console or personal upload | Experimental |
 
 Claude Cowork runs the same Claude Code engine in a VM, so it is not a separate runtime. It reaches Cowork sessions through the org plugin console rather than a local install, and it runs the hook subset that fires in Cowork. It is experimental and not yet verified on a live build. See the [Cowork page](/platforms/cowork/) for the distribution path and the hook set.
 
-The VS Code companion extension that surfaces Claude Code data also runs in Cursor and Windsurf, because both are VS Code forks. That covers the editor status bar only. Standalone Cursor and Windsurf adapters with their own hook integration are on the roadmap, not shipped.
+The VS Code companion extension that surfaces Claude Code data also runs in Cursor and Windsurf, because both are VS Code forks. That covers the editor status bar only. A standalone Cursor adapter with its own hook integration now ships in beta (see the [Cursor page](/platforms/cursor/)); a standalone Windsurf adapter remains on the roadmap, not shipped.
 
 ## Native per platform, not a shim
 

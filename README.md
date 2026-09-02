@@ -18,6 +18,7 @@
   <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/codex.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.codex-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Codex&color=orange" alt="Codex version"></a>
   <a href="https://github.com/alexgreensh/token-optimizer/tree/main/hermes"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Hermes&color=0d9488" alt="Hermes version"></a>
   <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/copilot.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Copilot&color=6e40c9&logo=githubcopilot&logoColor=white" alt="GitHub Copilot version"></a>
+  <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/cursor.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Cursor&color=0c0c0c&logo=cursor&logoColor=white" alt="Cursor version"></a>
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/cuts%20context%20waste-3fb950" alt="Cuts context waste">
@@ -56,7 +57,7 @@ Token Optimizer cuts the tokens your AI coding assistant wastes, keeps your work
 
 **Why not just use Headroom or RTK?** They compress command output, which covers 15-25% of your context. Token Optimizer covers that plus the other 75%: bloated configs, unused skills, stale memory, compaction loss, model misrouting, behavioral waste. Every saving is cache-safe and measured. The dashboard updates after every session, automatically.
 
-Works on **Claude Code** (CLI and VS Code), **OpenCode**, **OpenClaw**, **Codex**, **Hermes**, and **GitHub Copilot**. Windsurf and Cursor are next on the roadmap.
+Works on **Claude Code** (CLI and VS Code), **OpenCode**, **OpenClaw**, **Codex**, **Hermes**, **GitHub Copilot**, and **Cursor**. Windsurf is next on the roadmap.
 
 <p align="center">
   <img src="skills/token-optimizer/assets/hero-terminal.svg" alt="Token Optimizer Quick Scan" width="800">
@@ -112,6 +113,14 @@ cd token-optimizer
 bash install.sh --copilot
 ```
 See [`docs/copilot.md`](docs/copilot.md).
+
+**Cursor:**
+```bash
+git clone --depth 1 https://github.com/alexgreensh/token-optimizer.git
+cd token-optimizer
+bash install.sh --cursor
+```
+See [`docs/cursor.md`](docs/cursor.md).
 
 **macOS/Linux script install (alternative to plugin):**
 ```bash
@@ -233,7 +242,7 @@ These ten rows are the ones where Token Optimizer is the only 🟢 in the row: w
 | Zero baseline context overhead | 🟢 External process, no context injection | 🔴 Injects instructions | 🟢 Shell-level only | 🟢 Shell-level only | 🔴 MCP server overhead | 🟢 Native |
 | Zero runtime dependencies | 🟢 Pure stdlib (Python/TypeScript) | 🟡 Python + Rust + optional model | 🟢 Single Rust binary | 🟢 Single binary | 🟡 SQLite adapter required | 🟢 N/A |
 | Zero telemetry | 🟢 Nothing leaves the machine | 🟡 `HEADROOM_TELEMETRY` opt-in, off by default | 🟡 Opt-in | 🔴 Collects commands invoked, command arguments, exit codes, duration, CI attributes, IP | 🟡 Varies | 🟢 |
-| Multi-platform | 🟢 Claude Code, VS Code, Cowork, Codex, OpenClaw, OpenCode, Hermes, Copilot | 🟢 Claude Code, Cursor, Codex, Aider, Copilot | 🟢 15 integrations | 🟡 Cursor, Claude Code, Copilot, Codex CLI | 🟢 17 integrations | 🔴 Claude Code only |
+| Multi-platform | 🟢 Claude Code, VS Code, Cowork, Codex, OpenClaw, OpenCode, Hermes, Copilot, Cursor | 🟢 Claude Code, Cursor, Codex, Aider, Copilot | 🟢 15 integrations | 🟡 Cursor, Claude Code, Copilot, Codex CLI | 🟢 17 integrations | 🔴 Claude Code only |
 | Per-task model and effort advice | 🟢 `route` sizes the task before you spend | — | — | — | — | — |
 | Keep-Warm (cache TTL refresh) | 🟢 Opt-in ping before cache expiry, tripwire auto-off | 🔴 | 🔴 | — | 🔴 | 🔴 |
 | End-to-end task-outcome benchmark | 🟡 Controlled A/B on 7 real tasks (output tokens) + measured real-session with/without savings; pass-rate study not yet run | — | — | 🟢 Vendor reports Terminal-Bench 2.0 with the same pass rate and ~12% lower cost | — | N/A |

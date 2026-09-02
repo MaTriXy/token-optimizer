@@ -1,0 +1,116 @@
+---
+title: Cursor
+description: "Install Token Optimizer for Cursor via a shallow clone. It read-merges user-level hooks into ~/.cursor/hooks.json and runs a six-event hook bridge."
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Cursor support is in beta. Hooks are observed at runtime rather than version-gated, and the doctor proves which events fire on your build. Native-Windows hooks are refused. The install path depends on whether you already have Token Optimizer on this machine.
+
+## Prerequisites
+
+- Cursor, either the IDE or the `agent` CLI.
+- Python 3.x on your PATH.
+- For the fresh clone path: `git`.
+- A POSIX shell (WSL or Git Bash). Native Windows is refused.
+
+## Install
+
+<Tabs>
+<TabItem label="Fresh clone">
+
+Run from any folder. The clone creates a `token-optimizer/` folder, then you move into it and install.
+
+```bash
+git clone --depth 1 https://github.com/alexgreensh/token-optimizer.git
+cd token-optimizer
+bash install.sh --cursor
+```
+
+</TabItem>
+<TabItem label="Already installed">
+
+If Token Optimizer is already installed as a Claude Code plugin or script install, do not clone again. The `install.sh` script exists only at the repo root, not inside the skill folder, so call the engine directly:
+
+```bash
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 ~/.claude/skills/token-optimizer/scripts/measure.py cursor-install
+```
+
+Or, if you used the Claude Code script install:
+
+```bash
+bash ~/.claude/token-optimizer/install.sh --cursor
+```
+
+</TabItem>
+</Tabs>
+
+The install is idempotent. It read-merges user-level hooks into `~/.cursor/hooks.json` (Cursor has one shared hooks file, so foreign entries are preserved verbatim) and copies the adapter to `~/.cursor/token-optimizer/plugin/`. It never writes repo-level hooks.
+
+<Aside type="caution" title="Windows">
+Install from WSL or a POSIX shell. The installer refuses native Windows: the persisted `command` is POSIX-shell quoted and `cmd.exe` would not parse it, so the adapter fails rather than silently writing a no-op hook.
+</Aside>
+
+## Verify
+
+```bash
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 skills/token-optimizer/scripts/measure.py cursor-doctor --probe
+```
+
+`cursor-doctor --probe` replays the documented payloads through the installed hook `command`, proving which of the six events fire, and names the active token source. To preview the install without writing anything:
+
+```bash
+bash install.sh --cursor --dry-run
+```
+
+### Engine commands
+
+All require the `TOKEN_OPTIMIZER_RUNTIME=cursor` prefix.
+
+```bash
+measure.py cursor-install     # read-merge hooks.json + copy the payload
+measure.py cursor-doctor      # readiness + hook-firing probe
+measure.py cursor-summary     # token/quality session summary
+measure.py cursor-rollup      # ingest sessions into trends.db (auto on stop/sessionEnd)
+measure.py cursor-uninstall   # remove only what was installed
+```
+
+## Six wired events
+
+The merged hooks file carries six events. Everything the adapter does on each, and the output shape, is on the [Cursor platform reference](/platforms/cursor/).
+
+```text
+sessionStart  preToolUse(Shell)  postToolUse  preCompact  stop  sessionEnd
+```
+
+`preToolUse` carries a `Shell` matcher so every other tool stays off the bridge's hot path.
+
+## Cost and tokens
+
+Cursor exposes no billing figure, so there is no rate to configure. Token accounting uses Cursor's own stored fields with a strict trust ordering (`cursor_state_vscdb` → `cursor_transcript_estimate` → `cursor_tally_only`), surfaced per session rather than summed.
+
+## Auto-update
+
+Re-run the install after a `git pull`:
+
+```bash
+bash install.sh --cursor
+```
+
+## Uninstall
+
+```bash
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 skills/token-optimizer/scripts/measure.py cursor-uninstall
+```
+
+`cursor-uninstall` removes only the entries the installer added to `~/.cursor/hooks.json` and the payload directory. Session data is left in place by design.
+
+<Aside type="note">
+A composer killed without a clean `sessionEnd` never finalises its tally. The `postToolUse` hook keeps an in-flight tally and the rollup recovers partial data flagged as `~est.`, never silently dropped, never silently exact.
+</Aside>
+
+## See also
+
+- [Cursor platform reference](/platforms/cursor/) for the full feature and gap list.
+- [Capability matrix](/reference/capability-matrix/).
+- [Configuration](/reference/configuration/).

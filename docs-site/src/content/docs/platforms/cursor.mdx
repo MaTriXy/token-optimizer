@@ -1,0 +1,88 @@
+---
+title: Cursor
+description: "Cursor: per-session token accounting, Bash-output compression, and per-workspace continuity across the IDE and the agent CLI, with an honest no-cost-data posture."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Beta">
+The Cursor adapter is in beta. Hooks are observed at runtime rather than version-gated, and the doctor proves which events fire on your build. Native-Windows hooks and per-session cost are red cells.
+</Aside>
+
+Token Optimizer supports Cursor through an adapter that reads Cursor's own stored token fields, scores session quality, restores per-workspace continuity, and compresses Bash output. It is honest about the two things Cursor does not hand a companion: a billing figure and native Windows hook quoting.
+
+## Supported surfaces
+
+Cursor IDE (Composer) and Cursor CLI (`agent`) share one adapter. They are one session population keyed by `conversation_id`.
+
+Install from the [Cursor](/install/cursor/) page. The cross-platform grid is at [/reference/capability-matrix/](/reference/capability-matrix/).
+
+## Token accounting has a strict ordering
+
+Cursor persists token fields across several places, so the adapter reads the most trustworthy source it can and names it, instead of summing everything.
+
+| Source | Role |
+|---|---|
+| `state.vscdb` → `cursorDiskKV` | authoritative per-request token fields (primary) |
+| `transcript_path` | transcript-derived estimate (fallback) |
+| `<cursor_home>/token-optimizer/sessions/<id>.json` | our durable in-flight tally (crash recovery) |
+
+Sessions are flagged by active source: `cursor_state_vscdb`, `cursor_transcript_estimate`, or `cursor_tally_only`.
+
+## Cost is a genuine gap, not an approximation
+
+Cursor exposes no billing figure to hooks or to the state files we read. There is no number to pass through, so the adapter surfaces `cursor_no_cost_data` and renders no savings headline. It is better to show no number than to show a wrong one. See the capability matrix for the red cost cell.
+
+## Six hooks, observed not assumed
+
+The installer merges six events into `~/.cursor/hooks.json` and every fired event appends a line to `observed-events.jsonl`.
+
+| Event | TO feature |
+|---|---|
+| `sessionStart` | per-workspace continuity restore |
+| `preToolUse` (Shell) | Bash output compression via `updated_input` |
+| `postToolUse` | tally update, rewrite evidence, context nudge |
+| `preCompact` | record real context numbers (observational) |
+| `stop` | per-turn tally, throttled rollup + dashboard |
+| `sessionEnd` | finalise tally, unthrottled rollup + dashboard |
+
+The `Shell` rewrite inherits the existing whitelist and dangerous-character exclusions and fails closed on uncertainty. `postToolUse` writes `rewrite: honoured` or `rewrite: ignored` to the ledger, so compression is measured rather than presumed.
+
+## Explicit gaps
+
+Some Cursor internals are never exposed to a companion.
+
+| Gap | Reason |
+|---|---|
+| Per-session cost | no billing figure on hooks or in state files |
+| Native Windows hooks | persisted `command` is POSIX-shell quoted; `cmd.exe` would not parse it |
+| Compaction steering | `preCompact` is observational, not an injection point |
+| Status line quality bar | no terminal hook surface for a status line |
+
+## Crash recovery
+
+A composer killed without a clean `sessionEnd` never finalises its tally. The `postToolUse` hook keeps an in-flight tally, and rollup recovers that partial data flagged as `~est.` — never silently dropped, never silently exact.
+
+## Runtime prefix
+
+Every Cursor command needs the runtime prefix.
+
+```bash
+cd ~/.claude/skills/token-optimizer/scripts
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 measure.py cursor-summary
+```
+
+On Windows use `python`, not `python3` (and install from WSL or a POSIX shell).
+
+## Doctor command
+
+```bash
+cd ~/.claude/skills/token-optimizer/scripts
+TOKEN_OPTIMIZER_RUNTIME=cursor python3 measure.py cursor-doctor --probe
+```
+
+`cursor-doctor` names the active token source and replays the documented payloads through the installed hook `command`, proving which of the six events fire and whether Shell rewrites are being honoured.
+
+## Dashboard
+
+The Cursor daemon port is 24846. The shared engine assigns the port, so a Cursor session's dashboard serves on `http://localhost:24846/token-optimizer`.

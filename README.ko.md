@@ -18,6 +18,7 @@
   <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/codex.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.codex-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Codex&color=orange" alt="Codex 버전"></a>
   <a href="https://github.com/alexgreensh/token-optimizer/tree/main/hermes"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Hermes&color=0d9488" alt="Hermes 버전"></a>
   <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/copilot.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Copilot&color=6e40c9&logo=githubcopilot&logoColor=white" alt="GitHub Copilot 버전"></a>
+  <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/cursor.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Cursor&color=0c0c0c&logo=cursor&logoColor=white" alt="Cursor 버전"></a>
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/cuts%20context%20waste-3fb950" alt="컨텍스트 낭비 절감">
@@ -56,7 +57,7 @@ Token Optimizer는 AI 코딩 보조 도구가 낭비하는 토큰을 줄이고, 
 
 **왜 그냥 Headroom이나 RTK를 쓰지 않나요?** 둘 다 명령 출력을 압축하는데, 이는 컨텍스트의 15~25%만 다룹니다. Token Optimizer는 그 부분과 나머지 75%까지 다룹니다: 부풀려진 설정, 사용하지 않는 스킬, 오래된 메모리, 압축 손실, 모델 잘못된 라우팅, 행동적 낭비. 모든 절감은 캐시에 안전하고 측정됩니다. 대시보드는 매 세션 후 자동으로 갱신됩니다.
 
-**Claude Code**(CLI 및 VS Code), **OpenCode**, **OpenClaw**, **Codex**, **Hermes**, **GitHub Copilot**에서 작동합니다. Windsurf와 Cursor는 로드맵의 다음 순서입니다.
+**Claude Code**(CLI 및 VS Code), **OpenCode**, **OpenClaw**, **Codex**, **Hermes**, **GitHub Copilot**, **Cursor**에서 작동합니다. Windsurf는 로드맵의 다음 순서입니다.
 
 <p align="center">
   <img src="skills/token-optimizer/assets/hero-terminal.svg" alt="Token Optimizer 빠른 스캔" width="800">
@@ -112,6 +113,14 @@ cd token-optimizer
 bash install.sh --copilot
 ```
 [`docs/copilot.md`](docs/copilot.md)를 참조하세요.
+
+**Cursor:**
+```bash
+git clone --depth 1 https://github.com/alexgreensh/token-optimizer.git
+cd token-optimizer
+bash install.sh --cursor
+```
+[`docs/cursor.md`](docs/cursor.md)를 참조하세요.
 
 **macOS/Linux 스크립트 설치 (플러그인의 대안):**
 ```bash
@@ -232,7 +241,7 @@ RTK와 Boost는 첫 번째 표면에 도달합니다. Headroom은 첫 번째와 
 | 기준선 컨텍스트 오버헤드 없음 | 🟢 외부 프로세스, 컨텍스트 주입 없음 | 🔴 지시 주입 | 🟢 셸 수준만 | 🟢 셸 수준만 | 🔴 MCP 서버 오버헤드 | 🟢 네이티브 |
 | 런타임 의존성 없음 | 🟢 순수 표준 라이브러리 (Python/TypeScript) | 🟡 Python + Rust + 선택적 모델 | 🟢 단일 Rust 바이너리 | 🟢 단일 바이너리 | 🟡 SQLite 어댑터 필요 | 🟢 N/A |
 | 텔레메트리 없음 | 🟢 기계 밖으로 아무것도 나가지 않음 | 🟡 `HEADROOM_TELEMETRY` 옵트인, 기본 꺼짐 | 🟡 옵트인 | 🔴 호출된 명령, 명령 인자, 종료 코드, 지속 시간, CI 속성, IP 수집 | 🟡 다양함 | 🟢 |
-| 멀티 플랫폼 | 🟢 Claude Code, VS Code, Codex, OpenClaw, OpenCode, Hermes, Copilot | 🟢 Claude Code, Cursor, Codex, Aider, Copilot | 🟢 15개 통합 | 🟡 Cursor, Claude Code, Copilot, Codex CLI | 🟢 17개 통합 | 🔴 Claude Code만 |
+| 멀티 플랫폼 | 🟢 Claude Code, VS Code, Codex, OpenClaw, OpenCode, Hermes, Copilot, Cursor | 🟢 Claude Code, Cursor, Codex, Aider, Copilot | 🟢 15개 통합 | 🟡 Cursor, Claude Code, Copilot, Codex CLI | 🟢 17개 통합 | 🔴 Claude Code만 |
 | 작업별 모델 및 노력 조언 | 🟢 `route`가 돈 쓰기 전에 작업 크기 측정 | — | — | — | — | — |
 | 킵 웜(Keep-Warm) (캐시 TTL 갱신) | 🟢 캐시 만료 전 옵트인 핑, 트립와이어 자동 꺼짐 | 🔴 | 🔴 | — | 🔴 | 🔴 |
 | 엔드투엔드 작업 결과 벤치마크 | 🔴 출력 토큰 A/B만 | — | — | 🟢 벤더가 동일한 통과율과 ~12% 낮은 비용으로 Terminal-Bench 2.0 보고 | — | N/A |

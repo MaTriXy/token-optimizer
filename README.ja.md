@@ -18,6 +18,7 @@
   <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/codex.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.codex-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Codex&color=orange" alt="Codex バージョン"></a>
   <a href="https://github.com/alexgreensh/token-optimizer/tree/main/hermes"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Hermes&color=0d9488" alt="Hermes バージョン"></a>
   <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/copilot.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Copilot&color=6e40c9&logo=githubcopilot&logoColor=white" alt="GitHub Copilot バージョン"></a>
+  <a href="https://github.com/alexgreensh/token-optimizer/blob/main/docs/cursor.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falexgreensh%2Ftoken-optimizer%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=Cursor&color=0c0c0c&logo=cursor&logoColor=white" alt="Cursor バージョン"></a>
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/cuts%20context%20waste-3fb950" alt="コンテキストの無駄を削減">
@@ -56,7 +57,7 @@ Token Optimizerは、AIコーディングアシスタントが無駄にするト
 
 **なぜHeadroomやRTKで済ませないのか?** どちらもコマンド出力を圧縮しますが、それはコンテキストの15〜25%しかカバーしません。Token Optimizerはそれに加えて残り75%をカバーします:膨張した設定、未使用のスキル、古いメモリ、圧縮ロス、モデルの誤ルーティング、振る舞いの無駄。すべての節約はキャッシュセーフで測定されます。ダッシュボードは毎セッション後に自動更新されます。
 
-**Claude Code**(CLIとVS Code)、**OpenCode**、**OpenClaw**、**Codex**、**Hermes**、**GitHub Copilot**で動作します。WindsurfとCursorがロードマップの次です。
+**Claude Code**(CLIとVS Code)、**OpenCode**、**OpenClaw**、**Codex**、**Hermes**、**GitHub Copilot**、**Cursor**で動作します。Windsurfがロードマップの次です。
 
 <p align="center">
   <img src="skills/token-optimizer/assets/hero-terminal.svg" alt="Token Optimizer クイックスキャン" width="800">
@@ -112,6 +113,14 @@ cd token-optimizer
 bash install.sh --copilot
 ```
 [`docs/copilot.md`](docs/copilot.md)を参照。
+
+**Cursor:**
+```bash
+git clone --depth 1 https://github.com/alexgreensh/token-optimizer.git
+cd token-optimizer
+bash install.sh --cursor
+```
+[`docs/cursor.md`](docs/cursor.md)を参照。
 
 **macOS/Linuxスクリプトインストール(プラグインの代替):**
 ```bash
@@ -232,7 +241,7 @@ RTKとBoostは最初の面に到達します。Headroomは最初と3番目に到
 | ゼロベースラインコンテキストオーバーヘッド | 🟢 外部プロセス、コンテキスト注入なし | 🔴 指示を注入 | 🟢 シェルレベルのみ | 🟢 シェルレベルのみ | 🔴 MCPサーバーオーバーヘッド | 🟢 ネイティブ |
 | ゼロランタイム依存 | 🟢 純標準ライブラリ(Python/TypeScript) | 🟡 Python + Rust + オプションモデル | 🟢 単一Rustバイナリ | 🟢 単一バイナリ | 🟡 SQLiteアダプタが必要 | 🟢 N/A |
 | ゼロテレメトリ | 🟢 マシンから何も出ない | 🟡 `HEADROOM_TELEMETRY`オプトイン、デフォルトオフ | 🟡 オプトイン | 🔴 呼び出されたコマンド、コマンド引数、終了コード、期間、CI属性、IPを収集 | 🟡 様々 | 🟢 |
-| マルチプラットフォーム | 🟢 Claude Code、VS Code、Codex、OpenClaw、OpenCode、Hermes、Copilot | 🟢 Claude Code、Cursor、Codex、Aider、Copilot | 🟢 15統合 | 🟡 Cursor、Claude Code、Copilot、Codex CLI | 🟢 17統合 | 🔴 Claude Codeのみ |
+| マルチプラットフォーム | 🟢 Claude Code、VS Code、Codex、OpenClaw、OpenCode、Hermes、Copilot、Cursor | 🟢 Claude Code、Cursor、Codex、Aider、Copilot | 🟢 15統合 | 🟡 Cursor、Claude Code、Copilot、Codex CLI | 🟢 17統合 | 🔴 Claude Codeのみ |
 | タスク別のモデルとeffortの助言 | 🟢 `route`がお金を使う前にタスクを計量 | — | — | — | — | — |
 | Keep-Warm(キャッシュTTLリフレッシュ) | 🟢 キャッシュ期限前のオプトインping、トリップワイヤー自動オフ | 🔴 | 🔴 | — | 🔴 | 🔴 |
 | エンドツーエンドのタスク結果ベンチマーク | 🔴 出力トークンA/Bのみ | — | — | 🟢 ベンダーが同じ合格率と約12%低コストでTerminal-Bench 2.0を報告 | — | N/A |
