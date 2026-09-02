@@ -20,6 +20,16 @@ This module keeps runtime integration deliberately simple:
   running under GitHub Copilot. COPILOT_HOME is Copilot's OWN variable — TO
   reads it but never asks users to set it (issue #78); TOKEN_OPTIMIZER_COPILOT_HOME
   is TO's own collision-free override.
+- Cursor activates when TOKEN_OPTIMIZER_CURSOR_HOME is set, or when the
+  hook-spawned pair CURSOR_PROJECT_DIR + CURSOR_VERSION is present, or
+  TOKEN_OPTIMIZER_RUNTIME=cursor. Cursor has no documented CURSOR_HOME of its
+  own, so TO exposes only its namespaced TOKEN_OPTIMIZER_CURSOR_HOME override.
+  There is deliberately NO ancestor-process scan for Cursor: the CLI binary is
+  named `agent` (too generic to scan safely), so detection stays on env signals
+  the host exports into every hook subprocess. The cursor_hook_bridge always
+  sets the explicit override; the env pair is a weak safety net below the
+  CLAUDECODE tier so a Cursor launched from a CC Bash tool still resolves to
+  `cursor` only at the weak tier.
 - Cowork is NOT a separate runtime: Claude Cowork runs the same Claude Code
   engine inside a cloud/local VM, reads ~/.claude, and uses the Claude model
   ladder. So ``detect_runtime()`` still returns ``"claude"`` inside Cowork.
@@ -49,8 +59,16 @@ _RUNTIME_CODEX = "codex"
 _RUNTIME_HERMES = "hermes"
 _RUNTIME_OPENCODE = "opencode"
 _RUNTIME_COPILOT = "copilot"
+_RUNTIME_CURSOR = "cursor"
 _VALID_RUNTIMES = frozenset(
-    {_RUNTIME_CLAUDE, _RUNTIME_CODEX, _RUNTIME_HERMES, _RUNTIME_OPENCODE, _RUNTIME_COPILOT}
+    {
+        _RUNTIME_CLAUDE,
+        _RUNTIME_CODEX,
+        _RUNTIME_HERMES,
+        _RUNTIME_OPENCODE,
+        _RUNTIME_COPILOT,
+        _RUNTIME_CURSOR,
+    }
 )
 _CLAUDE_PLUGIN_ENVS = ("CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA")
 # Claude Cowork host markers. Cowork is Claude Code running in a cloud/local VM,
@@ -96,6 +114,13 @@ _HERMES_HOME_ENV = "HERMES_HOME"
 # back-compat location hint (with a guardrail warning for /mnt values).
 _COPILOT_HOME_ENV = "COPILOT_HOME"
 _TO_COPILOT_HOME_ENV = "TOKEN_OPTIMIZER_COPILOT_HOME"
+# Cursor has no documented CURSOR_HOME of its own, so TO exposes only a
+# namespaced override (never asks users to set a host var Cursor also reads).
+_TO_CURSOR_HOME_ENV = "TOKEN_OPTIMIZER_CURSOR_HOME"
+# The two env vars Cursor exports into every hook subprocess. Both must be
+# present together to count (either alone is too weak). This is the hook-
+# spawned-only weak signal; `agent` is too generic a binary name to scan.
+_CURSOR_HOOK_ENVS = ("CURSOR_PROJECT_DIR", "CURSOR_VERSION")
 # Copilot's explicit config-dir env vars. Like CODEX_HOME/HERMES_HOME these are
 # the host's OWN variables, set by/for a genuine Copilot session. They sit ABOVE
 # the CLAUDECODE tier so a Copilot session launched from a CC Bash tool (which
@@ -735,6 +760,11 @@ def _opencode_config_signal() -> bool:
         or os.environ.get(_HERMES_HOME_ENV)
         or os.environ.get(_COPILOT_HOME_ENV)
         or os.environ.get(_TO_COPILOT_HOME_ENV)
+        or os.environ.get(_TO_CURSOR_HOME_ENV)
+        or (
+            os.environ.get(_CURSOR_HOOK_ENVS[0])
+            and os.environ.get(_CURSOR_HOOK_ENVS[1])
+        )
     ):
         return False
     # A real Claude Code home (settings.json or projects/) means this is a Claude
@@ -780,6 +810,23 @@ def _copilot_signal() -> bool:
     return _ancestor_in_process_tree(_COPILOT_BASENAMES)
 
 
+def _cursor_signal() -> bool:
+    """True when both Cursor hook-spawned env vars are present.
+
+    Cursor exports CURSOR_PROJECT_DIR and CURSOR_VERSION into every hook
+    subprocess; both must be present together (either alone is too weak).
+    There is deliberately no ancestor-process scan: the Cursor CLI binary is
+    named ``agent`` — too generic to scan without false positives. This signal
+    sits at the weak tier BELOW the CLAUDECODE env check, so a Cursor launched
+    from a CC Bash tool (which inherits CLAUDECODE=1) is not stolen here; the
+    bridge always pins TOKEN_OPTIMIZER_RUNTIME=cursor anyway.
+    """
+    return bool(
+        os.environ.get(_CURSOR_HOOK_ENVS[0])
+        and os.environ.get(_CURSOR_HOOK_ENVS[1])
+    )
+
+
 @functools.lru_cache(maxsize=None)
 def detect_runtime() -> str:
     """Return the active runtime name.
@@ -800,17 +847,23 @@ def detect_runtime() -> str:
          launched from a CC Bash tool, which inherits CLAUDECODE=1, still
          resolves to copilot -- the same guard Codex/Hermes get. The
          ancestor-process signal stays at the weak tier below CLAUDECODE.)
+      7b. TOKEN_OPTIMIZER_CURSOR_HOME implies Cursor (explicit config-dir env,
+          same ABOVE-CLAUDECODE guard as Copilot; Cursor has no documented
+          CURSOR_HOME of its own so this is TO's namespaced override only).
       8. Claude Code process env (CLAUDECODE / CLAUDE_CODE_ENTRYPOINT /
          CLAUDE_CODE_SESSION_ID) implies Claude. Sits BELOW CODEX_HOME/
-         HERMES_HOME/COPILOT_HOME so a nested-Codex/Hermes/Copilot session
-         launched from a CC Bash tool (which inherits CLAUDECODE=1) still
-         resolves to its own runtime, but ABOVE the directory heuristics so
-         a host with CLAUDECODE=1 and a coexisting ~/.codex DIRECTORY resolves
-         to claude, not codex (#120)
+         HERMES_HOME/COPILOT_HOME/TOKEN_OPTIMIZER_CURSOR_HOME so a nested-
+         Codex/Hermes/Copilot/Cursor session launched from a CC Bash tool
+         (which inherits CLAUDECODE=1) still resolves to its own runtime, but
+         ABOVE the directory heuristics so a host with CLAUDECODE=1 and a
+         coexisting ~/.codex DIRECTORY resolves to claude, not codex (#120)
       9. A populated opencode config dir implies OpenCode (weak tertiary
-         tier; loses to Claude/Codex/Hermes/Copilot env, beats default)
+         tier; loses to Claude/Codex/Hermes/Copilot/Cursor env, beats default)
       10. COPILOT_HOME or a copilot ancestor process implies Copilot
-      11. Default to Claude Code for backward compatibility
+      11. CURSOR_PROJECT_DIR + CURSOR_VERSION both set implies Cursor (weak
+          hook-spawned tier, BELOW CLAUDECODE -- no ancestor scan since the
+          Cursor CLI binary `agent` is too generic)
+      12. Default to Claude Code for backward compatibility
 
     Why step 2 is ahead of the Claude env check (KTD-3, issue #57): on a host
     with BOTH Claude Code and OpenCode installed, a stray CLAUDE_PLUGIN_* env var
@@ -851,6 +904,12 @@ def detect_runtime() -> str:
     if any(os.environ.get(v) for v in _COPILOT_HOME_ENVS):
         return _RUNTIME_COPILOT
 
+    # Cursor explicit config-dir env: ABOVE the CLAUDECODE tier (same guard as
+    # Codex/Hermes/Copilot). Cursor has no documented CURSOR_HOME, so this is
+    # TO's namespaced override only.
+    if os.environ.get(_TO_CURSOR_HOME_ENV):
+        return _RUNTIME_CURSOR
+
     if any(os.environ.get(v) for v in _CLAUDE_CODE_ENVS):
         return _RUNTIME_CLAUDE
 
@@ -859,6 +918,9 @@ def detect_runtime() -> str:
 
     if _copilot_signal():
         return _RUNTIME_COPILOT
+
+    if _cursor_signal():
+        return _RUNTIME_CURSOR
 
     return _RUNTIME_CLAUDE
 
@@ -1000,6 +1062,19 @@ def _xdg_base(env_var: str, default_rel: str) -> Path:
     return _safe_home() / default_rel
 
 
+def cursor_home() -> Path:
+    """Return Cursor's home directory (~/.cursor by default).
+
+    Cursor stores its hooks.json, transcripts and chats under ~/.cursor. Cursor
+    has no documented CURSOR_HOME env var of its own, so the only override TO
+    exposes is its namespaced TOKEN_OPTIMIZER_CURSOR_HOME, honoured under the
+    strict under-``$HOME`` guard (a value outside $HOME falls back to ~/.cursor
+    with the once-per-process warning). This is where Token Optimizer's own
+    Cursor data lives (``<home>/token-optimizer/``) — never ~/.claude.
+    """
+    return _safe_home_from_env(_TO_CURSOR_HOME_ENV, _safe_home() / ".cursor")
+
+
 def opencode_config_home() -> Path:
     """Return OpenCode's config directory (~/.config/opencode by default).
 
@@ -1037,12 +1112,21 @@ def runtime_home() -> Path:
     if runtime == _RUNTIME_COPILOT:
         return copilot_home()
 
+    if runtime == _RUNTIME_CURSOR:
+        return cursor_home()
+
     return claude_home()
 
 
 def plugin_data_env_vars() -> tuple[str, ...]:
     """Return plugin-data env vars in runtime-specific priority order."""
-    if detect_runtime() in (_RUNTIME_CODEX, _RUNTIME_HERMES, _RUNTIME_OPENCODE, _RUNTIME_COPILOT):
+    if detect_runtime() in (
+        _RUNTIME_CODEX,
+        _RUNTIME_HERMES,
+        _RUNTIME_OPENCODE,
+        _RUNTIME_COPILOT,
+        _RUNTIME_CURSOR,
+    ):
         return ("TOKEN_OPTIMIZER_PLUGIN_DATA",)
     return ("CLAUDE_PLUGIN_DATA", "TOKEN_OPTIMIZER_PLUGIN_DATA")
 
@@ -1058,6 +1142,8 @@ def runtime_name_for_humans() -> str:
         return "OpenCode"
     if runtime == _RUNTIME_COPILOT:
         return "GitHub Copilot"
+    if runtime == _RUNTIME_CURSOR:
+        return "Cursor"
     # Cowork is the claude runtime in a VM; label the refinement without changing
     # the runtime it resolves to.
     if runtime == _RUNTIME_CLAUDE and is_cowork():

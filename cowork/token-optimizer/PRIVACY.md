@@ -115,12 +115,13 @@ Manual deletion: remove the following directories:
 - `~/.claude/_backups/token-optimizer/`
 - For Codex: `~/.codex/token-optimizer/`
 - For OpenCode: `~/.local/share/opencode/token-optimizer/`
+- For Cursor: `~/.cursor/token-optimizer/`
 
 ## Cross-Platform
 
 Locally installed extensions (see `docs/local-extensions.md`) may run inside the session-end flush worker; Token Optimizer ships none by default.
 
-The same privacy guarantees apply across all supported platforms (Claude Code, Codex, OpenCode, Hermes). Data paths vary by platform but the architecture is identical: local-only, zero network, credential-redacted storage.
+The same privacy guarantees apply across all supported platforms (Claude Code, Codex, OpenCode, Hermes, Copilot, Cursor). Data paths vary by platform but the architecture is identical: local-only, zero network, credential-redacted storage.
 
 Consent is tracked per-runtime. A user running both Claude Code and Codex must acknowledge consent separately in each runtime.
 
