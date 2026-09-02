@@ -96,9 +96,9 @@ def _py_trust_reason(p: str) -> str | None:
     try:
         real = os.path.realpath(p)
         if not os.path.isfile(real):
-            return False
+            return f"{real} does not exist"
         if os.name == "nt" or not hasattr(os, "geteuid"):
-            return True
+            return None
         euid = os.geteuid()
 
         def _admin_owned(uid: int) -> bool:

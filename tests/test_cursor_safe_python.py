@@ -17,6 +17,27 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "token-optimizer" / "scripts"
 
 
+
+@pytest.fixture(autouse=True)
+def _trusted_python_env(tmp_path, monkeypatch):
+    """A CONTROLLED trusted interpreter for resolver/install tests.
+
+    The host's real interpreter is not guaranteed to pass the trust gate --
+    hosted-CI tool caches extract python world-writable (measured on runner
+    33618210157), so falling back to sys.executable/$PATH makes these tests
+    environment-dependent. Point TOKEN_OPTIMIZER_PYTHON at a tmp interpreter
+    with clean modes (0755 file in a 0755 euid-owned dir) instead. Tests that
+    need a specific resolution override the env or mock the gate themselves.
+    """
+    d = tmp_path / "trusted-bin"
+    d.mkdir(mode=0o755)
+    f = d / "python3"
+    f.write_bytes(b"#!/bin/sh\n")
+    os.chmod(f, 0o755)
+    os.chmod(d, 0o755)
+    monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", str(f))
+
+
 @pytest.fixture()
 def c():
     sys.path.insert(0, str(SCRIPTS))
@@ -103,6 +124,8 @@ def test_sys_executable_must_pass_the_trust_gate(c, monkeypatch):
         return os.path.abspath(p) != os.path.abspath(sys.executable)
 
     monkeypatch.setattr(c, "_py_path_is_trusted", fake_gate)
+    # no override: the resolver must reach sys.executable and gate it
+    monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", "")
     resolved = c._resolve_safe_python()
     assert sys.executable in calls, "gate never consulted for sys.executable"
     assert os.path.isabs(resolved) and os.path.isfile(resolved)

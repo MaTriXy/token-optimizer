@@ -33,6 +33,27 @@ needs_posix = pytest.mark.skipif(
 )
 
 
+
+@pytest.fixture(autouse=True)
+def _trusted_python_env(tmp_path, monkeypatch):
+    """A CONTROLLED trusted interpreter for resolver/install tests.
+
+    The host's real interpreter is not guaranteed to pass the trust gate --
+    hosted-CI tool caches extract python world-writable (measured on runner
+    33618210157), so falling back to sys.executable/$PATH makes these tests
+    environment-dependent. Point TOKEN_OPTIMIZER_PYTHON at a tmp interpreter
+    with clean modes (0755 file in a 0755 euid-owned dir) instead. Tests that
+    need a specific resolution override the env or mock the gate themselves.
+    """
+    d = tmp_path / "trusted-bin"
+    d.mkdir(mode=0o755)
+    f = d / "python3"
+    f.write_bytes(b"#!/bin/sh\n")
+    os.chmod(f, 0o755)
+    os.chmod(d, 0o755)
+    monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", str(f))
+
+
 @pytest.fixture()
 def home(tmp_path):
     return tmp_path / "cursor-home"
