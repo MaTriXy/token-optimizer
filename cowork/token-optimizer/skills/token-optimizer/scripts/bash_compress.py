@@ -1907,12 +1907,22 @@ def main():
                 if _feature:
                     sys.path.insert(0, str(Path(__file__).resolve().parent))
                     from measure import _log_compression_event
+                    # C-2: command_pattern is persisted to trends.db's
+                    # compression_events table. Redact BEFORE truncating so an
+                    # inline secret (Bearer token, mysql -pPASSWORD,
+                    # PGPASSWORD=... psql) never reaches disk in cleartext.
+                    # Mirrors the fix in bash_compress_hook._log_event.
+                    try:
+                        from credential_patterns import redact_credentials as _redact
+                        _safe_pattern = _redact(command_str)[:100]
+                    except ImportError:
+                        _safe_pattern = command_str[:100]
                     _log_compression_event(
                         feature=_feature,
                         original_text=raw_output,
                         compressed_text=compressed,
                         session_id=os.environ.get("CLAUDE_SESSION_ID", ""),
-                        command_pattern=command_str[:100],
+                        command_pattern=_safe_pattern,
                         quality_preserved=True,
                         verified=True,
                         tier="measured",

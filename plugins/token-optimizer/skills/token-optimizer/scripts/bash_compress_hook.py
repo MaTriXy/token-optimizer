@@ -270,7 +270,12 @@ def _crossturn_dedup(command: str, output: str):
             return None
         from session_store import SessionStore
         from delta_diff import content_hash, compute_delta
-        from archive_result import _redact_credentials
+        # Canonical source: credential_patterns.redact_credentials. Importing the
+        # private archive_result._redact_credentials wrapper coupled this hot path
+        # to archive_result's import side effects and its _TOKEN_PATTERNS fallback
+        # (which emits generic [REDACTED] labels). The shared module is the single
+        # owner of the labeled-placeholder redaction contract (L-1).
+        from credential_patterns import redact_credentials as _redact_credentials
 
         store = SessionStore(session_id)
         try:
@@ -297,7 +302,13 @@ def _crossturn_dedup(command: str, output: str):
             # proxy for "probably still in the agent's context".
             if time.time() - float(prior.get("timestamp") or 0) > 3600:
                 return None
-            label = command.strip()[:60]
+            # C-1: the label is embedded in the ref string that becomes
+            # updatedToolOutput.stdout (the model sees it) AND is logged to
+            # trends.db as compressed_text via _log_event. Use the redacted
+            # command so an inline secret (Bearer token, -pPASSWORD, connection
+            # string) never reaches the model context or disk. safe_command is
+            # already computed above and in scope.
+            label = safe_command.strip()[:60]
             if prior.get("output_hash") == out_h:
                 ref = (f"[Token Optimizer: identical to your previous `{label}` "
                        f"output this session; unchanged.]")
@@ -325,13 +336,19 @@ def _log_event(command: str, original: str, compressed: str,
     """
     try:
         from compression_log import log_compression_event
+        # C-2: command_pattern is persisted to trends.db's compression_events
+        # table. Redact BEFORE truncating so an inline secret (Bearer token,
+        # mysql -pPASSWORD, PGPASSWORD=... psql) never reaches disk in
+        # cleartext. The dedup store path was redacted by PR #164 but this
+        # adjacent path in the same main() flow was missed.
+        from credential_patterns import redact_credentials as _redact
         session_id = os.environ.get("CLAUDE_SESSION_ID", "")
         log_compression_event(
             feature=feature,
             original_text=original,
             compressed_text=compressed,
             session_id=session_id,
-            command_pattern=command[:100],
+            command_pattern=_redact(command)[:100],
             quality_preserved=True,
             verified=True,
             tier="measured",

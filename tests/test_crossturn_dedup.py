@@ -7,6 +7,7 @@ Reuses the (previously dormant) command_outputs store + delta_diff. Fail-open an
 self-sufficient (the caller attaches the progressive-disclosure pointer).
 """
 import importlib
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -22,12 +23,28 @@ def hook(monkeypatch):
     monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", tmp)
     monkeypatch.setenv("CLAUDE_SESSION_ID", "test-xturn-session")
     sys.path.insert(0, str(SCRIPTS))
-    for m in ("bash_compress_hook", "session_store", "delta_diff"):
+    for m in ("bash_compress_hook", "session_store", "delta_diff",
+              "compression_log", "credential_patterns"):
         sys.modules.pop(m, None)
     mod = importlib.import_module("bash_compress_hook")
     importlib.reload(mod)
     yield mod
     sys.modules.pop("bash_compress_hook", None)
+
+
+def _trends_db_path(hook) -> Path:
+    """Resolve the trends.db path for the current snapshot dir."""
+    from compression_log import TRENDS_DB
+    return Path(TRENDS_DB)
+
+
+def _session_db_path(hook) -> Path:
+    """Resolve the per-session command_outputs db path."""
+    from session_store import SessionStore
+    store = SessionStore("test-xturn-session")
+    p = store.db_path
+    store.close()
+    return Path(p)
 
 
 def _git_status(nfiles, branch="main"):
@@ -74,3 +91,142 @@ def test_tiny_output_is_ignored(hook):
 def test_never_raises_without_session(hook, monkeypatch):
     monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
     assert hook._crossturn_dedup("git status", _git_status(12)) is None
+
+
+# ---------------------------------------------------------------------------
+# C-1 / C-2 / C-4: credential redaction regression tests.
+#
+# PR #164 redacted the dedup STORE path but left three adjacent leaks in the
+# same main() flow: the dedup `label` (embedded in the ref the model sees and
+# logged to trends.db as compressed_text), the `command_pattern` column in
+# trends.db's compression_events table, and zero tests pinning any of it. A
+# regression that removes a `_redact_credentials` call would have passed the
+# entire suite green. These tests pin all three surfaces so a secret-bearing
+# command can never reach the model context or disk in cleartext.
+# ---------------------------------------------------------------------------
+
+# A realistic secret-bearing command. The Bearer token and the AWS access key
+# are the two shapes the report called out explicitly.
+_BEARER_SECRET = "sk-ant-BearerSecretTOKEN1234567890abcdefXYZ"
+_AWS_KEY = "AKIAIOSFODNN7EXAMPLE"  # well-known AWS docs example key (not live)
+_CMD_WITH_BEARER = f'curl -H "Authorization: Bearer {_BEARER_SECRET}" https://api.example.com/v1/data'
+_OUTPUT_WITH_AWS_KEY = (
+    f"{{\n  \"status\": \"ok\",\n  \"key\": \"{_AWS_KEY}\",\n"
+    f"  \"rows\": [\n" + "\n".join(f"    {{\"id\": {i}}}" for i in range(40)) + "\n  ]\n}\n"
+)
+
+
+def test_crossturn_dedup_command_text_redacted_in_store(hook):
+    """C-4: a credential-bearing command must not survive in command_outputs.command_text."""
+    hook._crossturn_dedup(_CMD_WITH_BEARER, _OUTPUT_WITH_AWS_KEY)  # records
+    db = _session_db_path(hook)
+    conn = sqlite3.connect(str(db))
+    try:
+        row = conn.execute(
+            "SELECT command_text FROM command_outputs LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "dedup should have recorded the command"
+    command_text = row[0] or ""
+    assert _BEARER_SECRET not in command_text
+    assert "Bearer " + _BEARER_SECRET not in command_text
+    assert "CREDENTIAL REDACTED" in command_text
+
+
+def test_crossturn_dedup_compressed_output_redacted_in_store(hook):
+    """C-4: a credential-bearing output must not survive in command_outputs.compressed_output."""
+    hook._crossturn_dedup(_CMD_WITH_BEARER, _OUTPUT_WITH_AWS_KEY)  # records
+    db = _session_db_path(hook)
+    conn = sqlite3.connect(str(db))
+    try:
+        row = conn.execute(
+            "SELECT compressed_output FROM command_outputs LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    compressed_output = row[0] or ""
+    assert _AWS_KEY not in compressed_output
+    assert "CREDENTIAL REDACTED" in compressed_output
+
+
+def test_crossturn_dedup_ref_label_does_not_leak_secret(hook):
+    """C-1: the ref string returned to the model must not contain the raw secret.
+
+    The label is embedded in the ref (``[Token Optimizer: identical to your
+    previous `<label>` output ...]``) which becomes updatedToolOutput.stdout.
+    A raw `label = command.strip()[:60]` would surface the Bearer token to the
+    model AND to trends.db via compressed_text.
+    """
+    hook._crossturn_dedup(_CMD_WITH_BEARER, _OUTPUT_WITH_AWS_KEY)  # records
+    ref = hook._crossturn_dedup(_CMD_WITH_BEARER, _OUTPUT_WITH_AWS_KEY)  # identical
+    assert ref is not None
+    assert _BEARER_SECRET not in ref
+    assert "Bearer " + _BEARER_SECRET not in ref
+    # The redacted label should carry the placeholder, proving safe_command was used.
+    assert "CREDENTIAL REDACTED" in ref
+
+
+def test_crossturn_dedup_delta_label_does_not_leak_secret(hook):
+    """C-1 (delta path): the delta ref must also use the redacted label."""
+    hook._crossturn_dedup(_CMD_WITH_BEARER, _OUTPUT_WITH_AWS_KEY)  # records
+    changed = _OUTPUT_WITH_AWS_KEY.replace("\"ok\"", "\"changed\"")
+    ref = hook._crossturn_dedup(_CMD_WITH_BEARER, changed)  # delta
+    assert ref is not None
+    assert _BEARER_SECRET not in ref
+    assert "Bearer " + _BEARER_SECRET not in ref
+    assert "CREDENTIAL REDACTED" in ref
+
+
+def test_log_event_command_pattern_redacted_in_trends_db(hook):
+    """C-2: _log_event must redact command_pattern before it reaches trends.db.
+
+    compression_events.command_pattern is persisted to disk in cleartext. A
+    raw `command[:100]` would store the Bearer token and any other inline
+    secret indefinitely.
+    """
+    hook._log_event(_CMD_WITH_BEARER, _OUTPUT_WITH_AWS_KEY, "compressed-preview",
+                    feature="crossturn_dedup")
+    db = _trends_db_path(hook)
+    assert db.exists(), "trends.db should have been created by _log_event"
+    conn = sqlite3.connect(str(db))
+    try:
+        row = conn.execute(
+            "SELECT command_pattern FROM compression_events "
+            "WHERE feature = 'crossturn_dedup' ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    command_pattern = row[0] or ""
+    assert _BEARER_SECRET not in command_pattern
+    assert "Bearer " + _BEARER_SECRET not in command_pattern
+    assert "CREDENTIAL REDACTED" in command_pattern
+
+
+def test_log_event_does_not_persist_raw_secret_in_any_column(hook):
+    """C-2 (whole-row sweep): no column in compression_events may carry the raw
+    secret. The table stores command_pattern (text) plus token counts and
+    metadata; command_pattern is the only free-text column that could leak.
+    This sweeps every TEXT column as a defense-in-depth guard against a future
+    schema change adding another free-text column.
+    """
+    hook._log_event(_CMD_WITH_BEARER, _OUTPUT_WITH_AWS_KEY, "compressed-preview",
+                    feature="crossturn_dedup")
+    db = _trends_db_path(hook)
+    conn = sqlite3.connect(str(db))
+    try:
+        cols = [r[1] for r in conn.execute(
+            "PRAGMA table_info(compression_events)").fetchall()]
+        row = conn.execute(
+            "SELECT * FROM compression_events "
+            "WHERE feature = 'crossturn_dedup' ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    for col, val in zip(cols, row):
+        if isinstance(val, str):
+            assert _BEARER_SECRET not in val, f"raw secret leaked in column {col!r}"
+            assert "Bearer " + _BEARER_SECRET not in val, f"Bearer leaked in column {col!r}"
