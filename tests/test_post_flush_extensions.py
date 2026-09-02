@@ -92,6 +92,12 @@ def test_fail_open_on_non_callable_run(m):
     assert m._run_post_flush_extensions(time_left_fn=lambda: 10) is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the group/world-writable mode-bit guard is POSIX-only (Windows "
+    "fstat reports 0o666 for every writable file); on Windows the config "
+    "directory's own ACLs are the protection, per docs/local-extensions.md.",
+)
 def test_world_writable_extension_ignored(m):
     p = _install_ext(m, "def run(ctx):\n    return 'ran'\n")
     os.chmod(str(p), 0o666)
