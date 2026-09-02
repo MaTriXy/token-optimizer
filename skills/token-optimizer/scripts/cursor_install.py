@@ -175,10 +175,17 @@ def _is_ours(entry, bridge_path: Path) -> bool:
 
 
 def _read_hooks(path: Path) -> dict:
-    """Read hooks.json. Missing -> {} (fresh install). Present but unreadable,
-    invalid, or a non-object root -> RuntimeError: Cursor has ONE shared
+    """Read hooks.json. Missing -> {} (fresh install). A symlink, an unreadable,
+    invalid, or non-object root -> RuntimeError: Cursor has ONE shared
     hooks.json, so silently treating a corrupt file as empty would clobber
-    other tools' (and Cursor's own) entries on the next write."""
+    other tools' (and Cursor's own) entries on the next write, and writing
+    through a symlink would redirect the installer's output to an
+    attacker-chosen target."""
+    if path.is_symlink():
+        raise RuntimeError(
+            f"{path} is a symlink; refusing to read-merge-write through it. "
+            "Remove the symlink (or point it at the real hooks.json) and re-run."
+        )
     if not path.exists():
         return {}
     try:
@@ -200,10 +207,40 @@ def _write_hooks(path: Path, data: dict) -> None:
     try:
         from codex_io import atomic_write_json
 
-        atomic_write_json(path, data)
+        # replace_symlink: even if a symlink appears between _read_hooks and
+        # here, os.replace swaps the symlink itself, never its target.
+        atomic_write_json(path, data, replace_symlink=True)
     except ImportError:  # pragma: no cover - broken checkout
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+class _HooksLock:
+    """Exclusive lease around the hooks.json read-merge-write.
+
+    Two concurrent installs (or install racing uninstall) would otherwise both
+    read stale content and the second write would silently drop the first's
+    entries. Uses hook_runtime.lease_lock (the same portable lock the bridges
+    use); a failed acquire aborts loudly instead of racing.
+    """
+
+    def __init__(self, hooks_path: Path):
+        self._lock_path = hooks_path.parent / f".{hooks_path.name}.to-install.lock"
+
+    def __enter__(self):
+        from hook_runtime import lease_lock
+
+        self._cm = lease_lock(self._lock_path, acquire_timeout=5.0, lease_seconds=30.0)
+        acquired = self._cm.__enter__()
+        if not acquired:
+            raise RuntimeError(
+                "another Cursor install/uninstall is in progress "
+                f"(could not acquire {self._lock_path}); re-run in a moment"
+            )
+        return self
+
+    def __exit__(self, *exc):
+        return self._cm.__exit__(*exc)
 
 
 def install(*, dry_run: bool = False, home: Path = None) -> dict:
@@ -260,23 +297,24 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
 
     bridge_path = plugin_dir / "cursor_hook_bridge.py"
     hooks_path = _host_hooks_path(root)
-    existing = _read_hooks(hooks_path)
-    hooks = existing.get("hooks")
-    if not isinstance(hooks, dict):
-        hooks = {}
-    for event, new_entries in _hook_entries(bridge_path).items():
-        old = hooks.get(event, [])
-        if not isinstance(old, list):
-            old = []
-        hooks[event] = [e for e in old if not _is_ours(e, bridge_path)] + new_entries
-    existing["hooks"] = hooks
-    existing.setdefault("version", 1)
+    with _HooksLock(hooks_path):
+        existing = _read_hooks(hooks_path)
+        hooks = existing.get("hooks")
+        if not isinstance(hooks, dict):
+            hooks = {}
+        for event, new_entries in _hook_entries(bridge_path).items():
+            old = hooks.get(event, [])
+            if not isinstance(old, list):
+                old = []
+            hooks[event] = [e for e in old if not _is_ours(e, bridge_path)] + new_entries
+        existing["hooks"] = hooks
+        existing.setdefault("version", 1)
 
-    if not dry_run:
-        try:
-            _write_hooks(hooks_path, existing)
-        except OSError as exc:
-            raise RuntimeError(f"failed writing {hooks_path}: {exc}") from exc
+        if not dry_run:
+            try:
+                _write_hooks(hooks_path, existing)
+            except OSError as exc:
+                raise RuntimeError(f"failed writing {hooks_path}: {exc}") from exc
     actions["hook_file"] = str(hooks_path)
     return actions
 
@@ -293,27 +331,28 @@ def uninstall(*, dry_run: bool = False, home: Path = None) -> dict:
 
     bridge_path = _plugin_dir(root) / "cursor_hook_bridge.py"
     hooks_path = _host_hooks_path(root)
-    existing = _read_hooks(hooks_path)
-    hooks = existing.get("hooks")
-    if isinstance(hooks, dict):
-        changed = False
-        pruned = {}
-        for event, entries in hooks.items():
-            if not isinstance(entries, list):
-                pruned[event] = entries
-                continue
-            kept = [e for e in entries if not _is_ours(e, bridge_path)]
-            if len(kept) != len(entries):
-                changed = True
-            pruned[event] = kept
-        if changed:
-            existing["hooks"] = pruned
-            if not dry_run:
-                try:
-                    _write_hooks(hooks_path, existing)
-                except OSError as exc:
-                    raise RuntimeError(f"failed writing {hooks_path}: {exc}") from exc
-            actions["removed"].append(f"{hooks_path} (Cursor entries)")
+    with _HooksLock(hooks_path):
+        existing = _read_hooks(hooks_path)
+        hooks = existing.get("hooks")
+        if isinstance(hooks, dict):
+            changed = False
+            pruned = {}
+            for event, entries in hooks.items():
+                if not isinstance(entries, list):
+                    pruned[event] = entries
+                    continue
+                kept = [e for e in entries if not _is_ours(e, bridge_path)]
+                if len(kept) != len(entries):
+                    changed = True
+                pruned[event] = kept
+            if changed:
+                existing["hooks"] = pruned
+                if not dry_run:
+                    try:
+                        _write_hooks(hooks_path, existing)
+                    except OSError as exc:
+                        raise RuntimeError(f"failed writing {hooks_path}: {exc}") from exc
+                actions["removed"].append(f"{hooks_path} (Cursor entries)")
 
     plugin_dir = _plugin_dir(root)
     if plugin_dir.exists():

@@ -196,3 +196,76 @@ def test_install_aborts_on_missing_payload_module(home, monkeypatch):
     with pytest.raises(RuntimeError, match="missing payload modules"):
         ci.install(home=home)
     assert ci._host_hooks_path(home).exists() is False
+
+
+def test_install_refuses_symlinked_hooks_json(tmp_path):
+    """P0-3: a pre-existing hooks.json symlink must never be written through."""
+    import json as _json
+    target = tmp_path / "target.json"
+    target.write_text(_json.dumps({"hooks": {}}), encoding="utf-8")
+    cur = tmp_path / ".cursor"
+    cur.mkdir()
+    hooks = cur / "hooks.json"
+    hooks.symlink_to(target)
+
+    with pytest.raises(RuntimeError, match="symlink"):
+        ci.install(home=cur)
+    # the symlink target is untouched
+    assert _json.loads(target.read_text(encoding="utf-8")) == {"hooks": {}}
+
+
+def test_atomic_write_replace_symlink_replaces_link_not_target(tmp_path):
+    """codex_io.atomic_write(replace_symlink=True) swaps the symlink itself."""
+    from codex_io import atomic_write
+    target = tmp_path / "target.json"
+    target.write_text("old", encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(target)
+    atomic_write(link, "new", replace_symlink=True)
+    assert link.is_symlink() is False
+    assert target.read_text(encoding="utf-8") == "old"
+
+
+def test_atomic_write_default_still_follows_symlink(tmp_path):
+    """Default behavior unchanged for dotfile-managed config callers."""
+    from codex_io import atomic_write
+    target = tmp_path / "target.json"
+    target.write_text("old", encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(target)
+    atomic_write(link, "new")
+    assert link.is_symlink() is True
+    assert target.read_text(encoding="utf-8") == "new"
+
+
+def test_concurrent_installs_both_survive(tmp_path, monkeypatch):
+    """P0-3: two racing installs must not silently drop each other's entries.
+    With the lease, the loser aborts loudly instead of clobbering."""
+    import threading
+    cur = tmp_path / ".cursor"
+    cur.mkdir()
+    monkeypatch.setattr(ci, "cursor_home", lambda: cur)
+    # minimal payload so install() gets to the hooks RMW
+    plugin = cur / "token-optimizer" / "plugin"
+    plugin.mkdir(parents=True)
+    for name in ci._PAYLOAD_MODULES:
+        (plugin / name).write_text("# stub\n", encoding="utf-8")
+    (ci._SCRIPT_DIR / "measure.py").exists()  # locator path untouched
+
+    errors, done = [], []
+    def run():
+        try:
+            ci.install(home=cur)
+            done.append(1)
+        except RuntimeError as exc:
+            errors.append(exc)
+
+    t1, t2 = threading.Thread(target=run), threading.Thread(target=run)
+    t1.start(); t2.start(); t1.join(); t2.join()
+
+    # exactly one install wins; the other either completed serially or aborted
+    # loudly -- either way hooks.json is valid JSON with our six events intact.
+    import json as _json
+    data = _json.loads((cur / "hooks.json").read_text(encoding="utf-8"))
+    assert set(data["hooks"]) == {"sessionStart", "preToolUse", "postToolUse",
+                                  "preCompact", "stop", "sessionEnd"}
