@@ -88,6 +88,15 @@ CREATE TABLE IF NOT EXISTS command_outputs (
     timestamp REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS command_run_streaks (
+    command_hash TEXT PRIMARY KEY,
+    command_text TEXT NOT NULL,
+    output_hash TEXT NOT NULL,
+    streak INTEGER NOT NULL,
+    nudged_streak INTEGER,
+    last_ts REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cached_content (
     file_path TEXT PRIMARY KEY,
     content TEXT NOT NULL,
@@ -679,6 +688,39 @@ class SessionStore:
             (
                 command_hash, command_text, output_hash, output_chars,
                 compressed_output, time.time(),
+            ),
+        )
+        conn.commit()
+
+    # ----- command_run_streaks (thrash guard) -----
+
+    def get_command_streak(self, command_hash: str) -> Optional[dict[str, Any]]:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM command_run_streaks WHERE command_hash = ?", (command_hash,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_command_streak(
+        self,
+        command_hash: str,
+        command_text: str,
+        output_hash: str,
+        streak: int,
+        nudged_streak: Optional[int],
+    ) -> None:
+        if self._is_over_size_cap():
+            return
+        conn = self._connect()
+        conn.execute(
+            """INSERT OR REPLACE INTO command_run_streaks
+               (command_hash, command_text, output_hash, streak,
+                nudged_streak, last_ts)
+               VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                command_hash, command_text[:500], output_hash, streak,
+                nudged_streak, time.time(),
             ),
         )
         conn.commit()

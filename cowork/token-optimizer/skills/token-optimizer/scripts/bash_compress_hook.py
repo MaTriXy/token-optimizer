@@ -83,14 +83,41 @@ def main() -> None:
     stdout = tool_response.get("stdout", "") or ""
     stderr = tool_response.get("stderr", "") or ""
 
-    # Too small to compress
-    if not stdout or len(stdout) < 100:
-        return
-
     # Get the command that was run
     tool_input = payload.get("tool_input", {})
     command = tool_input.get("command", "")
     if not command:
+        return
+
+    # Runtime thrash guard (Track F lever 1): record EVERY Bash run and, when
+    # the same command has produced byte-identical output >= 3 times in a row,
+    # append a one-line nudge. Nudge-only: the command already ran, nothing is
+    # denied, and any material output change resets the streak inside
+    # thrash_guard.check(). Runs BEFORE every eligibility gate below because
+    # thrash is exactly the small-output / failing-command case those gates
+    # skip, and before the already-compressed marker check so PreToolUse-
+    # compressed repeats are counted too.
+    try:
+        from thrash_guard import check as _thrash_check
+        _nudge = _thrash_check(command, stdout)
+        if _nudge:
+            print(json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "updatedToolOutput": {
+                        "stdout": stdout + "\n" + _nudge,
+                        "stderr": stderr,
+                        "interrupted": False,
+                        "isImage": False,
+                    },
+                },
+            }))
+            return
+    except Exception:
+        pass  # Fail open: the raw output stands
+
+    # Too small to compress
+    if not stdout or len(stdout) < 100:
         return
 
     # Detect if the output was ALREADY compressed by PreToolUse bash_hook.
