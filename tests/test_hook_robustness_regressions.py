@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -69,16 +70,27 @@ def test_stdin_partial_payload_returns_within_deadline(tmp_path):
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True,
     )
-    proc.stdin.write('{"partial": tru')  # valid-ish start, never completed
-    proc.stdin.flush()
     try:
-        out, _err = proc.communicate(timeout=8)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
-        pytest.fail("read_stdin_hook_input hung past 8s on a partial payload "
-                    "with the pipe held open (deadline not enforced end to end)")
-    assert "returned" in out, f"child crashed instead of timing out: {out!r}"
+        proc.stdin.write('{"partial": tru')  # valid-ish start, never completed
+        proc.stdin.flush()
+        try:
+            out, _err = proc.communicate(timeout=8)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            pytest.fail("read_stdin_hook_input hung past 8s on a partial payload "
+                        "with the pipe held open (deadline not enforced end to end)")
+        assert "returned" in out, f"child crashed instead of timing out: {out!r}"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
 
 
 # --------------------------------------------------------------------------- #
@@ -101,20 +113,28 @@ def test_planted_fifo_marker_does_not_hang_the_hook(tmp_path):
     marker = Path(tempfile.gettempdir()) / f".token-optimizer-ro-pyc-{tag}"
     try:
         os.mkfifo(marker)
-        old = time.time() - 172800
+        old = time.time() - 172800  # backdate 2 days: defeat the freshness check
         os.utime(marker, (old, old))
-        done = []
+        done = threading.Event()
         thread = threading.Thread(
             target=lambda: (module_runner._warn_readonly_scripts_dir_once(str(scripts_dir)),
-                            done.append(True)),
+                            done.set()),
             daemon=True,
         )
         thread.start()
         thread.join(timeout=5)
-        assert done, ("hook hung >=5s on a planted FIFO marker; the marker write "
-                      "must be exclusive and non-blocking (fail-open)")
+        assert done.is_set(), ("hook hung >=5s on a planted FIFO marker; the marker write "
+                               "must be exclusive and non-blocking (fail-open)")
     finally:
         scripts_dir.chmod(0o755)
+        if thread.is_alive() and marker.exists():
+            # Rescue reader: release a worker still blocked opening the FIFO
+            # for write, so nothing outlives the test.
+            try:
+                os.close(os.open(marker, os.O_RDONLY | os.O_NONBLOCK))
+            except OSError:
+                pass
+            thread.join(timeout=2)
         try:
             marker.unlink()
         except OSError:
@@ -130,26 +150,24 @@ def test_planted_fifo_marker_does_not_hang_the_hook(tmp_path):
     reason="os.fchmod is absent on Windows, so the leak window between mkstemp "
     "and fdopen cannot be forced there.",
 )
-def test_dashboard_meta_write_does_not_leak_fd_on_fchmod_failure(monkeypatch):
+def test_dashboard_meta_write_does_not_leak_fd_on_fchmod_failure(tmp_path, monkeypatch):
     """Forcing os.fchmod to raise between mkstemp and fdopen must not leak the
     descriptor: 50 failed writes used to leak 50 fds."""
     measure = _load_module(SCRIPTS / "measure.py", "measure_regr")
-    meta_path = Path(tempfile.mkdtemp()) / "meta.json"
+    meta_path = tmp_path / "meta.json"
 
     def fd_count():
-        return len(os.listdir("/dev/fd"))
+        with os.scandir("/dev/fd") as entries:
+            return sum(1 for _ in entries)
 
-    real_fchmod = os.fchmod
-
-    def boom(*_args, **_kwargs):
+    def forced_fchmod_failure(*_args, **_kwargs):
         raise OSError("forced fchmod failure")
 
-    monkeypatch.setattr(os, "fchmod", boom)
+    monkeypatch.setattr(os, "fchmod", forced_fchmod_failure)
     before = fd_count()
     for _ in range(50):
         measure._write_dashboard_meta_atomic(meta_path)  # fail-soft, never raises
     after = fd_count()
-    monkeypatch.setattr(os, "fchmod", real_fchmod)
     assert after - before == 0, (
         f"interrupted atomic writes leaked {after - before} fds "
         "(tmp_fd not closed when fchmod raises before fdopen owns it)"
@@ -177,10 +195,9 @@ def test_expired_outer_budget_is_delivered_not_disarmed():
         events.append("outer-fired")
         raise ptr._HandlerBudgetExceeded(0.2)
 
-    signal_module = __import__("signal")
-    previous = signal_module.getsignal(signal_module.SIGALRM)
-    signal_module.signal(signal_module.SIGALRM, outer_handler)
-    signal_module.setitimer(signal_module.ITIMER_REAL, 0.2)
+    previous = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, outer_handler)
+    signal.setitimer(signal.ITIMER_REAL, 0.2)
     try:
         try:
             with ptr._handler_deadline(5.0):
@@ -188,7 +205,7 @@ def test_expired_outer_budget_is_delivered_not_disarmed():
             events.append("inner-exited-cleanly")
         except ptr._HandlerBudgetExceeded:
             events.append("budget-exceeded")
-        remaining = signal_module.getitimer(signal_module.ITIMER_REAL)[0]
+        remaining = signal.getitimer(signal.ITIMER_REAL)[0]
         # The outer budget must have been DELIVERED (its handler ran, raising
         # its own budget exception), not silently disarmed for later handlers.
         assert "outer-fired" in events, (
@@ -196,5 +213,5 @@ def test_expired_outer_budget_is_delivered_not_disarmed():
             f"outer timer remaining after inner exit: {remaining:.3f}s"
         )
     finally:
-        signal_module.setitimer(signal_module.ITIMER_REAL, 0)
-        signal_module.signal(signal_module.SIGALRM, previous)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
