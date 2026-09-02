@@ -98,3 +98,26 @@ def test_override_env_is_honored_when_trusted(c, monkeypatch):
     # a bogus override is ignored; resolver still returns a real file
     monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", "/nonexistent/python3")
     assert os.path.isfile(c._resolve_safe_python())
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX ownership test")
+def test_sys_executable_must_pass_the_trust_gate(c, monkeypatch):
+    """P0-1 (same bug as cursor_install): sys.executable is only persisted when
+    the trust gate accepts it. A writable venv interpreter (gate rejects) must
+    fall through to the $PATH search, never be persisted as-is."""
+    calls = []
+
+    def fake_gate(p):
+        calls.append(p)
+        return os.path.abspath(p) != os.path.abspath(sys.executable)
+
+    monkeypatch.setattr(c, "_py_path_is_trusted", fake_gate)
+    resolved = c._resolve_safe_python()
+    assert sys.executable in calls, "gate never consulted for sys.executable"
+    assert os.path.isabs(resolved) and os.path.isfile(resolved)
+
+
+def test_sys_executable_returned_when_trusted(c, monkeypatch):
+    monkeypatch.setattr(c, "_py_path_is_trusted", lambda p: True)
+    monkeypatch.setenv("TOKEN_OPTIMIZER_PYTHON", "")
+    assert c._resolve_safe_python() == os.path.abspath(sys.executable)

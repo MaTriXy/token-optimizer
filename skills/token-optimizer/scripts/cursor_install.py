@@ -114,14 +114,15 @@ def _resolve_safe_python() -> str:
     Never emit a bare "python3": that string is resolved via $PATH every time the
     hook fires, so a hijacked PATH entry runs attacker code. Resolution order:
       1. TOKEN_OPTIMIZER_PYTHON, if it names a trusted file;
-      2. sys.executable (absolute path baked in ONCE);
+      2. sys.executable (absolute path baked in ONCE) -- but only through the
+         same trust gate: a writable venv interpreter must never be persisted;
       3. a $PATH search, accepting only a candidate that passes the gate.
     Raises RuntimeError rather than persist an unsafe command.
     """
     override = os.environ.get("TOKEN_OPTIMIZER_PYTHON", "").strip()
     if override and _py_path_is_trusted(override):
         return os.path.abspath(override)
-    if sys.executable and os.path.isfile(sys.executable):
+    if sys.executable and _py_path_is_trusted(sys.executable):
         return os.path.abspath(sys.executable)
     for name in ("python3", "python"):
         cand = shutil.which(name)

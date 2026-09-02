@@ -114,7 +114,9 @@ def _resolve_safe_python() -> str:
       1. TOKEN_OPTIMIZER_PYTHON, if it names a trusted file (user escape hatch,
          same env the launcher honours);
       2. sys.executable -- the interpreter already running this installer, an
-         absolute path baked in ONCE here so the hook never does a PATH lookup;
+         absolute path baked in ONCE here so the hook never does a PATH lookup,
+         but only through the same ownership gate (a writable venv interpreter
+         must never be persisted);
       3. a $PATH search, but only accepting a candidate that passes the ownership
          gate above.
     Raises RuntimeError rather than persist an unsafe command -- recoverable by
@@ -123,7 +125,7 @@ def _resolve_safe_python() -> str:
     override = os.environ.get("TOKEN_OPTIMIZER_PYTHON", "").strip()
     if override and _py_path_is_trusted(override):
         return os.path.abspath(override)
-    if sys.executable and os.path.isfile(sys.executable):
+    if sys.executable and _py_path_is_trusted(sys.executable):
         return os.path.abspath(sys.executable)
     for name in ("python3", "python"):
         cand = shutil.which(name)
