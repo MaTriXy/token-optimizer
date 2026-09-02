@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import bisect
 import copy
+import errno
 import hashlib
 import heapq
 import hmac
@@ -6962,20 +6963,32 @@ def _run_session_end_flush_worker(args):
     except _HookTimeout:
         pass
     else:
+        # Flush work completed without a timeout. M-5: release the flush lock
+        # BEFORE running post-flush extensions, so a slow/hung extension does
+        # not extend lock hold time and block concurrent session-end flushes.
+        # The flush work is already complete; the extension runs with the
+        # user's privileges, not under the lock. The budget (SIGALRM watchdog)
+        # is kept so a hung extension is still hard-killed — only the lock is
+        # released early.
+        _release_session_end_flush_lock(lock_dir)
+        lock_dir = None
         # Optional local post-flush extensions (admin-placed, OFF by default).
         # See _run_post_flush_extensions: nothing is loaded unless the file
         # exists, every failure is swallowed, and extensions get the remaining
-        # flush budget. Runs in an else so a BaseException from the flush work
-        # still hits the finally below (lock + budget must always release).
+        # flush budget.
         try:
             _run_post_flush_extensions(
                 time_left_fn=old_budget.remaining,
                 version=TOKEN_OPTIMIZER_VERSION)
-        except Exception:
+        except (Exception, SystemExit):
             pass
     finally:
+        # Only release the lock if the else branch didn't already (timeout
+        # path or an unexpected exception escaping the try block). The budget
+        # is always cleared here — the else branch keeps it for the extension.
+        if lock_dir is not None:
+            _release_session_end_flush_lock(lock_dir)
         _clear_hook_budget(old_budget)
-        _release_session_end_flush_lock(lock_dir)
 
 
 def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
@@ -6993,6 +7006,20 @@ def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
     and should defer work that does not fit; the watchdog may hard-exit the
     worker when the budget expires.
 
+    fd hygiene mirrors module_runner.py's marker writer (C-5): O_NOFOLLOW
+    refuses symlinks at the kernel level (a symlinked extension path is not
+    followed), O_NONBLOCK refuses FIFOs (a FIFO at the extension path would
+    block the worker thread indefinitely, preventing the finally from
+    releasing the flush lock), and an st_uid == os.getuid() owner check on
+    POSIX refuses an extension file planted by another user. Non-regular
+    files (char/block devices) are refused via S_ISREG. The read is bounded
+    to 1 MB (M-4) so a huge or sparse file cannot OOM the worker.
+
+    SystemExit is caught alongside Exception (H-6): an extension calling
+    sys.exit() must not escape the fail-open boundary and terminate the
+    worker. Every decision point emits a [Token Optimizer] stderr line (H-5)
+    so an admin who installs a broken extension gets feedback.
+
     context keys: trends_db, snapshot_dir, config_dir, runtime, version,
     time_left_fn. Token Optimizer ships no extensions and takes no
     responsibility for third-party ones; they run with the user's privileges.
@@ -7002,22 +7029,78 @@ def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
         # Open once and judge the fd, not the path: a stat()-then-exec would
         # leave a window where the file is swapped (or symlink-retargeted)
         # between the permission check and the code actually executed.
-        fd = os.open(ext_path, os.O_RDONLY)
+        # O_NOFOLLOW + O_NONBLOCK mirror module_runner.py's marker defense
+        # (C-5): a symlink at ext_path fails ELOOP, a FIFO fails ENXIO
+        # instead of blocking the worker forever. Both are absent on Windows;
+        # getattr fallback of 0 makes them no-ops there.
+        flags = (os.O_RDONLY
+                 | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0))
+        try:
+            fd = os.open(ext_path, flags)
+        except OSError as e:
+            # FileNotFoundError (no extension installed, the common case) is
+            # silent. ELOOP (symlink) / ENXIO (FIFO) get a stderr note so an
+            # admin sees the security rejection (H-5).
+            if e.errno != errno.ENOENT:
+                sys.stderr.write(
+                    f"[Token Optimizer] post-flush extension refused at "
+                    f"{ext_path}: {os.strerror(e.errno)} (errno {e.errno})\n")
+            return None
         try:
             st = os.fstat(fd)
-            # POSIX mode bits only: Windows reports 0o666 for every writable
-            # file (no group/other split), so this check would reject every
-            # extension there. Same hasattr-style POSIX gate as os.fchmod.
-            if os.name != "nt" and st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            # C-5 / L-3: refuse non-regular files (char/block devices read
+            # garbage data and are not executable code).
+            if not stat.S_ISREG(st.st_mode):
+                sys.stderr.write(
+                    f"[Token Optimizer] post-flush extension refused at "
+                    f"{ext_path}: not a regular file\n")
                 return None
-            source = os.read(fd, st.st_size if st.st_size > 0 else 1_048_576)
+            # C-5: owner check on POSIX. An extension file planted by another
+            # user (e.g. a world-readable config dir) is local code injection.
+            # Windows ACLs are the protection there, not uid bits.
+            if os.name != "nt":
+                if st.st_uid != os.getuid():
+                    sys.stderr.write(
+                        f"[Token Optimizer] post-flush extension refused at "
+                        f"{ext_path}: owner {st.st_uid} != current user "
+                        f"{os.getuid()}\n")
+                    return None
+                # POSIX mode bits only: Windows reports 0o666 for every writable
+                # file (no group/other split), so this check would reject every
+                # extension there. Same hasattr-style POSIX gate as os.fchmod.
+                if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                    sys.stderr.write(
+                        f"[Token Optimizer] post-flush extension refused at "
+                        f"{ext_path}: group/world-writable\n")
+                    return None
+            # M-4: bounded read. Cap at 1 MB so a very large or sparse file
+            # cannot OOM the worker and prevent the finally from releasing
+            # the flush lock.
+            read_size = min(st.st_size if st.st_size > 0 else 1_048_576,
+                            1_048_576)
+            source = os.read(fd, read_size)
         finally:
-            os.close(fd)
+            # L-2: wrap os.close in try/except so a bad fd never escapes the
+            # fail-open boundary.
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         module = types.ModuleType("_to_post_flush_ext")
         module.__file__ = str(ext_path)
-        exec(compile(source, str(ext_path), "exec"), module.__dict__)
+        try:
+            exec(compile(source, str(ext_path), "exec"), module.__dict__)
+        except Exception as e:
+            sys.stderr.write(
+                f"[Token Optimizer] post-flush extension failed to load at "
+                f"{ext_path}: {type(e).__name__}\n")
+            return None
         run = getattr(module, "run", None)
         if not callable(run):
+            sys.stderr.write(
+                f"[Token Optimizer] post-flush extension at {ext_path}: "
+                f"no callable run(context) defined\n")
             return None
         context = {
             "trends_db": TRENDS_DB,
@@ -7027,8 +7110,30 @@ def _run_post_flush_extensions(time_left_fn=None, version="unknown"):
             "version": version,
             "time_left_fn": time_left_fn,
         }
-        return run(context)
-    except Exception:
+        try:
+            result = run(context)
+        except SystemExit as e:
+            # H-6: SystemExit is a BaseException, not an Exception. Without
+            # this catch, an extension calling sys.exit() would propagate
+            # uncaught past the loader, past the caller's except Exception,
+            # and terminate the worker — violating the docstring's guarantee
+            # that "the hook always completes."
+            sys.stderr.write(
+                f"[Token Optimizer] post-flush extension at {ext_path} "
+                f"called sys.exit({e.code!r}); swallowed (fail-open)\n")
+            return None
+        except Exception as e:
+            sys.stderr.write(
+                f"[Token Optimizer] post-flush extension at {ext_path} "
+                f"raised {type(e).__name__}; swallowed (fail-open)\n")
+            return None
+        sys.stderr.write(
+            f"[Token Optimizer] post-flush extension at {ext_path} ran "
+            f"successfully\n")
+        return result
+    except (Exception, SystemExit):
+        # Outer boundary: any unexpected failure (including a SystemExit that
+        # somehow bypassed the inner catch) stays fail-open.
         return None
 
 
