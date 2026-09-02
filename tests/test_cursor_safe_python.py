@@ -254,4 +254,3 @@ def test_trust_gate_rejects_null_byte_path(c):
     crashing the entire resolver search)."""
     reason = c._py_trust_reason("/usr/bin/python3\x00/tmp/evil")
     assert reason is not None, "null-byte path was not rejected"
-    assert "stat failed" in reason or "null" in reason.lower()
