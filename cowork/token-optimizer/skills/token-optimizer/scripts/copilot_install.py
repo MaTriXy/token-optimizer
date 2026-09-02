@@ -93,15 +93,20 @@ def _py_path_is_trusted(p: str) -> bool:
             return True
         in_prefix = real.startswith(_TRUSTED_PY_PREFIXES)
         euid = os.geteuid()
-        for target in (real, os.path.dirname(real)):
+        # File + immediate dir only, deliberately NOT a full ancestor walk: the
+        # standard Homebrew interpreter lives under /opt/homebrew/Cellar (0775,
+        # admin-group-writable by Homebrew's own design) and is not under the
+        # /opt/homebrew/bin/ prefix, so walking ancestors would reject the most
+        # common macOS install. The replant vector requires a writable PARENT of
+        # the interpreter's dir, which the dirname check covers.
+        for i, target in enumerate((real, os.path.dirname(real))):
             st = os.stat(target)
-            if not in_prefix and st.st_uid != euid:
+            if not in_prefix and i < 2 and st.st_uid != euid:
                 # Root-owned system installs are trusted by prefix; anything
                 # else must be OURS, not another account's.
                 return False
             if st.st_mode & (_stat.S_IWGRP | _stat.S_IWOTH):
-                # Group/other-writable file or dir is hijackable everywhere,
-                # prefixes included (a shared Homebrew prefix, a CI cache).
+                # Group/other-writable file or dir is hijackable.
                 return False
         return True
     except OSError:

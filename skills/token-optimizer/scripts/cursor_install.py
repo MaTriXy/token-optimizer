@@ -105,15 +105,20 @@ def _py_path_is_trusted(p: str) -> bool:
             return True
         in_prefix = real.startswith(_TRUSTED_PY_PREFIXES)
         euid = os.geteuid()
-        for target in (real, os.path.dirname(real)):
+        # File + immediate dir only, deliberately NOT a full ancestor walk: the
+        # standard Homebrew interpreter lives under /opt/homebrew/Cellar (0775,
+        # admin-group-writable by Homebrew's own design) and is not under the
+        # /opt/homebrew/bin/ prefix, so walking ancestors would reject the most
+        # common macOS install. The replant vector requires a writable PARENT of
+        # the interpreter's dir, which the dirname check covers.
+        for i, target in enumerate((real, os.path.dirname(real))):
             st = os.stat(target)
-            if not in_prefix and st.st_uid != euid:
+            if not in_prefix and i < 2 and st.st_uid != euid:
                 # Root-owned system installs are trusted by prefix; anything
                 # else must be OURS, not another account's.
                 return False
             if st.st_mode & (_stat.S_IWGRP | _stat.S_IWOTH):
-                # Group/other-writable file or dir is hijackable everywhere,
-                # prefixes included (a shared Homebrew prefix, a CI cache).
+                # Group/other-writable file or dir is hijackable.
                 return False
         return True
     except OSError:
@@ -239,13 +244,39 @@ def _hooks_lock(hooks_path: Path):
     from hook_runtime import lease_lock
 
     lock_path = hooks_path.parent / f".{hooks_path.name}.to-install.lock"
-    with lease_lock(lock_path, acquire_timeout=5.0, lease_seconds=30.0) as acquired:
+    # 120s lease: the critical section copies the payload and rewrites
+    # hooks.json; a 30s lease could lapse mid-RMW on a slow disk and let a
+    # concurrent installer reclaim it, reintroducing the clobber.
+    with lease_lock(lock_path, acquire_timeout=5.0, lease_seconds=120.0) as acquired:
         if not acquired:
             raise RuntimeError(
                 "another Cursor install/uninstall is in progress "
                 f"(could not acquire {lock_path}); re-run in a moment"
             )
         yield
+
+
+def _copy_no_follow(src: Path, dest: Path) -> None:
+    """Copy src to dest without ever writing through a symlink at dest.
+
+    A pre-write is_symlink() check is TOCTOU-racy; tempfile + os.replace swaps
+    whatever is at dest (a symlink included) instead of following it.
+    """
+    import tempfile
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{dest.name}.", dir=str(dest.parent))
+    try:
+        with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
+            shutil.copyfileobj(inp, out)
+        os.chmod(tmp_name, 0o644)
+        os.replace(tmp_name, dest)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def install(*, dry_run: bool = False, home: Path = None) -> dict:
@@ -268,16 +299,9 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
             actions["skipped"].append(name)
             continue
         dest = plugin_dir / name
-        if dest.is_symlink():
-            # copy2 would write THROUGH the link to an attacker-chosen target.
-            raise RuntimeError(
-                f"{dest} is a symlink; refusing to overwrite it. "
-                "Remove it and re-run install."
-            )
         if not dry_run:
             try:
-                plugin_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dest)
+                _copy_no_follow(src, dest)
             except OSError as exc:
                 # A partial payload would silently break the bridge; abort BEFORE
                 # touching hooks.json.
@@ -297,17 +321,11 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
     measure_py = _SCRIPT_DIR / "measure.py"
     if measure_py.is_file():
         locator = plugin_dir / _MEASURE_LOCATOR_NAME
-        if locator.is_symlink():
-            raise RuntimeError(
-                f"{locator} is a symlink; refusing to overwrite it. "
-                "Remove it and re-run install."
-            )
         if not dry_run:
             try:
-                plugin_dir.mkdir(parents=True, exist_ok=True)
-                locator.write_text(
-                    f"{measure_py}\n", encoding="utf-8"
-                )
+                tmp = locator.with_name(f".{locator.name}.tmp")
+                tmp.write_text(f"{measure_py}\n", encoding="utf-8")
+                os.replace(tmp, locator)  # swaps a symlink, never follows it
             except OSError as exc:
                 raise RuntimeError(f"failed writing measure-path locator: {exc}") from exc
         actions["measure_locator"] = str(measure_py)

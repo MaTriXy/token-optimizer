@@ -364,7 +364,7 @@ def _session_lock(to_dir, sid):
 def _update_tally(fields, *, terminal=False, end_reason=None,
                   increment_turns=False, count_tool=False, compaction=None,
                   bump_nudge=False):
-    """Read-modify-write the session tally; returns the tally or None.
+    """Read-modify-write the session tally; returns ``(tally, nudge_emitted)``.
 
     Non-terminal activity reopens an idle/sessionEnd-finalised tally (final set
     back to False) so a long-lived IDE composer resumed after lunch is never
@@ -373,11 +373,11 @@ def _update_tally(fields, *, terminal=False, end_reason=None,
     to_dir = _to_dir()
     path = _tally_path(fields) if to_dir is not None else None
     if path is None:
-        return None
+        return None, False
     sid = fields.get("conversation_id") or "unknown"
     with _session_lock(to_dir, sid) as acquired:
         if not acquired:
-            return None
+            return None, False
         tally = _load_tally(path)
         now = time.time()
         if tally is None:
@@ -431,19 +431,17 @@ def _update_tally(fields, *, terminal=False, end_reason=None,
         # preCompact could exploit to clobber either the tool_calls increment
         # or the nudge_level). preCompact gives real numbers; when it never
         # fired the tool-call count is the honest available proxy.
+        nudge_emitted = False
         if bump_nudge:
             new_level = _nudge_level(int(tally.get("tool_calls", 0) or 0))
             if new_level > int(tally.get("nudge_level", 0) or 0):
                 tally["nudge_level"] = new_level
-                tally["_nudge_emitted"] = True
+                nudge_emitted = True
 
-        # The marker is for the caller only; the persisted tally stays clean.
-        if "_nudge_emitted" in tally:
-            persist = {k: v for k, v in tally.items() if k != "_nudge_emitted"}
-            _atomic_write_json(path, persist)
-        else:
-            _atomic_write_json(path, tally)
-        return tally
+        # The emit decision travels as the tuple's second element, never as a
+        # key in the tally: no caller can accidentally persist it.
+        _atomic_write_json(path, tally)
+        return tally, nudge_emitted
 
 
 # ---------------------------------------------------------------------------
@@ -757,10 +755,10 @@ def handle_post_tool_use(payload):
                      tool_name=fields["tool_name"] or None,
                      rewrite=rewrite)
 
-    tally = _update_tally(fields, count_tool=True, bump_nudge=True)
+    tally, nudge_emitted = _update_tally(fields, count_tool=True, bump_nudge=True)
     if tally is None:
         return
-    if tally.pop("_nudge_emitted", False):
+    if nudge_emitted:
         _emit({"additional_context": _NUDGE_TEXT})
 
 
@@ -828,9 +826,13 @@ def main(argv=None):
         _HANDLERS[args[0]](payload)
     except Exception:
         # A hook must never break the user's Cursor session: still exit 0, but
-        # never silently. A broken install, disk-full, or spawn failure has to
-        # leave a log signal (stderr; Cursor surfaces hook stderr in its logs).
-        logger.exception("[cursor_hook_bridge] handler %s failed; failing open", args[0])
+        # never silently. The log itself is guarded — a closed/full stderr
+        # (Cursor may not drain hook pipes) must not turn fail-open into
+        # fail-hung inside the handler that guarantees exit 0.
+        try:
+            logger.exception("[cursor_hook_bridge] handler %s failed; failing open", args[0])
+        except Exception:
+            pass
         return 0
     return 0
 

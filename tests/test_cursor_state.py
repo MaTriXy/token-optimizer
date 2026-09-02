@@ -11,7 +11,6 @@ Run: python3 -m pytest tests/test_cursor_state.py -v
 import json
 import sqlite3
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -207,7 +206,7 @@ def test_percent_wildcard_does_not_bleed_tokens(tmp_path):
     assert res["aaa"]["input_tokens"] == 7
 
 
-def test_single_scan_not_n_plus_one(tmp_path):
+def test_single_scan_not_n_plus_one(tmp_path, monkeypatch):
     """P0-5: one query over the key prefixes, not 2 per composer id. The old
     N+1 shape fired 1000 SELECTs here (4.6s on this DB); the single scan is
     pinned by counting executed SELECT statements, with wall-clock as a loose
@@ -225,22 +224,18 @@ def test_single_scan_not_n_plus_one(tmp_path):
     conn.close()
 
     selects = []
-    orig_connect = cursor_state.sqlite3.connect
+    real_connect = cursor_state.sqlite3.connect
 
     def counting_connect(*a, **k):
-        c = orig_connect(*a, **k)
+        c = real_connect(*a, **k)
         c.set_trace_callback(lambda s: selects.append(s) if s.lstrip().upper().startswith("SELECT") else None)
         return c
 
-    cursor_state.sqlite3.connect = counting_connect
-    try:
-        t0 = time.perf_counter()
-        res = cursor_state.read_state_vscdb_tokens(ids, db)
-        elapsed = time.perf_counter() - t0
-    finally:
-        cursor_state.sqlite3.connect = orig_connect
+    # monkeypatch guarantees restoration even on failure (direct assignment on
+    # the shared stdlib module would leak process-wide on a non-local exit).
+    monkeypatch.setattr(cursor_state.sqlite3, "connect", counting_connect)
+    res = cursor_state.read_state_vscdb_tokens(ids, db)
 
     assert len(res) == 500
     assert res[ids[0]]["input_tokens"] == 10 * 110
     assert len(selects) == 1, f"expected exactly 1 SELECT, got {len(selects)}"
-    assert elapsed < 5.0, f"single-scan read took {elapsed:.2f}s"

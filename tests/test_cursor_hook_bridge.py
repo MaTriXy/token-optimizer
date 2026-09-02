@@ -385,9 +385,27 @@ def test_pre_compact_survives_non_dict_payloads(bad, monkeypatch, tmp_path):
     bridge.handle_pre_compact(bad)  # must not raise
 
 
+def test_stop_rollup_throttle_skips_when_lease_held(monkeypatch, tmp_path):
+    """P1-3: with the throttle lease held by a concurrent stop hook,
+    _stop_rollup_due must return False (deterministic contention branch --
+    the old unlocked code would have returned True and spawned a second
+    rollup+dashboard pair)."""
+    from hook_runtime import lease_lock
+    monkeypatch.setattr(bridge, "cursor_home", lambda: tmp_path)
+    lock_dir = tmp_path / "token-optimizer" / ".locks"
+    lock_dir.mkdir(parents=True)
+    with lease_lock(lock_dir / ".stop-rollup.lock", acquire_timeout=0.0,
+                    lease_seconds=60.0) as acquired:
+        assert acquired
+        assert bridge._stop_rollup_due() is False
+    # once the lease is released, the throttle proceeds
+    assert bridge._stop_rollup_due() is True
+
+
 def test_stop_rollup_throttle_is_atomic_under_concurrency(monkeypatch, tmp_path):
-    """P1-3: two concurrent stop hooks must yield at most one 'due' verdict,
-    not two (each would spawn rollup+dashboard)."""
+    """P1-3 (smoke): two concurrent stop hooks must yield at most one 'due'
+    verdict. Scheduler-dependent, so the deterministic pin lives in
+    test_stop_rollup_throttle_skips_when_lease_held."""
     import threading
     monkeypatch.setattr(bridge, "cursor_home", lambda: tmp_path)
     results = []
@@ -432,3 +450,49 @@ def test_main_logs_handler_failure_but_exits_zero(monkeypatch, caplog):
         rc = bridge.main(["stop"])
     assert rc == 0
     assert any("stop" in r.message and r.levelno == logging.ERROR for r in caplog.records)
+
+
+def test_observed_append_failure_warns_once(monkeypatch, tmp_path, caplog):
+    """P1-10 follow-up: a persistently unwritable data dir logs ONE warning
+    (first failure) instead of a traceback per hook event."""
+    import logging
+
+    class ReadOnlyDir:
+        def open(self, *a, **k):
+            raise OSError(13, "read-only")
+        def __truediv__(self, name):
+            return self
+
+    monkeypatch.setattr(bridge, "_observed_warned", False)
+    monkeypatch.setattr(bridge, "_to_dir", lambda: ReadOnlyDir())
+    with caplog.at_level(logging.WARNING, logger="cursor_hook_bridge"):
+        bridge._record_observed("stop")
+        bridge._record_observed("stop")
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warns) == 1
+
+
+def test_pre_compact_persists_real_numbers_from_dict_payload(monkeypatch, tmp_path):
+    """P1-2: a well-formed preCompact payload's real context numbers land in
+    the compaction record; garbage values ('abc') degrade to 0, not a crash."""
+    monkeypatch.setattr(bridge, "cursor_home", lambda: tmp_path)
+    bridge.handle_pre_compact({
+        "hook_event_name": "preCompact", "trigger": "manual",
+        "context_tokens": 1234, "context_window_size": 128000,
+        "context_usage_percent": 0.42, "conversation_id": "pc-conv",
+    })
+    tally = bridge._load_tally(bridge._tally_path({"conversation_id": "pc-conv"}))
+    comp = tally["compactions"][-1]
+    assert comp["context_tokens"] == 1234
+    assert comp["context_window_size"] == 128000
+    assert abs(comp["context_usage_percent"] - 0.42) < 1e-9
+    assert comp["trigger"] == "manual"
+
+    bridge.handle_pre_compact({
+        "hook_event_name": "preCompact", "trigger": "auto",
+        "context_tokens": "abc", "conversation_id": "pc-conv",
+    })
+    tally = bridge._load_tally(bridge._tally_path({"conversation_id": "pc-conv"}))
+    comp = tally["compactions"][-1]
+    assert comp["context_tokens"] == 0
+    assert comp["context_window_size"] == 0

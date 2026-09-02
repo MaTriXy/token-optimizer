@@ -268,6 +268,9 @@ def read_state_vscdb_tokens(
         for row in cur:
             key = row["key"]
             if key.startswith("bubbleId:"):
+                # Key shape is bubbleId:<composerId>:<bubbleId>; Cursor composer
+                # ids are UUIDs (no ':'), so partition on the first colon is
+                # exact. (The composerData branch needs no split.)
                 rest = key[len("bubbleId:"):]
                 cid, sep, _suffix = rest.partition(":")
                 entry = wanted.get(cid)
@@ -282,10 +285,12 @@ def read_state_vscdb_tokens(
                     continue
                 if not isinstance(bubble, dict):
                     continue
+                # The DB knows about this id even if the bubble carries no
+                # tokenCount: report it (zeroed) rather than omit it.
+                entry["_found"] = True
                 tc = bubble.get("tokenCount")
                 if not isinstance(tc, dict):
                     continue
-                entry["_found"] = True
                 try:
                     entry["input_tokens"] += int(tc.get("inputTokens") or 0)
                     entry["output_tokens"] += int(tc.get("outputTokens") or 0)
@@ -296,18 +301,19 @@ def read_state_vscdb_tokens(
                 entry = wanted.get(cid)
                 if entry is None:
                     continue
+                entry["_found"] = True
                 try:
                     data = json.loads(row["value"])
                 except (TypeError, ValueError, json.JSONDecodeError):
                     continue
                 if isinstance(data, dict):
-                    entry["_found"] = True
                     mc = data.get("modelConfig")
                     if isinstance(mc, dict):
                         entry["model"] = mc.get("modelName") or entry["model"]
                     entry["created_at_ms"] = data.get("createdAt")
     except sqlite3.Error:
-        pass
+        # A mid-scan failure must not look like "no data": leave a signal.
+        logger.warning("[cursor_state] vscdb scan aborted by sqlite error", exc_info=True)
     finally:
         conn.close()
 

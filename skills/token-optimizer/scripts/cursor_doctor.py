@@ -415,10 +415,19 @@ def _installed_commands() -> dict:
     except (OSError, json.JSONDecodeError, ValueError):
         return {}
     commands = _str_entry_commands(config)
+    # Identity, not substring: only entries whose bridge token is a bridge we
+    # own (the installed plugin copy, or the sibling checkout bridge in dev)
+    # qualify, so a corrupted entry pointing at /tmp/evil/cursor_hook_bridge.py
+    # is never replayed by --probe.
+    ours = {
+        str(cursor_home() / "token-optimizer" / "plugin" / "cursor_hook_bridge.py"),
+        str(_SCRIPT_DIR / "cursor_hook_bridge.py"),
+    }
     out = {}
     for event in _WIRED_EVENTS:
         for cmd in commands.get(event, []):
-            if "cursor_hook_bridge.py" in cmd:
+            argv = _parse_hook_command(cmd)
+            if argv and argv[1] in ours:
                 out[event] = cmd
                 break
     return out

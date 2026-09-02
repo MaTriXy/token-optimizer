@@ -182,7 +182,7 @@ def test_install_aborts_on_copy_failure_before_touching_hooks(home, monkeypatch)
     def _boom(src, dst):
         raise OSError("disk full")
 
-    monkeypatch.setattr(ci.shutil, "copy2", _boom)
+    monkeypatch.setattr(ci.shutil, "copyfileobj", _boom)
     with pytest.raises(RuntimeError, match="failed copying"):
         ci.install(home=home)
     # Abort happened before the read-merge-write: foreign entries untouched.
@@ -263,12 +263,28 @@ def test_concurrent_installs_both_survive(tmp_path, monkeypatch):
     t1, t2 = threading.Thread(target=run), threading.Thread(target=run)
     t1.start(); t2.start(); t1.join(); t2.join()
 
-    # exactly one install wins; the other either completed serially or aborted
-    # loudly -- either way hooks.json is valid JSON with our six events intact.
+    # Every racer either completed (serialized by the lease) or aborted loudly;
+    # nobody vanished. hooks.json is valid JSON with our six events intact.
+    assert len(done) + len(errors) == 2
     import json as _json
     data = _json.loads((cur / "hooks.json").read_text(encoding="utf-8"))
     assert set(data["hooks"]) == {"sessionStart", "preToolUse", "postToolUse",
                                   "preCompact", "stop", "sessionEnd"}
+
+
+@needs_posix
+def test_install_aborts_loudly_when_lease_held(home, monkeypatch):
+    """P0-3 (deterministic): with the install lease held by a concurrent
+    installer, install() raises the loud RuntimeError instead of racing the
+    read-merge-write."""
+    from hook_runtime import lease_lock
+    home.mkdir(parents=True)
+    monkeypatch.setattr(ci, "cursor_home", lambda: home)
+    lock_path = home / ".hooks.json.to-install.lock"
+    with lease_lock(lock_path, acquire_timeout=0.0, lease_seconds=120.0) as acquired:
+        assert acquired
+        with pytest.raises(RuntimeError, match="another Cursor install"):
+            ci.install(home=home)
 
 
 def test_payload_modules_ship_the_bridges_runtime_deps():
@@ -291,29 +307,32 @@ def test_install_copies_full_payload(home, monkeypatch):
 
 
 @needs_posix
-def test_install_refuses_symlinked_payload_dest(home, monkeypatch):
-    """P1-5: a pre-planted symlink at a payload destination must never be
-    written through (copy2 would overwrite the link's target)."""
+def test_install_replaces_symlinked_payload_dest_without_following(home, monkeypatch):
+    """P1-5: a pre-planted symlink at a payload destination is swapped by
+    os.replace, never written through to the link's target."""
     plugin = home / "token-optimizer" / "plugin"
     plugin.mkdir(parents=True)
     victim = home / "victim.txt"
     victim.write_text("keep", encoding="utf-8")
     (plugin / "codex_io.py").symlink_to(victim)
-    with pytest.raises(RuntimeError, match="symlink"):
-        ci.install(home=home)
+    monkeypatch.setattr(ci, "cursor_home", lambda: home)
+    ci.install(home=home)
     assert victim.read_text(encoding="utf-8") == "keep"
+    assert (plugin / "codex_io.py").is_symlink() is False
+    assert (plugin / "codex_io.py").is_file()
 
 
 @needs_posix
-def test_install_refuses_symlinked_measure_locator(home, monkeypatch):
+def test_install_replaces_symlinked_measure_locator_without_following(home, monkeypatch):
     plugin = home / "token-optimizer" / "plugin"
     plugin.mkdir(parents=True)
     victim = home / "victim.txt"
     victim.write_text("keep", encoding="utf-8")
     (plugin / ci._MEASURE_LOCATOR_NAME).symlink_to(victim)
-    with pytest.raises(RuntimeError, match="symlink"):
-        ci.install(home=home)
+    monkeypatch.setattr(ci, "cursor_home", lambda: home)
+    ci.install(home=home)
     assert victim.read_text(encoding="utf-8") == "keep"
+    assert (plugin / ci._MEASURE_LOCATOR_NAME).is_symlink() is False
 
 
 def test_locate_measure_py_rejects_crafted_locator(tmp_path, monkeypatch):

@@ -157,6 +157,7 @@ def test_probe_refuses_to_execute_injected_command(monkeypatch, tmp_path):
     results = cd.run_probe()
 
     stop = next(r for r in results if r["event"] == "stop")
-    assert stop["status"] == "fail"
-    assert "refusing" in stop["detail"]
+    # The entry is not ours (bridge path is /tmp/...), so it is never replayed:
+    # reported as a failure or a skip, but never executed.
+    assert stop["status"] in ("fail", "skip")
     assert not marker.exists()
