@@ -78,8 +78,9 @@ _TRUSTED_PY_PREFIXES = (
 
 
 def _py_path_is_trusted(p: str) -> bool:
-    """Trusted iff the resolved interpreter is under a system prefix, OR it and
-    its dir are owned by us and not group/other-writable -- the launcher's hybrid
+    """Trusted iff the resolved interpreter is under a system prefix AND neither
+    it nor its dir is group/other-writable, OR (outside the prefixes) it and its
+    dir are owned by us and not group/other-writable -- the launcher's hybrid
     allowlist+ownership boundary (ssh/sudo/git), in Python. Pure stat, never runs
     the target. On Windows, stat ownership is unreliable under Git-Bash, so
     require only that the path is a real file (the launcher leans on hardcoded
@@ -90,14 +91,17 @@ def _py_path_is_trusted(p: str) -> bool:
             return False
         if os.name == "nt" or not hasattr(os, "geteuid"):
             return True
-        if real.startswith(_TRUSTED_PY_PREFIXES):
-            return True
+        in_prefix = real.startswith(_TRUSTED_PY_PREFIXES)
         euid = os.geteuid()
         for target in (real, os.path.dirname(real)):
             st = os.stat(target)
-            if st.st_uid != euid:
+            if not in_prefix and st.st_uid != euid:
+                # Root-owned system installs are trusted by prefix; anything
+                # else must be OURS, not another account's.
                 return False
             if st.st_mode & (_stat.S_IWGRP | _stat.S_IWOTH):
+                # Group/other-writable file or dir is hijackable everywhere,
+                # prefixes included (a shared Homebrew prefix, a CI cache).
                 return False
         return True
     except OSError:
@@ -114,7 +118,9 @@ def _resolve_safe_python() -> str:
       1. TOKEN_OPTIMIZER_PYTHON, if it names a trusted file (user escape hatch,
          same env the launcher honours);
       2. sys.executable -- the interpreter already running this installer, an
-         absolute path baked in ONCE here so the hook never does a PATH lookup;
+         absolute path baked in ONCE here so the hook never does a PATH lookup,
+         but only through the same ownership gate (a writable venv interpreter
+         must never be persisted);
       3. a $PATH search, but only accepting a candidate that passes the ownership
          gate above.
     Raises RuntimeError rather than persist an unsafe command -- recoverable by
@@ -123,7 +129,7 @@ def _resolve_safe_python() -> str:
     override = os.environ.get("TOKEN_OPTIMIZER_PYTHON", "").strip()
     if override and _py_path_is_trusted(override):
         return os.path.abspath(override)
-    if sys.executable and os.path.isfile(sys.executable):
+    if sys.executable and _py_path_is_trusted(sys.executable):
         return os.path.abspath(sys.executable)
     for name in ("python3", "python"):
         cand = shutil.which(name)

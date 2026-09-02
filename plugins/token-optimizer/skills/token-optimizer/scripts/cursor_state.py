@@ -245,69 +245,78 @@ def read_state_vscdb_tokens(
         # Locked (OperationalError: database is locked) -> skip this pass.
         return result
 
+    # Exact ids we are looking for. Matching happens in Python on the id parsed
+    # out of the key, so LIKE wildcards in an id (% _) can never widen the match
+    # and misattribute another conversation's tokens.
+    wanted = {}
+    for cid in ids[:_MAX_COMPOSERS]:
+        if isinstance(cid, str) and cid:
+            wanted[cid] = {"input_tokens": 0, "output_tokens": 0, "model": None,
+                           "created_at_ms": None, "_bubble_rows": 0}
+    if not wanted:
+        return result
+
     try:
-        for i, composer_id in enumerate(ids):
-            if i >= _MAX_COMPOSERS:
-                break
-            if not isinstance(composer_id, str) or not composer_id:
-                continue
-            _cid = composer_id.replace("'", "")
-            if not _cid:
-                continue
-            entry = {"input_tokens": 0, "output_tokens": 0, "model": None, "created_at_ms": None}
-            found = False
-            rows = 0
-            try:
-                cur = conn.execute(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?",
-                    (f"bubbleId:{_cid}:%",),
-                )
-                for row in cur:
-                    if rows >= _MAX_BUBBLE_ROWS:
-                        break
-                    rows += 1
-                    try:
-                        bubble = json.loads(row["value"])
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        continue
-                    if not isinstance(bubble, dict):
-                        continue
-                    tc = bubble.get("tokenCount")
-                    if not isinstance(tc, dict):
-                        continue
-                    found = True
-                    try:
-                        entry["input_tokens"] += int(tc.get("inputTokens") or 0)
-                        entry["output_tokens"] += int(tc.get("outputTokens") or 0)
-                    except (TypeError, ValueError):
-                        continue
-            except sqlite3.Error:
-                continue
-
-            # Composer metadata (model name + createdAt), best-effort.
-            try:
-                cur = conn.execute(
-                    "SELECT value FROM cursorDiskKV WHERE key = ?",
-                    (f"composerData:{_cid}",),
-                )
-                row = cur.fetchone()
-                if row is not None:
-                    found = True
+        # ONE scan over the two key prefixes (was 2 queries per composer id:
+        # N+1 full-table scans, 4.6s on a 55K-row DB with 500 composers).
+        # With an index on cursorDiskKV(key) SQLite serves each LIKE prefix
+        # from the index; without one this is a single pass instead of 2N.
+        cur = conn.execute(
+            "SELECT key, value FROM cursorDiskKV "
+            "WHERE key LIKE 'bubbleId:%' OR key LIKE 'composerData:%'"
+        )
+        for row in cur:
+            key = row["key"]
+            if key.startswith("bubbleId:"):
+                rest = key[len("bubbleId:"):]
+                cid, sep, _suffix = rest.partition(":")
+                entry = wanted.get(cid)
+                if entry is None or not sep:
+                    continue
+                if entry["_bubble_rows"] >= _MAX_BUBBLE_ROWS:
+                    continue
+                entry["_bubble_rows"] += 1
+                try:
+                    bubble = json.loads(row["value"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(bubble, dict):
+                    continue
+                tc = bubble.get("tokenCount")
+                if not isinstance(tc, dict):
+                    continue
+                entry["_found"] = True
+                try:
+                    entry["input_tokens"] += int(tc.get("inputTokens") or 0)
+                    entry["output_tokens"] += int(tc.get("outputTokens") or 0)
+                except (TypeError, ValueError):
+                    continue
+            else:  # composerData:<id>
+                cid = key[len("composerData:"):]
+                entry = wanted.get(cid)
+                if entry is None:
+                    continue
+                try:
                     data = json.loads(row["value"])
-                    if isinstance(data, dict):
-                        mc = data.get("modelConfig")
-                        if isinstance(mc, dict):
-                            entry["model"] = mc.get("modelName") or entry["model"]
-                        entry["created_at_ms"] = data.get("createdAt")
-            except (sqlite3.Error, TypeError, ValueError, json.JSONDecodeError):
-                pass
-
-            # Only report composers the DB actually knows about; a conversation
-            # id with no bubble rows and no composerData is absent, not zero.
-            if found:
-                result[composer_id] = entry
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if isinstance(data, dict):
+                    entry["_found"] = True
+                    mc = data.get("modelConfig")
+                    if isinstance(mc, dict):
+                        entry["model"] = mc.get("modelName") or entry["model"]
+                    entry["created_at_ms"] = data.get("createdAt")
+    except sqlite3.Error:
+        pass
     finally:
         conn.close()
+
+    # Only report composers the DB actually knows about; a conversation
+    # id with no bubble rows and no composerData is absent, not zero.
+    for cid, entry in wanted.items():
+        if entry.pop("_found", False):
+            entry.pop("_bubble_rows", None)
+            result[cid] = entry
     return result
 
 

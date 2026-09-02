@@ -56,6 +56,13 @@ _PAYLOAD_MODULES = (
     # hermes_session supplies compute_quality_score — without it cursor_session
     # silently falls back to a single-signal quality estimate.
     "hermes_session.py",
+    # spawn_utils supplies spawn_detached — without it the bridge's degraded
+    # fallback does NOT detach, so rollup/dashboard spawns die with the hook.
+    "spawn_utils.py",
+    # hook_runtime supplies lease_lock (tally RMW + stop throttle) and
+    # utf8_io is enforced at startup; both degrade silently when absent.
+    "hook_runtime.py",
+    "utf8_io.py",
 )
 
 # One-line locator written next to the bridge, naming the canonical measure.py
@@ -84,24 +91,28 @@ _TRUSTED_PY_PREFIXES = (
 
 
 def _py_path_is_trusted(p: str) -> bool:
-    """Trusted iff the resolved interpreter is under a system prefix, OR it and
-    its dir are owned by us and not group/other-writable. Pure stat, never runs
-    the target. On Windows, stat ownership is unreliable under Git-Bash, so
-    require only that the path is a real file."""
+    """Trusted iff the resolved interpreter is under a system prefix AND neither
+    it nor its dir is group/other-writable, OR (outside the prefixes) it and its
+    dir are owned by us and not group/other-writable. Pure stat, never runs the
+    target. On Windows, stat ownership is unreliable under Git-Bash, so require
+    only that the path is a real file."""
     try:
         real = os.path.realpath(p)
         if not os.path.isfile(real):
             return False
         if os.name == "nt" or not hasattr(os, "geteuid"):
             return True
-        if real.startswith(_TRUSTED_PY_PREFIXES):
-            return True
+        in_prefix = real.startswith(_TRUSTED_PY_PREFIXES)
         euid = os.geteuid()
         for target in (real, os.path.dirname(real)):
             st = os.stat(target)
-            if st.st_uid != euid:
+            if not in_prefix and st.st_uid != euid:
+                # Root-owned system installs are trusted by prefix; anything
+                # else must be OURS, not another account's.
                 return False
             if st.st_mode & (_stat.S_IWGRP | _stat.S_IWOTH):
+                # Group/other-writable file or dir is hijackable everywhere,
+                # prefixes included (a shared Homebrew prefix, a CI cache).
                 return False
         return True
     except OSError:
@@ -114,14 +125,15 @@ def _resolve_safe_python() -> str:
     Never emit a bare "python3": that string is resolved via $PATH every time the
     hook fires, so a hijacked PATH entry runs attacker code. Resolution order:
       1. TOKEN_OPTIMIZER_PYTHON, if it names a trusted file;
-      2. sys.executable (absolute path baked in ONCE);
+      2. sys.executable (absolute path baked in ONCE) -- but only through the
+         same trust gate: a writable venv interpreter must never be persisted;
       3. a $PATH search, accepting only a candidate that passes the gate.
     Raises RuntimeError rather than persist an unsafe command.
     """
     override = os.environ.get("TOKEN_OPTIMIZER_PYTHON", "").strip()
     if override and _py_path_is_trusted(override):
         return os.path.abspath(override)
-    if sys.executable and os.path.isfile(sys.executable):
+    if sys.executable and _py_path_is_trusted(sys.executable):
         return os.path.abspath(sys.executable)
     for name in ("python3", "python"):
         cand = shutil.which(name)
@@ -174,10 +186,17 @@ def _is_ours(entry, bridge_path: Path) -> bool:
 
 
 def _read_hooks(path: Path) -> dict:
-    """Read hooks.json. Missing -> {} (fresh install). Present but unreadable,
-    invalid, or a non-object root -> RuntimeError: Cursor has ONE shared
+    """Read hooks.json. Missing -> {} (fresh install). A symlink, an unreadable,
+    invalid, or non-object root -> RuntimeError: Cursor has ONE shared
     hooks.json, so silently treating a corrupt file as empty would clobber
-    other tools' (and Cursor's own) entries on the next write."""
+    other tools' (and Cursor's own) entries on the next write, and writing
+    through a symlink would redirect the installer's output to an
+    attacker-chosen target."""
+    if path.is_symlink():
+        raise RuntimeError(
+            f"{path} is a symlink; refusing to read-merge-write through it. "
+            "Remove the symlink (or point it at the real hooks.json) and re-run."
+        )
     if not path.exists():
         return {}
     try:
@@ -199,10 +218,40 @@ def _write_hooks(path: Path, data: dict) -> None:
     try:
         from codex_io import atomic_write_json
 
-        atomic_write_json(path, data)
+        # replace_symlink: even if a symlink appears between _read_hooks and
+        # here, os.replace swaps the symlink itself, never its target.
+        atomic_write_json(path, data, replace_symlink=True)
     except ImportError:  # pragma: no cover - broken checkout
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+class _HooksLock:
+    """Exclusive lease around the hooks.json read-merge-write.
+
+    Two concurrent installs (or install racing uninstall) would otherwise both
+    read stale content and the second write would silently drop the first's
+    entries. Uses hook_runtime.lease_lock (the same portable lock the bridges
+    use); a failed acquire aborts loudly instead of racing.
+    """
+
+    def __init__(self, hooks_path: Path):
+        self._lock_path = hooks_path.parent / f".{hooks_path.name}.to-install.lock"
+
+    def __enter__(self):
+        from hook_runtime import lease_lock
+
+        self._cm = lease_lock(self._lock_path, acquire_timeout=5.0, lease_seconds=30.0)
+        acquired = self._cm.__enter__()
+        if not acquired:
+            raise RuntimeError(
+                "another Cursor install/uninstall is in progress "
+                f"(could not acquire {self._lock_path}); re-run in a moment"
+            )
+        return self
+
+    def __exit__(self, *exc):
+        return self._cm.__exit__(*exc)
 
 
 def install(*, dry_run: bool = False, home: Path = None) -> dict:
@@ -225,6 +274,12 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
             actions["skipped"].append(name)
             continue
         dest = plugin_dir / name
+        if dest.is_symlink():
+            # copy2 would write THROUGH the link to an attacker-chosen target.
+            raise RuntimeError(
+                f"{dest} is a symlink; refusing to overwrite it. "
+                "Remove it and re-run install."
+            )
         if not dry_run:
             try:
                 plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -247,10 +302,16 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
     # next to the installer; the bridge degrades to "rollups paused" otherwise.
     measure_py = _SCRIPT_DIR / "measure.py"
     if measure_py.is_file():
+        locator = plugin_dir / _MEASURE_LOCATOR_NAME
+        if locator.is_symlink():
+            raise RuntimeError(
+                f"{locator} is a symlink; refusing to overwrite it. "
+                "Remove it and re-run install."
+            )
         if not dry_run:
             try:
                 plugin_dir.mkdir(parents=True, exist_ok=True)
-                (plugin_dir / _MEASURE_LOCATOR_NAME).write_text(
+                locator.write_text(
                     f"{measure_py}\n", encoding="utf-8"
                 )
             except OSError as exc:
@@ -259,23 +320,24 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
 
     bridge_path = plugin_dir / "cursor_hook_bridge.py"
     hooks_path = _host_hooks_path(root)
-    existing = _read_hooks(hooks_path)
-    hooks = existing.get("hooks")
-    if not isinstance(hooks, dict):
-        hooks = {}
-    for event, new_entries in _hook_entries(bridge_path).items():
-        old = hooks.get(event, [])
-        if not isinstance(old, list):
-            old = []
-        hooks[event] = [e for e in old if not _is_ours(e, bridge_path)] + new_entries
-    existing["hooks"] = hooks
-    existing.setdefault("version", 1)
+    with _HooksLock(hooks_path):
+        existing = _read_hooks(hooks_path)
+        hooks = existing.get("hooks")
+        if not isinstance(hooks, dict):
+            hooks = {}
+        for event, new_entries in _hook_entries(bridge_path).items():
+            old = hooks.get(event, [])
+            if not isinstance(old, list):
+                old = []
+            hooks[event] = [e for e in old if not _is_ours(e, bridge_path)] + new_entries
+        existing["hooks"] = hooks
+        existing.setdefault("version", 1)
 
-    if not dry_run:
-        try:
-            _write_hooks(hooks_path, existing)
-        except OSError as exc:
-            raise RuntimeError(f"failed writing {hooks_path}: {exc}") from exc
+        if not dry_run:
+            try:
+                _write_hooks(hooks_path, existing)
+            except OSError as exc:
+                raise RuntimeError(f"failed writing {hooks_path}: {exc}") from exc
     actions["hook_file"] = str(hooks_path)
     return actions
 
@@ -292,32 +354,38 @@ def uninstall(*, dry_run: bool = False, home: Path = None) -> dict:
 
     bridge_path = _plugin_dir(root) / "cursor_hook_bridge.py"
     hooks_path = _host_hooks_path(root)
-    existing = _read_hooks(hooks_path)
-    hooks = existing.get("hooks")
-    if isinstance(hooks, dict):
-        changed = False
-        pruned = {}
-        for event, entries in hooks.items():
-            if not isinstance(entries, list):
-                pruned[event] = entries
-                continue
-            kept = [e for e in entries if not _is_ours(e, bridge_path)]
-            if len(kept) != len(entries):
-                changed = True
-            pruned[event] = kept
-        if changed:
-            existing["hooks"] = pruned
-            if not dry_run:
-                try:
-                    _write_hooks(hooks_path, existing)
-                except OSError as exc:
-                    raise RuntimeError(f"failed writing {hooks_path}: {exc}") from exc
-            actions["removed"].append(f"{hooks_path} (Cursor entries)")
+    with _HooksLock(hooks_path):
+        existing = _read_hooks(hooks_path)
+        hooks = existing.get("hooks")
+        if isinstance(hooks, dict):
+            changed = False
+            pruned = {}
+            for event, entries in hooks.items():
+                if not isinstance(entries, list):
+                    pruned[event] = entries
+                    continue
+                kept = [e for e in entries if not _is_ours(e, bridge_path)]
+                if len(kept) != len(entries):
+                    changed = True
+                pruned[event] = kept
+            if changed:
+                existing["hooks"] = pruned
+                if not dry_run:
+                    try:
+                        _write_hooks(hooks_path, existing)
+                    except OSError as exc:
+                        raise RuntimeError(f"failed writing {hooks_path}: {exc}") from exc
+                actions["removed"].append(f"{hooks_path} (Cursor entries)")
 
     plugin_dir = _plugin_dir(root)
     if plugin_dir.exists():
         if not dry_run:
-            shutil.rmtree(plugin_dir)
+            try:
+                shutil.rmtree(plugin_dir)
+            except OSError as exc:
+                # main() only surfaces RuntimeError; a raw OSError would escape
+                # as a traceback and leave a half-uninstalled state unexplained.
+                raise RuntimeError(f"failed removing {plugin_dir}: {exc}") from exc
         actions["removed"].append(str(plugin_dir))
 
     return actions

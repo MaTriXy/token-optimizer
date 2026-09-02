@@ -179,6 +179,11 @@ def decode_payload(payload):
         "transcript_path": None,
         "model": None,
         "timestamp": None,
+        # preCompact numbers (0/0.0 when absent or the payload is not a dict)
+        "context_tokens": 0,
+        "context_window_size": 0,
+        "context_usage_percent": 0.0,
+        "trigger": "",
     }
     if not isinstance(payload, dict):
         return out
@@ -221,6 +226,19 @@ def decode_payload(payload):
         out["model"] = model[:128]
 
     out["timestamp"] = payload.get("timestamp")
+
+    for key in ("context_tokens", "context_window_size"):
+        try:
+            out[key] = int(payload.get(key) or 0)
+        except (TypeError, ValueError):
+            out[key] = 0
+    try:
+        out["context_usage_percent"] = float(payload.get("context_usage_percent") or 0.0)
+    except (TypeError, ValueError):
+        out["context_usage_percent"] = 0.0
+    trigger = payload.get("trigger")
+    if isinstance(trigger, str):
+        out["trigger"] = trigger
     return out
 
 
@@ -285,7 +303,7 @@ def _record_observed(event, **extra):
         with (to_dir / "observed-events.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")
     except OSError:
-        logger.debug("[cursor_hook_bridge] observed-events append failed", exc_info=True)
+        logger.warning("[cursor_hook_bridge] observed-events append failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +355,8 @@ def _session_lock(to_dir, sid):
 
 
 def _update_tally(fields, *, terminal=False, end_reason=None,
-                  increment_turns=False, count_tool=False, compaction=None):
+                  increment_turns=False, count_tool=False, compaction=None,
+                  bump_nudge=False):
     """Read-modify-write the session tally; returns the tally or None.
 
     Non-terminal activity reopens an idle/sessionEnd-finalised tally (final set
@@ -400,7 +419,20 @@ def _update_tally(fields, *, terminal=False, end_reason=None,
             comps.append(compaction)
             tally["compactions"] = comps[-200:]
 
-        _atomic_write_json(path, tally)
+        # Context-growth nudge (R10), folded into THIS locked RMW: computing it
+        # in the caller needed a second lock (and a gap a concurrent stop/
+        # preCompact could exploit to clobber either the tool_calls increment
+        # or the nudge_level). preCompact gives real numbers; when it never
+        # fired the tool-call count is the honest available proxy.
+        if bump_nudge:
+            new_level = _nudge_level(int(tally.get("tool_calls", 0) or 0))
+            if new_level > int(tally.get("nudge_level", 0) or 0):
+                tally["nudge_level"] = new_level
+                tally["_nudge_emitted"] = True
+
+        # The marker is for the caller only; the persisted tally stays clean.
+        persist = {k: v for k, v in tally.items() if k != "_nudge_emitted"}
+        _atomic_write_json(path, persist)
         return tally
 
 
@@ -521,14 +553,20 @@ _MEASURE_LOCATOR = _SCRIPT_DIR / "measure-path"
 
 
 def _locate_measure_py():
-    """Return the path to measure.py, or None if not found (rollups paused)."""
+    """Return the path to measure.py, or None if not found (rollups paused).
+
+    The locator is installer-written, but the plugin dir is user-writable: a
+    crafted locator pointing anywhere would have this bridge spawn its target
+    as code. Only a regular, non-symlinked file named measure.py is accepted.
+    """
     sibling = _SCRIPT_DIR / "measure.py"
-    if sibling.is_file():
+    if sibling.is_file() and not sibling.is_symlink():
         return sibling
     try:
-        if _MEASURE_LOCATOR.is_file():
+        if _MEASURE_LOCATOR.is_file() and not _MEASURE_LOCATOR.is_symlink():
             located = Path(_MEASURE_LOCATOR.read_text(encoding="utf-8").strip())
-            if located.is_file():
+            if (located.is_file() and not located.is_symlink()
+                    and located.name == "measure.py"):
                 return located
     except (OSError, ValueError):
         pass
@@ -551,7 +589,7 @@ def _spawn_rollup():
             stderr=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
-        pass
+        logger.warning("[cursor_hook_bridge] detached rollup spawn failed", exc_info=True)
 
 
 def _spawn_dashboard():
@@ -569,16 +607,38 @@ def _spawn_dashboard():
             stderr=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
-        pass
+        logger.warning("[cursor_hook_bridge] detached dashboard spawn failed", exc_info=True)
 
 
 def _stop_rollup_due():
-    """True once per 120s per machine (R12). Best-effort: reads then writes."""
+    """True once per 120s per machine (R12). Best-effort: reads then writes.
+
+    The read-check-write runs under a lease lock: two concurrent stop hooks
+    (multi-window Cursor) would otherwise both read a stale ``last`` and both
+    spawn rollup+dashboard. On lock contention we skip the spawn (the winner is
+    rolling up); without hook_runtime we degrade to the unlocked path.
+    """
     to_dir = _to_dir()
     if to_dir is None:
         return False
     state = to_dir / ".stop-rollup-last.json"
     now = time.time()
+    if lease_lock is not None:
+        lock_dir = to_dir / ".locks"
+        try:
+            lock_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            lock_dir = None
+        if lock_dir is not None:
+            with lease_lock(lock_dir / ".stop-rollup.lock",
+                            acquire_timeout=0.5, lease_seconds=30.0) as acquired:
+                if not acquired:
+                    return False
+                return _stop_rollup_due_locked(state, now)
+    return _stop_rollup_due_locked(state, now)
+
+
+def _stop_rollup_due_locked(state, now):
     last = None
     try:
         if state.exists():
@@ -687,25 +747,10 @@ def handle_post_tool_use(payload):
                      tool_name=fields["tool_name"] or None,
                      rewrite=rewrite)
 
-    tally = _update_tally(fields, count_tool=True)
+    tally = _update_tally(fields, count_tool=True, bump_nudge=True)
     if tally is None:
         return
-
-    # Context-growth nudge (R10). preCompact gives real numbers; when it never
-    # fired the tool-call count is the honest available proxy.
-    tool_calls = int(tally.get("tool_calls", 0) or 0)
-    new_level = _nudge_level(tool_calls)
-    old_level = int(tally.get("nudge_level", 0) or 0)
-    if new_level > old_level:
-        with _session_lock(_to_dir(), fields["conversation_id"]) as acquired:
-            if not acquired:
-                return
-            # Re-read under the lock so the nudge_level write is not lost to a
-            # concurrent sibling chat writing the same tally.
-            tpath = _tally_path(fields)
-            t = _load_tally(tpath) or tally
-            t["nudge_level"] = new_level
-            _atomic_write_json(tpath, t)
+    if tally.pop("_nudge_emitted", False):
         _emit({"additional_context": _NUDGE_TEXT})
 
 
@@ -713,25 +758,13 @@ def handle_pre_compact(payload):
     """Record Cursor's real context numbers and compaction trigger."""
     fields = decode_payload(payload)
     _record_observed("preCompact", conversation_id=fields["conversation_id"] or None)
-    try:
-        ctx_tokens = int(payload.get("context_tokens") or 0)
-    except (TypeError, ValueError):
-        ctx_tokens = 0
-    try:
-        ctx_window = int(payload.get("context_window_size") or 0)
-    except (TypeError, ValueError):
-        ctx_window = 0
-    try:
-        usage_pct = float(payload.get("context_usage_percent") or 0.0)
-    except (TypeError, ValueError):
-        usage_pct = 0.0
     _update_tally(
         fields,
         compaction={
-            "trigger": str(payload.get("trigger") or "")[:64],
-            "context_tokens": ctx_tokens,
-            "context_window_size": ctx_window,
-            "context_usage_percent": usage_pct,
+            "trigger": fields["trigger"][:64],
+            "context_tokens": fields["context_tokens"],
+            "context_window_size": fields["context_window_size"],
+            "context_usage_percent": fields["context_usage_percent"],
             "ts": time.time(),
         },
     )
@@ -784,7 +817,10 @@ def main(argv=None):
     try:
         _HANDLERS[args[0]](payload)
     except Exception:
-        # A hook must never break the user's Cursor session. No output, exit 0.
+        # A hook must never break the user's Cursor session: still exit 0, but
+        # never silently. A broken install, disk-full, or spawn failure has to
+        # leave a log signal (stderr; Cursor surfaces hook stderr in its logs).
+        logger.exception("[cursor_hook_bridge] handler %s failed; failing open", args[0])
         return 0
     return 0
 
