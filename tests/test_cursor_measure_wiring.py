@@ -40,6 +40,25 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "token-optimizer" 
 _MODULES = ("measure", "runtime_env", "plugin_env", "cursor_session", "cursor_state")
 
 
+@pytest.fixture(autouse=True)
+def _restore_sys_modules():
+    """Undo the _purge()/_import_measure() re-imports after each test.
+
+    _import_measure pops and re-imports ``measure`` (and its ``runtime_env``
+    sibling) so it can pin module-level paths to tmp_path. Without this
+    fixture the fresh instances stay in sys.modules and later test FILES that
+    imported the originals at collection time patch one instance while the
+    code under test runs the other (#107 closeout regression, same shape as
+    test_windows_spawn_no_window.py).
+    """
+    saved = sys.modules.copy()
+    yield
+    for k in list(sys.modules):
+        if k not in saved:
+            del sys.modules[k]
+    sys.modules.update(saved)
+
+
 def _purge():
     for name in _MODULES:
         sys.modules.pop(name, None)
