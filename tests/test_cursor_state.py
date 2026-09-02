@@ -11,6 +11,7 @@ Run: python3 -m pytest tests/test_cursor_state.py -v
 import json
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -170,3 +171,61 @@ def test_state_vscdb_path_is_a_path():
     p = cursor_state.state_vscdb_path()
     assert isinstance(p, Path)
     assert str(p).endswith("state.vscdb")
+
+
+def _vscdb_with_bubbles(path, bubbles):
+    import sqlite3
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)")
+    for key, value in bubbles.items():
+        conn.execute("INSERT INTO cursorDiskKV VALUES (?, ?)", (key, json.dumps(value)))
+    conn.commit()
+    conn.close()
+
+
+def test_like_wildcard_underscore_does_not_bleed_tokens(tmp_path):
+    """P0-4: '_' in a composer id is a LIKE single-char wildcard; querying for
+    abc_def must never sum abcXdef's bubbles."""
+    db = tmp_path / "state.vscdb"
+    _vscdb_with_bubbles(db, {
+        "bubbleId:abc_def:b1": {"tokenCount": {"inputTokens": 100, "outputTokens": 50}},
+        "bubbleId:abcXdef:b1": {"tokenCount": {"inputTokens": 999, "outputTokens": 1}},
+        "bubbleId:abc%def:b1": {"tokenCount": {"inputTokens": 500, "outputTokens": 0}},
+    })
+    res = cursor_state.read_state_vscdb_tokens(["abc_def"], db)
+    assert res["abc_def"]["input_tokens"] == 100
+    assert res["abc_def"]["output_tokens"] == 50
+
+
+def test_percent_wildcard_does_not_bleed_tokens(tmp_path):
+    db = tmp_path / "state.vscdb"
+    _vscdb_with_bubbles(db, {
+        "bubbleId:aaa:b1": {"tokenCount": {"inputTokens": 7, "outputTokens": 0}},
+        "bubbleId:aaXb:b1": {"tokenCount": {"inputTokens": 400, "outputTokens": 0}},
+    })
+    res = cursor_state.read_state_vscdb_tokens(["aaa"], db)
+    assert res["aaa"]["input_tokens"] == 7
+
+
+def test_single_scan_not_n_plus_one(tmp_path):
+    """P0-5: one query over the key prefixes, not 2 per composer id. On a
+    55K-row DB with 500 composers the old N+1 shape measured 4.6s; the single
+    scan must stay well under that on any machine."""
+    import sqlite3
+    db = tmp_path / "state.vscdb"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)")
+    ids = [f"composer-{i:04d}-uuid" for i in range(500)]
+    rows = [(f"bubbleId:{cid}:b{i}",
+             json.dumps({"tokenCount": {"inputTokens": 10, "outputTokens": 5}}))
+            for i, cid in enumerate(ids * 110)]
+    conn.executemany("INSERT INTO cursorDiskKV VALUES (?, ?)", rows)
+    conn.commit()
+    conn.close()
+
+    t0 = time.perf_counter()
+    res = cursor_state.read_state_vscdb_tokens(ids, db)
+    elapsed = time.perf_counter() - t0
+    assert len(res) == 500
+    assert res[ids[0]]["input_tokens"] == 10 * 110
+    assert elapsed < 5.0, f"single-scan read took {elapsed:.2f}s (N+1 regression?)"
