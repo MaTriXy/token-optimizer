@@ -270,6 +270,12 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
             actions["skipped"].append(name)
             continue
         dest = plugin_dir / name
+        if dest.is_symlink():
+            # copy2 would write THROUGH the link to an attacker-chosen target.
+            raise RuntimeError(
+                f"{dest} is a symlink; refusing to overwrite it. "
+                "Remove it and re-run install."
+            )
         if not dry_run:
             try:
                 plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -292,10 +298,16 @@ def install(*, dry_run: bool = False, home: Path = None) -> dict:
     # next to the installer; the bridge degrades to "rollups paused" otherwise.
     measure_py = _SCRIPT_DIR / "measure.py"
     if measure_py.is_file():
+        locator = plugin_dir / _MEASURE_LOCATOR_NAME
+        if locator.is_symlink():
+            raise RuntimeError(
+                f"{locator} is a symlink; refusing to overwrite it. "
+                "Remove it and re-run install."
+            )
         if not dry_run:
             try:
                 plugin_dir.mkdir(parents=True, exist_ok=True)
-                (plugin_dir / _MEASURE_LOCATOR_NAME).write_text(
+                locator.write_text(
                     f"{measure_py}\n", encoding="utf-8"
                 )
             except OSError as exc:

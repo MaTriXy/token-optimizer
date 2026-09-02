@@ -21,6 +21,7 @@ SCRIPTS = REPO / "skills" / "token-optimizer" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import cursor_install as ci  # noqa: E402
+import cursor_hook_bridge as bridge_mod  # noqa: E402
 
 # The installer refuses native Windows by design (the persisted hook command is
 # POSIX-shell quoted). Install/uninstall paths therefore can't run on win32;
@@ -288,3 +289,48 @@ def test_install_copies_full_payload(home, monkeypatch):
     plugin = home / "token-optimizer" / "plugin"
     for name in ci._PAYLOAD_MODULES:
         assert (plugin / name).is_file(), name
+
+
+@needs_posix
+def test_install_refuses_symlinked_payload_dest(home, monkeypatch):
+    """P1-5: a pre-planted symlink at a payload destination must never be
+    written through (copy2 would overwrite the link's target)."""
+    plugin = home / "token-optimizer" / "plugin"
+    plugin.mkdir(parents=True)
+    victim = home / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    (plugin / "codex_io.py").symlink_to(victim)
+    with pytest.raises(RuntimeError, match="symlink"):
+        ci.install(home=home)
+    assert victim.read_text(encoding="utf-8") == "keep"
+
+
+@needs_posix
+def test_install_refuses_symlinked_measure_locator(home, monkeypatch):
+    plugin = home / "token-optimizer" / "plugin"
+    plugin.mkdir(parents=True)
+    victim = home / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    (plugin / ci._MEASURE_LOCATOR_NAME).symlink_to(victim)
+    with pytest.raises(RuntimeError, match="symlink"):
+        ci.install(home=home)
+    assert victim.read_text(encoding="utf-8") == "keep"
+
+
+def test_locate_measure_py_rejects_crafted_locator(tmp_path, monkeypatch):
+    """P1-5: the bridge must not spawn an arbitrary file named by a crafted
+    measure-path locator; only a regular, non-symlink measure.py qualifies."""
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    evil = tmp_path / "evil.py"
+    evil.write_text("pwn", encoding="utf-8")
+    (plugin / "measure-path").write_text(f"{evil}\n", encoding="utf-8")
+    monkeypatch.setattr(bridge_mod, "_SCRIPT_DIR", plugin)
+    monkeypatch.setattr(bridge_mod, "_MEASURE_LOCATOR", plugin / "measure-path")
+    assert bridge_mod._locate_measure_py() is None
+    # a locator naming a real measure.py still resolves
+    good = tmp_path / "checkout" / "measure.py"
+    good.parent.mkdir()
+    good.write_text("ok", encoding="utf-8")
+    (plugin / "measure-path").write_text(f"{good}\n", encoding="utf-8")
+    assert bridge_mod._locate_measure_py() == good

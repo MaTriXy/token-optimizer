@@ -553,14 +553,20 @@ _MEASURE_LOCATOR = _SCRIPT_DIR / "measure-path"
 
 
 def _locate_measure_py():
-    """Return the path to measure.py, or None if not found (rollups paused)."""
+    """Return the path to measure.py, or None if not found (rollups paused).
+
+    The locator is installer-written, but the plugin dir is user-writable: a
+    crafted locator pointing anywhere would have this bridge spawn its target
+    as code. Only a regular, non-symlinked file named measure.py is accepted.
+    """
     sibling = _SCRIPT_DIR / "measure.py"
-    if sibling.is_file():
+    if sibling.is_file() and not sibling.is_symlink():
         return sibling
     try:
-        if _MEASURE_LOCATOR.is_file():
+        if _MEASURE_LOCATOR.is_file() and not _MEASURE_LOCATOR.is_symlink():
             located = Path(_MEASURE_LOCATOR.read_text(encoding="utf-8").strip())
-            if located.is_file():
+            if (located.is_file() and not located.is_symlink()
+                    and located.name == "measure.py"):
                 return located
     except (OSError, ValueError):
         pass
