@@ -63,7 +63,7 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     # it) is redacted too; the anchor gate already lowercases, so gating is
     # unaffected.
     ("MySQL password flag",     re.compile(
-        r"(?P<keep>\bmysql\s+.*?(?-i:-p)\s*)(?!-)(?!\[CREDENTIAL REDACTED:)"
+        r"(?P<keep>\bmysql\s+.*?(?<!\S)(?-i:-p)\s*)(?!-)(?!\[CREDENTIAL REDACTED:)"
         r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"']+)",
         re.I,
     )),
@@ -98,9 +98,9 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
         re.I,
     )),
     ("CLI password flag (short)", re.compile(
-        r"(?P<keep>sshpass\b.*?\s(?-i:-p)\s*"
-        r"|redis-cli\b.*?\s(?-i:-a)\s+"
-        r"|mariadb\b.*?\s(?-i:-p)\s*)"
+        r"(?P<keep>sshpass\b.*?(?<!\S)(?-i:-p)\s*"
+        r"|redis-cli\b.*?(?<!\S)(?-i:-a)\s+"
+        r"|mariadb\b.*?(?<!\S)(?-i:-p)\s*)"
         r"(?!-)(?!\[CREDENTIAL REDACTED:)"
         r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"']+)",
         re.I,

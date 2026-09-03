@@ -38,6 +38,10 @@ REDACTED = [
     (_j("sshpass -p 'h u' ssh box"), "h u"),
     (_j("redis-cli -a pw ping"), "pw"),
     (_j("redis-cli -h host -a 'p w' ping"), "p w"),
+    (_j('mysql --password="long form" -e 1'), "long form"),
+    (_j("mysql --password='lf2' -e 1"), "lf2"),
+    (_j("mysql -u root --password lf3 -e 1"), "lf3"),
+    (_j("mariadb --password=lf4"), "lf4"),
 ]
 
 UNCHANGED = [
@@ -50,6 +54,10 @@ UNCHANGED = [
     "curl -a x",
     "redis-cli -a",
     "tool --password",
+    "mysql --password-stdin",
+    "mysql --password-file /x/y",
+    "mariadb --password-stdin",
+    "sshpass --passcode-x",
 ]
 
 

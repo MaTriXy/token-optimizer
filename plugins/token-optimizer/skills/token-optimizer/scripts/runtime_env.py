@@ -719,7 +719,7 @@ def _ancestor_in_process_tree(basenames: frozenset) -> bool:
     snapshot (``_load_proc_snapshot``) instead of spawning its own ``ps``:
     a process's ancestor chain is fixed for its lifetime, so one snapshot
     per process is exact for every scanner, and the OpenCode and Copilot
-    scans no longer pay two separate spawns (hot-path latency, Track F).
+    scans no longer pay two separate spawns (hot-path latency).
 
     Never raises and never blocks for long: disabled on Windows, behind a
     short timeout, and skippable via TOKEN_OPTIMIZER_NO_PROC_SCAN.

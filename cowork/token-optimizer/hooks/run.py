@@ -424,7 +424,7 @@ def main() -> int:
     # child's default open() encoding UTF-8; PYTHONIOENCODING covers its std streams.
     child_env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
 
-    # Hot-path latency (Track F lever 2): resolve the runtime HERE and hand the
+    # Hot-path latency: resolve the runtime HERE and hand the
     # answer to the child via TOKEN_OPTIMIZER_RUNTIME, the override tier
     # detect_runtime() already honors (the Copilot hook bridge uses the same
     # mechanism). Without this, runtime detection runs twice per hook event —
