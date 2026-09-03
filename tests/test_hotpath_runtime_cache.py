@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Hot-path latency tests for the shared process snapshot + negative-result
-ancestor-scan cache (Track F lever 2) and the run.py runtime export.
+ancestor-scan cache and the run.py runtime export.
 
 What changed:
 - runtime_env._load_proc_snapshot(): ONE `ps -Ao pid=,ppid=,comm=,args=`

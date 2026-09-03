@@ -1,4 +1,4 @@
-"""Runtime thrash guard: nudge-only loop prevention across turns (Track F lever 1).
+"""Runtime thrash guard: nudge-only loop prevention across turns.
 
 A per-command wrapper (e.g. Boost) is exec'd per command with no cross-turn
 state, so it cannot see an agent re-running the same command with identical
