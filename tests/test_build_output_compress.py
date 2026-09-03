@@ -564,7 +564,7 @@ class TestHelpers:
 
 
 # ---------------------------------------------------------------------------
-# Regression tests for gauntlet findings F1-F8 (P0/P1 fixes)
+# Regression tests: credential lines preserved, distinct errors kept, fail-open, case-insensitive matching
 # ---------------------------------------------------------------------------
 
 class TestRegressionF1CredentialInNoiseLine:

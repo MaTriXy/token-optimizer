@@ -12,7 +12,7 @@ Thin, fast, fail-safe entry point invoked by Cursor's hooks.json (merged into
     cursor_hook_bridge.py sessionEnd
 
 Contract notes (verified against cursor.com/docs/hooks and the installed
-Cursor CLI bundle as of 2026-08-31, see .sprint-scratch/cursor-research.md):
+Cursor CLI bundle as of 2026-08-31):
 
 - Payloads arrive on stdin as ONE snake_case JSON object. Common fields:
   ``conversation_id``, ``generation_id``, ``model``, ``model_id``,

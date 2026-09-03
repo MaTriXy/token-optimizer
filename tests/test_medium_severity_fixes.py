@@ -1,4 +1,4 @@
-"""Tests for MEDIUM-severity gauntlet fixes.
+"""Tests for medium-severity robustness fixes.
 
 M-2: codex_state._normalize_ms OverflowError on float('inf')
 M-3: codex_state._ro_connect ValueError on relative paths
