@@ -68,6 +68,24 @@ Auto-update is off by default for plugins, and plugin authors cannot change that
 
 The script install handles updates differently. It re-runs the installer daily against the latest release tag and re-verifies the checksum each time.
 
+## Claude Code cloud sessions
+
+Cloud sessions on claude.ai/code run in a fresh container. They do not read the plugins installed on your own machine, and the `/plugin` command is not available inside them, so the install above does not carry over. Two ways to get Token Optimizer into cloud sessions:
+
+- **Per account:** enable Token Optimizer for your claude.ai account (Desktop app, **Customize**, plugins). Claude Code then loads it in every cloud session as a synced plugin.
+- **Per repository:** commit the following to the repository's `.claude/settings.json`. Every cloud session on that repository installs the plugin at start (the default network level already allows GitHub).
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "alexgreensh-token-optimizer": { "source": { "source": "github", "repo": "alexgreensh/token-optimizer" } }
+  },
+  "enabledPlugins": { "token-optimizer@alexgreensh-token-optimizer": true }
+}
+```
+
+Inside the session, `claude plugin list` shows the plugin, and any Bash command with long output shows the usual compression banner. Hooks, compression and redaction behave exactly as they do locally. One difference: each cloud session starts with an empty state directory, so the dashboard and audit history cover that session only; nothing is shared across sessions or with your machine.
+
 ## Windows note
 
 Windows is plugin path only. Do not run `install.sh` on Windows; Git Bash holds file handles and the install fails with EBUSY errors. A manual ZIP fallback is available from GitHub Releases.

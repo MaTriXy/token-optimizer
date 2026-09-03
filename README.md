@@ -78,6 +78,19 @@ Then in Claude Code: `/token-optimizer`
 >
 > After install, run `/token-optimizer` once to set up hooks. From there, everything runs automatically: compression, checkpoints, quality scoring, dashboard updates. You don't need to run any command again unless you want an audit.
 
+> **Claude Code cloud sessions (claude.ai/code).** A cloud session runs in a fresh container and never reads the plugins installed on your machine, so the two commands above are not enough there (`/plugin` itself is not available in cloud sessions). Either enable Token Optimizer for your claude.ai account (Desktop app → **Customize** → plugins), or commit this to the repo's `.claude/settings.json` so every cloud session on that repo installs it at start:
+>
+> ```json
+> {
+>   "extraKnownMarketplaces": {
+>     "alexgreensh-token-optimizer": { "source": { "source": "github", "repo": "alexgreensh/token-optimizer" } }
+>   },
+>   "enabledPlugins": { "token-optimizer@alexgreensh-token-optimizer": true }
+> }
+> ```
+>
+> Hooks, compression and redaction behave the same inside the container. Each cloud session starts with an empty state directory, so the dashboard and audit history there cover that session only.
+
 <details>
 <summary><b>Other platforms and install methods</b></summary>
 
