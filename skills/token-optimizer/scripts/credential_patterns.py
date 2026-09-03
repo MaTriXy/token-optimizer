@@ -62,7 +62,11 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     # N-3: re.I so "MySQL -pSECRET" (capitalized client name, as MySQL ships
     # it) is redacted too; the anchor gate already lowercases, so gating is
     # unaffected.
-    ("MySQL password flag",     re.compile(r"(?P<keep>\bmysql\s+.*?-p)(?!\s)(?!\[CREDENTIAL REDACTED:)[^\s\"']+", re.I)),
+    ("MySQL password flag",     re.compile(
+        r"(?P<keep>\bmysql\s+.*?(?-i:-p)\s*)(?!-)(?!\[CREDENTIAL REDACTED:)"
+        r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"']+)",
+        re.I,
+    )),
     # M-12: PGPASSWORD=, MYSQL_PWD=, and similar *_PASSWORD= / *_PWD= env assignments.
     # These appear as shell command prefixes (FOO=bar cmd ...) or in config output.
     ("Database env password",   re.compile(
@@ -88,14 +92,17 @@ CREDENTIAL_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     # The named `keep` group captures the flag (+ command context for short
     # forms) so redaction preserves it and blanks only the value.
     ("CLI password flag (long)", re.compile(
-        r"(?P<keep>(?:--password|--passwd|--passcode|--auth-token)\s*=?\s*)"
-        r"(?!\[CREDENTIAL REDACTED:)[^\s\"']+",
+        r"(?P<keep>(?:--password|--passwd|--passcode|--auth-token)(?![\w-])(?:\s*=\s*|\s+))"
+        r"(?!-)(?!\[CREDENTIAL REDACTED:)"
+        r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"']+)",
         re.I,
     )),
     ("CLI password flag (short)", re.compile(
-        r"(?P<keep>(?:sshpass|mysql|mariadb)\b.*?\s+-p\s*=?\s*"
-        r"|redis-cli\b.*?\s+-a\s*=?\s*)"
-        r"(?!\[CREDENTIAL REDACTED:)[^\s\"']+",
+        r"(?P<keep>sshpass\b.*?\s(?-i:-p)\s*"
+        r"|redis-cli\b.*?\s(?-i:-a)\s+"
+        r"|mariadb\b.*?\s(?-i:-p)\s*)"
+        r"(?!-)(?!\[CREDENTIAL REDACTED:)"
+        r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"']+)",
         re.I,
     )),
 ]
@@ -211,7 +218,7 @@ _PATTERN_ANCHORS = {
                               "passwd='", "passwd=\""),
     "AWS secret key": ("aws_secret", "secret_access_key", "secretaccesskey"),
     "CLI password flag (long)": ("--password", "--passwd", "--passcode", "--auth-token"),
-    "CLI password flag (short)": ("sshpass", "mysql", "mariadb", "redis-cli"),
+    "CLI password flag (short)": ("sshpass", "mariadb", "redis-cli"),
 }
 
 

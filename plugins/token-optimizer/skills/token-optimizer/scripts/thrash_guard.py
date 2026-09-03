@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runtime thrash guard: nudge-only loop prevention across turns (Track F lever 1).
+"""Runtime thrash guard: nudge-only loop prevention across turns.
 
 Why this exists
 ---------------
@@ -125,7 +125,7 @@ def check(command: str, output: str, now: float | None = None):
             )
             if not fire:
                 return None
-            return _NUDGE_TEMPLATE.format(label=_sanitize_label(stripped), streak=streak)
+            return _NUDGE_TEMPLATE.format(label=_sanitize_label(safe_command), streak=streak)
         finally:
             store.close()
     except Exception:
