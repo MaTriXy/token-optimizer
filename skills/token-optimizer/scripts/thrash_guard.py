@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import time
 
 # Fire once a command has produced byte-identical output this many times in
@@ -158,6 +159,57 @@ def _sanitize_label(command: str) -> str:
 # A line that is an error keyword followed only by digits/dots is a metric
 # (e.g. "Error: 0.000835" from a numeric accuracy report), not a failure.
 _NUMERIC_ERROR_LINE_RE = re.compile(r"^\s*error\s*:\s*[\d.]+\s*$", re.IGNORECASE)
+
+# Final pipeline stages whose visible output is identical by construction:
+# a truncating filter shows the same slice of its input regardless of whether
+# the underlying data changed, so byte-identical output is not evidence of a
+# stuck loop.
+_TRUNCATING_FILTER_CMDS = frozenset({"tail", "head", "wc"})
+
+
+def _ends_with_truncating_filter(command: str) -> bool:
+    """True when the command's last pipeline stage truncates its output.
+
+    ``progress.log | tail -10`` is byte-identical on every run no matter how
+    the log changed underneath, so its output can never be evidence of a
+    stuck loop. Counts (``wc``, ``grep -c``) behave the same way.
+    """
+    try:
+        last_stage = command.rstrip().split("|")[-1].strip()
+        tokens = shlex.split(last_stage)
+        if not tokens:
+            return False
+        cmd = tokens[0].rsplit("/", 1)[-1]
+        if cmd in _TRUNCATING_FILTER_CMDS:
+            return True
+        if cmd in ("grep", "egrep", "fgrep"):
+            # -c counts matches; -m N / -N cap how many are shown.
+            return any(
+                t.startswith("-") and not t.startswith("--")
+                and (re.search(r"[cm\d]", t))
+                for t in tokens[1:]
+            )
+        return False
+    except Exception:
+        return False
+
+
+def _workspace_changed_since(store, ts: float) -> bool:
+    """True when a file-writing tool ran after ``ts`` (best effort).
+
+    Reads the session's activity log, which records every tool use with a
+    timestamp. If the agent edited files between two runs of the same
+    command, byte-identical output is not evidence of a stuck loop.
+    """
+    try:
+        row = store._connect().execute(
+            "SELECT 1 FROM activity_log "
+            "WHERE tool_bucket = 'edit' AND timestamp > ? LIMIT 1",
+            (ts,),
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return False
 
 
 def _looks_like_failure(
@@ -276,24 +328,36 @@ def check(
         try:
             prior = store.get_command_streak(cmd_h)
             fresh = not prior or now - float(prior.get("last_ts") or 0) > STALE_SECONDS
+            # An edit between two runs makes byte-identical output
+            # meaningless as a stuck-loop signal: the workspace changed, so
+            # the streak restarts.
+            workspace_changed = (
+                bool(prior) and not fresh
+                and _workspace_changed_since(store, float(prior.get("last_ts") or 0))
+            )
 
             # --- Identical-output streak (existing signal) ---
             if (
                 prior
                 and prior.get("output_hash") == out_h
                 and not fresh
+                and not workspace_changed
             ):
                 streak = int(prior.get("streak") or 0) + 1
                 nudged_streak = _int_or_none(prior.get("nudged_streak"))
             else:
-                # Material change (different output), a new command, or a stale
-                # streak: start over. This is the "never fire when the output
-                # changed materially" guarantee.
+                # Material change (different output), a new command, a stale
+                # streak, or an intervening edit: start over. This is the
+                # "never fire when the output changed materially" guarantee.
                 streak = 1
                 nudged_streak = None
 
-            fire_identical = streak >= STREAK_THRESHOLD and (
-                nudged_streak is None or streak >= nudged_streak + REPEAT_AFTER
+            fire_identical = (
+                streak >= STREAK_THRESHOLD
+                and not _ends_with_truncating_filter(command)
+                and (
+                    nudged_streak is None or streak >= nudged_streak + REPEAT_AFTER
+                )
             )
 
             # --- Burn streak (new signal) ---

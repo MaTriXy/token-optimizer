@@ -340,6 +340,81 @@ def test_stdout_not_scanned_without_redirect(guard):
         "Error: connection refused\n", "", redirected=True) is True
 
 
+# ---------------------------------------------------------------------------
+# Identical-output nudge vs. truncating filters and intervening edits
+# ---------------------------------------------------------------------------
+
+def _log_edit(ts: float) -> None:
+    """Record a file-writing tool use in the session activity log."""
+    from session_store import SessionStore
+    store = SessionStore(os.environ["CLAUDE_SESSION_ID"])
+    try:
+        conn = store._connect()
+        conn.execute(
+            "INSERT INTO activity_log (tool_name, tool_bucket, has_error, timestamp) "
+            "VALUES ('Edit', 'edit', 0, ?)", (ts,))
+        conn.commit()
+    finally:
+        store.close()
+
+
+def test_truncating_filter_never_fires_identical_nudge(guard):
+    """`| tail -10` of a progress log is identical by construction."""
+    cmd = "cat build.log | tail -10"
+    out = "step 1 ok\nstep 2 ok\n"
+    for _ in range(5):
+        assert guard.check(cmd, out, stderr="") is None
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat build.log | head -5",
+    "cat build.log | wc -l",
+    "cat build.log | grep -c error",
+    "cat build.log | grep -m1 error",
+    "tail -20 build.log",
+])
+def test_truncating_filter_variants_never_fire(guard, cmd):
+    out = "same slice\nof output\n"
+    for _ in range(5):
+        assert guard.check(cmd, out, stderr="") is None
+
+
+def test_truncating_filter_does_not_block_other_nudges(guard):
+    """The filter guard only suppresses the identical-output signal."""
+    cmd = "cat build.log 2>&1 | tail -10"
+    guard.check(cmd, "Error: a\nline 1\n", stderr="")
+    guard.check(cmd, "Error: b\nline 2\n", stderr="")
+    nudge = guard.check(cmd, "Error: c\nline 3\n", stderr="")
+    assert nudge is not None
+    assert "failed 3 times" in nudge
+
+
+def test_edit_between_runs_resets_identical_streak(guard):
+    """Three identical `| tail` runs with an intervening edit: no nudge."""
+    cmd = "python3 report.py"
+    out = "report body\n"
+    t0 = time.time()
+    guard.check(cmd, out, now=t0)
+    guard.check(cmd, out, now=t0 + 1)
+    _log_edit(t0 + 2)
+    # Without the edit these two runs would reach streak 4 and fire.
+    assert guard.check(cmd, out, now=t0 + 3) is None
+    assert guard.check(cmd, out, now=t0 + 4) is None
+    # A fresh streak still fires once it reaches the threshold again.
+    assert guard.check(cmd, out, now=t0 + 5) is not None
+
+
+def test_edit_detection_uses_timestamps(guard):
+    """An edit BEFORE the prior run does not reset the streak."""
+    cmd = "cat report.txt"
+    out = "report\n"
+    t0 = time.time()
+    _log_edit(t0)
+    guard.check(cmd, out, now=t0 + 10)
+    guard.check(cmd, out, now=t0 + 1)
+    assert guard.check(cmd, out, now=t0 + 2) is not None  # streak 3: fire
+
+
 def test_burn_nudge_fires_on_third_failure_with_different_output(guard):
     cmd = "gcc -o image image.c -lm && ./image 2>&1"
     # Three failures, each with different output
