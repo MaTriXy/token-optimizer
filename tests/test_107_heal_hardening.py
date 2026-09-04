@@ -173,7 +173,7 @@ def _installer_env(m, monkeypatch, create_rc=0, create_stderr="",
     """Drive the REAL _install_task_scheduler_daemon with everything around it
     stubbed. File writes land in the sandboxed SNAPSHOT_DIR."""
     _fake_nt(m, monkeypatch)
-    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda: True)
+    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda **kw: True)
     monkeypatch.setattr(m, "_is_ms_store_python_alias", lambda p: ms_store)
     monkeypatch.setattr(m, "_compose_windows_user_id", lambda: "WORKGROUP\\bob")
     monkeypatch.setattr(m, "_probe_windows_port_owner", lambda port: port_owner)
@@ -278,7 +278,7 @@ def test_install_success_supersedes_marker_race(m, monkeypatch):
     monkeypatch.setattr(m, "_normalized_platform", lambda: "Darwin")
     monkeypatch.setattr(m, "_daemon_service_installed", lambda s=None: False)
     monkeypatch.setattr(m, "_verify_daemon_port", lambda **k: False)
-    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda: True)
+    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda **kw: True)
     monkeypatch.setattr(m, "_get_or_create_daemon_token", lambda: "t")
 
     def _install(**k):
@@ -297,7 +297,7 @@ def test_lock_race_loser_resolves_from_reality_without_arming(m, monkeypatch):
     _flags_env(m, monkeypatch)
     monkeypatch.setattr(m, "_normalized_platform", lambda: "Darwin")
     monkeypatch.setattr(m, "_verify_daemon_port", lambda **k: False)
-    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda: True)
+    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda **kw: True)
     monkeypatch.setattr(m, "_get_or_create_daemon_token", lambda: "t")
     monkeypatch.setattr(m, "_install_launchd_daemon", lambda **k: False)
 
@@ -330,13 +330,9 @@ def test_marker_reason_helper(m):
 # ---------------------------------------------------------------------------
 def test_ensure_health_surfaces_the_wedge():
     """run_ensure_health must print a one-liner when the marker is suppressing
-    the daemon, naming the exact command that clears it -- and it must land on
-    the SessionStart hook's *stdout* (session-visible context), NOT stderr.
-
-    #107 originally routed this to stderr, which a SessionStart hook swallows,
-    so the dashboard stayed silently dead -- the exact wedge #107 set out to
-    kill. This message is the deliberate exception to the "errors -> stderr"
-    convention: a persistent, user-recoverable state must reach the user."""
+    the daemon, naming the exact command that clears it. The message routes to
+    stderr so it does not inflate the model's context every turn; the user
+    sees it on the terminal or via `measure.py doctor`."""
     src = _measure_source()
     idx = src.index("def run_ensure_health")
     body = src[idx:]
@@ -349,10 +345,9 @@ def test_ensure_health_surfaces_the_wedge():
     assert "setup-daemon" in window, (
         "the suppression one-liner must name the clearing command"
     )
-    assert "file=sys.stderr" not in window, (
-        "the suppression one-liner must reach hook STDOUT (session-visible), "
-        "not stderr -- stderr is swallowed by the SessionStart hook, which is "
-        "what made the wedge silent in the first place"
+    assert "file=sys.stderr" in window, (
+        "the suppression one-liner must route to stderr so it does not "
+        "enter the model's context on every turn"
     )
     assert "_daemon_install_failed_reason" in window, (
         "the one-liner should include the recorded failure reason"

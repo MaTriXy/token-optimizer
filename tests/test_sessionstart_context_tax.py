@@ -1,20 +1,16 @@
 """Unit A: kill the SessionStart context tax.
 
 SessionStart hooks inject their stdout into the agent's context window every
-session. On headless/container/CI Linux runs the dashboard daemon installer
-printed a ~594-char ``[Error] systemctl --user is not reachable...`` diagnostic
-to *stdout* even under ``soft_fail=True`` (the hook path), so it landed in the
-model context on every session. The Windows installer already routed its
-``_fail`` text to stderr under ``soft_fail``; the systemd and launchd
-installers did not. The "Self-healed N hooks" notice had the same leak.
+session. Diagnostic lines printed to stdout land in the model context on every
+turn, costing tokens with no benefit to the model.
 
 These tests pin the fix:
   * the systemd ``[Error] systemctl ... is not reachable`` block routes to
     stderr under ``soft_fail`` (hook path) and stays out of stdout, which is
     well under the 150-char SessionStart budget;
   * the macOS launchd installer's ``_fail`` does the same (same bug class);
-  * the "Self-healed N hooks" notice routes to stderr when running under a
-    hook (non-interactive), so an interactive human still sees it on stdout.
+  * the "Self-healed N hooks" notice routes to stderr so it never inflates
+    SessionStart context, regardless of invocation mode.
 """
 
 from __future__ import annotations
@@ -119,7 +115,7 @@ def test_launchd_error_stays_out_of_hook_stdout(m, monkeypatch, capsys):
     """The macOS launchd installer's _fail must route to stderr under
     soft_fail too, so a headless macOS run never injects a daemon error into
     SessionStart context."""
-    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda: False)
+    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda **kw: False)
 
     result = m._install_launchd_daemon(soft_fail=True)
 
@@ -234,13 +230,15 @@ def test_self_healed_notice_routes_to_stderr_under_hook(m, monkeypatch, capsys):
 
 def test_self_healed_notice_stays_on_stdout_for_interactive_run(m, monkeypatch, capsys):
     """An interactive ``measure.py ensure-health`` (a tty, not a hook) must
-    still surface the Self-healed notice on stdout so a human sees it."""
+    still surface the Self-healed notice so a human sees it. The notice now
+    routes to stderr (visible on the terminal), keeping stdout clean for both
+    hook and interactive invocations."""
     _stub_ensure_health_to_heal(m, monkeypatch, added=1)
     monkeypatch.setattr(m, "_running_under_hook", lambda: False)
 
     m.run_ensure_health()
 
-    out, _ = capsys.readouterr()
-    assert "Self-healed" in out, (
-        "interactive run must keep the Self-healed notice on stdout"
+    _, err = capsys.readouterr()
+    assert "Self-healed" in err, (
+        "interactive run must still surface the Self-healed notice on stderr"
     )
