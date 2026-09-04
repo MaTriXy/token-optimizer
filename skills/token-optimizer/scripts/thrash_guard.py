@@ -155,25 +155,38 @@ def _sanitize_label(command: str) -> str:
     return label
 
 
-def _looks_like_failure(stdout: str, stderr: str) -> bool:
-    """Detect failure from stdout/stderr when no exit code is available.
+# A line that is an error keyword followed only by digits/dots is a metric
+# (e.g. "Error: 0.000835" from a numeric accuracy report), not a failure.
+_NUMERIC_ERROR_LINE_RE = re.compile(r"^\s*error\s*:\s*[\d.]+\s*$", re.IGNORECASE)
 
-    Reuses the ``_ERROR_STDERR_PATTERNS`` list from ``bash_compress`` (the
-    same patterns the compression pipeline uses to skip failure output),
-    applied to both stderr and stdout. When stderr is redirected to stdout
-    (2>&1), error lines appear on stdout, so both must be checked.
 
-    Fast path: when there is no stderr and the stdout is short and contains
-    no error-like keyword, return False without importing ``bash_compress``
-    (which is a heavy module). This keeps the hot path — short, clean output
-    — at the same cost as the existing identical-output streak check.
+def _looks_like_failure(
+    stdout: str,
+    stderr: str,
+    exit_code: int | None = None,
+    redirected: bool = False,
+) -> bool:
+    """Decide whether a Bash run failed.
+
+    The exit code is authoritative when known: non-zero means failure, zero
+    means success, and stdout is never scanned in that case. A program that
+    prints an accuracy metric like ``Error: 0.000835`` and exits 0 is a
+    success, not a failure.
+
+    When no exit code is available, fall back to text: stderr is always
+    scanned; stdout is scanned only when the command redirected stderr into
+    stdout (``2>&1``), because otherwise an error-looking line on stdout is
+    just data. Redirected stdout is scanned line by line, anchored to line
+    start, with purely numeric payloads after the colon excluded.
     """
+    if exit_code is not None:
+        return exit_code != 0
     if not stderr and not stdout:
         return False
     # Cheap pre-screen: if neither text contains a colon (all the patterns
     # require a colon or a specific keyword), skip the heavy import. This
     # avoids importing bash_compress for the common case of clean short
-    # output, which is the hot path the brief asks us not to regress.
+    # output, which is the hot path.
     has_potential = False
     for text in (stderr, stdout):
         if text and (":" in text or "Traceback" in text or "FAILED" in text
@@ -187,12 +200,18 @@ def _looks_like_failure(stdout: str, stderr: str) -> bool:
         return False
     try:
         from bash_compress import _ERROR_STDERR_PATTERNS
-        for text in (stderr, stdout):
-            if not text:
-                continue
+        if stderr:
             for pat in _ERROR_STDERR_PATTERNS:
-                if pat.search(text):
+                if pat.search(stderr):
                     return True
+        if stdout and redirected:
+            for line in stdout.splitlines():
+                if _NUMERIC_ERROR_LINE_RE.match(line):
+                    continue
+                stripped = line.lstrip()
+                for pat in _ERROR_STDERR_PATTERNS:
+                    if pat.match(stripped):
+                        return True
     except Exception:
         pass
     return False
@@ -203,6 +222,7 @@ def check(
     output: str,
     now: float | None = None,
     stderr: str = "",
+    exit_code: int | None = None,
 ):
     """Record this Bash run and return a nudge line when the streak warrants it.
 
@@ -210,7 +230,9 @@ def check(
     Never raises; never denies — the caller decides how to surface the nudge.
     ``now`` is injectable for tests and defaults to ``time.time()``.
     ``stderr`` is the tool response's stderr, used for failure detection when
-    no exit code is available.
+    no exit code is available. ``exit_code`` is the command's exit status when
+    the caller knows it; when present it is the sole failure signal and the
+    output text is never scanned.
 
     Three signals share one store record:
     1. Identical-output streak (existing): fires when the same command
@@ -244,7 +266,10 @@ def check(
         # agent stays on the live (unredacted) command the agent already sees.
         safe_command = _redact_credentials(normalized)[:500]
         now = time.time() if now is None else now
-        is_fail = _looks_like_failure(output, stderr)
+        is_fail = _looks_like_failure(
+            output, stderr, exit_code=exit_code,
+            redirected="2>&1" in command,
+        )
         body = _heredoc_body(command)
         has_inline_script = body is not None and len(body) >= INLINE_SCRIPT_MIN_CHARS
         store = SessionStore(session_id)

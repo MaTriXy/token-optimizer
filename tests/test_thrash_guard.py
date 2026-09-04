@@ -289,8 +289,59 @@ def test_no_heredoc_unchanged():
     assert _normalize_command("  git status  ") == "git status"
 
 
+# ---------------------------------------------------------------------------
+# Exit-code-first failure detection
+# ---------------------------------------------------------------------------
+
+# A successful numeric program whose output happens to contain error-looking
+# lines. "Error: 0.000835" is a metric, not a failure.
+_PI_MONTE_CARLO_OUTPUT = (
+    "Estimated pi: 3.14\n"
+    "Error: 0.000835\n"
+    "Accuracy: 99.97%\n"
+)
+
+
+def test_numeric_error_metric_is_not_a_failure(guard):
+    """The Monte-Carlo output must never fire the burn nudge, even after 3 runs."""
+    cmd = "python3 estimate_pi.py"
+    nudge = None
+    for _ in range(3):
+        nudge = guard.check(cmd, _PI_MONTE_CARLO_OUTPUT, stderr="")
+    assert nudge is None or "failed" not in nudge
+
+
+def test_numeric_error_metric_not_flagged_even_redirected(guard):
+    """Even with 2>&1, an error keyword followed only by digits is a metric."""
+    assert guard._looks_like_failure(
+        _PI_MONTE_CARLO_OUTPUT, "", redirected=True) is False
+
+
+def test_known_exit_code_is_the_sole_failure_signal(guard):
+    """When the exit code is known, output text is never scanned."""
+    # Exit 0: never a failure, even with error-looking output.
+    assert guard.check(
+        "make check", "Error: 0.000835\nFAILED to impress\n",
+        exit_code=0) is None
+    # Non-zero: a failure even when the output looks clean.
+    guard.check("make check", "all good\n", exit_code=1, stderr="")
+    guard.check("make check", "still good\n", exit_code=1, stderr="")
+    nudge = guard.check("make check", "fine again\n", exit_code=1, stderr="")
+    assert nudge is not None
+    assert "failed 3 times" in nudge
+
+
+def test_stdout_not_scanned_without_redirect(guard):
+    """Without 2>&1 and with empty stderr, stdout is data, not a failure signal."""
+    assert guard._looks_like_failure(
+        "Error: connection refused\nTraceback (most recent call last)\n",
+        "", redirected=False) is False
+    assert guard._looks_like_failure(
+        "Error: connection refused\n", "", redirected=True) is True
+
+
 def test_burn_nudge_fires_on_third_failure_with_different_output(guard):
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     # Three failures, each with different output
     assert guard.check(cmd, "Error: undefined symbol foo\nline 1\n", stderr="") is None
     assert guard.check(cmd, "Error: type mismatch bar\nline 2\n", stderr="") is None
@@ -302,20 +353,20 @@ def test_burn_nudge_fires_on_third_failure_with_different_output(guard):
 
 
 def test_burn_nudge_stays_silent_below_threshold(guard):
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     assert guard.check(cmd, "Error: foo\nline 1\n", stderr="") is None
     assert guard.check(cmd, "Error: bar\nline 2\n", stderr="") is None
 
 
 def test_burn_nudge_does_not_fire_on_non_failure(guard):
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     # Non-failing runs never fire the burn nudge
     for i in range(5):
         assert guard.check(cmd, f"output version {i}\nline {i}\n", stderr="") is None
 
 
 def test_success_resets_burn_streak(guard):
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     # Two failures, then a success, then two more failures: streak never reaches 3
     guard.check(cmd, "Error: foo\nline 1\n", stderr="")
     guard.check(cmd, "Error: bar\nline 2\n", stderr="")
@@ -325,7 +376,7 @@ def test_success_resets_burn_streak(guard):
 
 
 def test_burn_nudge_cooldown(guard):
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     # Fire at 3
     guard.check(cmd, "Error: a\nline 1\n", stderr="")
     guard.check(cmd, "Error: b\nline 2\n", stderr="")
@@ -339,7 +390,7 @@ def test_burn_nudge_cooldown(guard):
 
 def test_burn_nudge_identical_output_does_not_fire(guard):
     """If the identical-output nudge fires, the burn nudge does not."""
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     out = "Error: same failure\nline 1\n"
     # Three identical failures: the identical-output nudge fires, not the burn nudge
     guard.check(cmd, out, stderr="")
@@ -353,7 +404,7 @@ def test_burn_nudge_identical_output_does_not_fire(guard):
 def test_burn_streak_stale_resets(guard):
     """A stale failure streak resets: 2 failures, then stale, then 2 more
     do not fire (need 3 after the reset)."""
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     t0 = time.time()
     guard.check(cmd, "Error: a\nline 1\n", stderr="", now=t0)
     guard.check(cmd, "Error: b\nline 2\n", stderr="", now=t0)
@@ -366,7 +417,7 @@ def test_burn_streak_stale_resets(guard):
 
 def test_burn_stale_resets_silent_below_threshold(guard):
     """After a stale reset, only 2 consecutive failures stay silent."""
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     t0 = time.time()
     guard.check(cmd, "Error: a\nline 1\n", stderr="", now=t0)
     guard.check(cmd, "Error: b\nline 2\n", stderr="", now=t0)
@@ -393,7 +444,7 @@ def test_burn_nudge_fail_open_on_unwritable_store(guard, monkeypatch):
     which POSIX chmod cannot enforce on Windows CI.
     """
     import session_store
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
 
     def _raise(self, *a, **k):
         raise OSError("store unwritable")
@@ -407,7 +458,7 @@ def test_burn_nudge_fail_open_on_unwritable_store(guard, monkeypatch):
 def test_burn_nudge_concurrent_no_double_nudge(guard):
     """Two concurrent processes do not both fire a nudge on the same threshold."""
     import threading
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     # Pre-seed 2 failures from one thread
     guard.check(cmd, "Error: a\nline 1\n", stderr="")
     guard.check(cmd, "Error: b\nline 2\n", stderr="")
@@ -435,7 +486,7 @@ def test_burn_nudge_concurrent_no_double_nudge(guard):
 
 def test_burn_nudge_label_sanitized(guard):
     """The nudge label must have backticks from the command replaced."""
-    cmd = "echo `whoami` && gcc -o image image.c"
+    cmd = "echo `whoami` && gcc -o image image.c 2>&1"
     guard.check(cmd, "Error: a\nline 1\n", stderr="")
     guard.check(cmd, "Error: b\nline 2\n", stderr="")
     nudge = guard.check(cmd, "Error: c\nline 3\n", stderr="")
@@ -484,7 +535,7 @@ def test_inline_script_small_heredoc_never_fires(guard):
 
 def test_inline_script_no_heredoc_never_fires(guard):
     """A command without a heredoc never fires the inline-script nudge."""
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     for i in range(20):
         assert guard.check(cmd, f"output {i}\nline {i}\n", stderr="") is None
 
@@ -532,7 +583,7 @@ def test_inline_script_priority_below_burn(guard):
     """When the burn nudge fires, the inline-script nudge does not."""
     # Command with a large heredoc body that also fails with different output
     body = "import math\n" + "# analysis code\n" * 30
-    cmd = f"python3 << 'PYEOF'\n{body}\nPYEOF"
+    cmd = f"python3 << 'PYEOF'\n{body}\nPYEOF 2>&1"
     # 3 failures with different output: burn fires at 3, inline-script (threshold 8) does not
     guard.check(cmd, "Error: a\nline 1\n", stderr="")
     guard.check(cmd, "Error: b\nline 2\n", stderr="")
@@ -729,11 +780,57 @@ def test_replay_path_tracing_inline_script_fires_at_step_27(guard):
 # Integration: burn nudge through bash_compress_hook.main() with stderr
 # ---------------------------------------------------------------------------
 
+def _payload_string_response(command, response, session_id):
+    """Payload with a string-typed tool_response, as Claude Code delivers it
+    when a Bash command exits non-zero."""
+    return json.dumps({
+        "session_id": session_id,
+        "transcript_path": "/tmp/transcript.jsonl",
+        "cwd": "/Users/test/project",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "tool_response": response,
+    })
+
+
+def test_hook_string_exit_code_response_feeds_failure_detection():
+    """A non-zero exit delivered as a string response drives the burn nudge."""
+    sid = "test-exitcode-int-" + uuid.uuid4().hex[:8]
+    cmd = "make check"
+    outputs = [
+        "Error: Exit code 1\nall good\n",
+        "Error: Exit code 1\nstill good\n",
+        "Error: Exit code 1\nfine again\n",
+    ]
+    proc = None
+    for out in outputs:
+        proc = _run_hook(_payload_string_response(cmd, out, sid))
+        assert proc.returncode == 0
+    updated = _updated_stdout(proc)
+    assert updated is not None
+    assert updated.startswith("fine again\n")
+    assert "failed 3 times" in updated
+
+
+def test_hook_string_exit_zero_response_is_not_a_failure():
+    """Exit 0 delivered as a string never counts as a failure."""
+    sid = "test-exitzero-int-" + uuid.uuid4().hex[:8]
+    cmd = "make check"
+    proc = None
+    for _ in range(3):
+        proc = _run_hook(_payload_string_response(
+            cmd, "Error: Exit code 0\nError: 0.000835\n", sid))
+        assert proc.returncode == 0
+    updated = _updated_stdout(proc)
+    assert updated is None or "failed" not in updated
+
+
 def test_hook_burn_nudge_appended_with_stderr():
     """The burn nudge fires through the hook when stderr carries error
     patterns and the output differs each time."""
     sid = "test-burn-int-" + uuid.uuid4().hex[:8]
-    cmd = "gcc -o image image.c -lm && ./image"
+    cmd = "gcc -o image image.c -lm && ./image 2>&1"
     outputs = [
         "Error: undefined symbol foo\nline 1\n",
         "Error: type mismatch bar\nline 2\n",
