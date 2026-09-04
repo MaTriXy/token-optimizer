@@ -25433,17 +25433,21 @@ def setup_all_hooks(dry_run=False, verbose=False):
     return {"added": added, "skipped": skipped, "plugin_root": plugin_root_str}
 
 
-def _ensure_dashboard_file():
+def _ensure_dashboard_file(to_stderr=False):
     """Shared: generate the initial dashboard HTML if missing.
 
     All platform installers rely on the HTML file already existing on
     disk so the daemon has something to serve. Idempotent.
+
+    ``to_stderr`` routes progress/error lines to stderr so they never
+    land in the SessionStart stdout capture.
     """
+    _out = sys.stderr if to_stderr else sys.stdout
     if not DASHBOARD_PATH.exists():
-        print("  Generating initial dashboard...")
+        print("  Generating initial dashboard...", file=_out)
         generate_standalone_dashboard(quiet=True)
     if not DASHBOARD_PATH.exists():
-        print("[Error] Could not generate dashboard. Run 'measure.py dashboard' first.")
+        print("[Error] Could not generate dashboard. Run 'measure.py dashboard' first.", file=_out)
         return False
     return True
 
@@ -25743,7 +25747,7 @@ def _install_launchd_daemon(dry_run=False, soft_fail=False, effective_host=None)
         print("  No changes written.")
         return True
 
-    if not _ensure_dashboard_file():
+    if not _ensure_dashboard_file(to_stderr=soft_fail):
         return _fail("[Token Optimizer] Dashboard file missing; cannot start daemon.")
 
     # Clear any stale uninstall tombstone so a fresh install proceeds.
@@ -26512,7 +26516,7 @@ def _install_task_scheduler_daemon(dry_run=False, soft_fail=False, effective_hos
         print("  No changes written.")
         return
 
-    if not _ensure_dashboard_file():
+    if not _ensure_dashboard_file(to_stderr=soft_fail):
         return _fail("[Error] Dashboard file missing; cannot start daemon.")
 
     # Microsoft Store Python's App Execution Alias cannot be
@@ -26957,7 +26961,7 @@ def _install_systemd_user_daemon(dry_run=False, soft_fail=False, effective_host=
             f"  Meanwhile, the dashboard file still works: {DASHBOARD_PATH.as_uri()}",
         )
 
-    if not _ensure_dashboard_file():
+    if not _ensure_dashboard_file(to_stderr=soft_fail):
         return _fail("[Error] Dashboard file missing; cannot start daemon.")
 
     _get_or_create_daemon_token()
@@ -27743,7 +27747,7 @@ def _ensure_dashboard_daemon(force=False):
     # belt-and-suspenders: installers return False under soft_fail, but a future
     # edit that reintroduces sys.exit must NEVER kill the SessionStart hook.
     try:
-        if not _ensure_dashboard_file():
+        if not _ensure_dashboard_file(to_stderr=True):
             # Transient class (disk full once, a regen hiccup): the 24h
             # throttle bounds the retry. Never marker-worthy.
             return "install-failed"
@@ -45094,7 +45098,7 @@ def run_ensure_health():
                 _cp_data = dict(_cp_data)
                 _cp_data["cleanupPeriodDays"] = 99999
                 if _write_settings_atomic(_cp_data):
-                    print("  [Token Optimizer] Set cleanupPeriodDays=99999 (preserves transcripts for trends)")
+                    print("  [Token Optimizer] Set cleanupPeriodDays=99999 (preserves transcripts for trends)", file=sys.stderr)
                 else:
                     print("  [Token Optimizer] cleanupPeriodDays was not changed (settings.json locked or refused).", file=sys.stderr)
         except Exception as _e:
@@ -45112,7 +45116,7 @@ def run_ensure_health():
     # One-time (no-op once the snapshot exists); never blocks SessionStart.
     try:
         if _auto_capture_pristine_baseline():
-            print("  [Token Optimizer] Captured baseline snapshot for structural savings")
+            print("  [Token Optimizer] Captured baseline snapshot for structural savings", file=sys.stderr)
     except Exception:
         pass
 
@@ -45184,7 +45188,7 @@ def run_ensure_health():
                 try:
                     if _dashboard_heal_spawn_due():
                         _spawn_detached_dashboard_selfheal(days=30, force=True)
-                        print(f"  [Token Optimizer] Refreshing dashboard to v{TOKEN_OPTIMIZER_VERSION} (background)")
+                        print(f"  [Token Optimizer] Refreshing dashboard to v{TOKEN_OPTIMIZER_VERSION} (background)", file=sys.stderr)
                 except Exception as _e:
                     print(f"  [Token Optimizer] dashboard refresh failed: {_e}", file=sys.stderr)
     except Exception as _e:
@@ -45309,12 +45313,9 @@ def run_ensure_health():
                     # tombstoned/disabled it or whose install is condemned.
                     # The script write above is inert and may stand either way.
                     if _daemon_resurrection_blocked() is None:
-                        _level, _msg = _apply_daemon_restart_outcome(
+                        _, _msg = _apply_daemon_restart_outcome(
                             _restart_dashboard_daemon(_normalized_platform()))
-                        if _level in ("ok", "ok-reinstall"):
-                            print(f"  [Token Optimizer] {_msg}")
-                        else:
-                            print(f"  [Token Optimizer] {_msg}", file=sys.stderr)
+                        print(f"  [Token Optimizer] {_msg}", file=sys.stderr)
     except Exception as _e:
         print(f"  [Token Optimizer] daemon auto-update check failed: {_e}", file=sys.stderr)
 
@@ -45330,11 +45331,16 @@ def run_ensure_health():
     try:
         _daemon_ensure = _ensure_dashboard_daemon()
         if _daemon_ensure == "installed":
-            print("  [Token Optimizer] Dashboard daemon installed. "
-                  f"URL: http://localhost:{DAEMON_PORT}/token-optimizer "
-                  "(path required). Opt out: measure.py setup-daemon --uninstall")
+            # User-visible onboarding notice (bookmarkable URL). Emitted as a
+            # systemMessage so the CC UI shows it to the user without sending
+            # it to the model. See the noop-install-failed branch below for the
+            # full stdout/stderr/systemMessage rationale.
+            print(json.dumps({"systemMessage":
+                "  [Token Optimizer] Dashboard daemon installed. "
+                f"URL: http://localhost:{DAEMON_PORT}/token-optimizer "
+                "(path required). Opt out: measure.py setup-daemon --uninstall"}))
         elif _daemon_ensure == "restarted":
-            print("  [Token Optimizer] Restarted the dashboard daemon.")
+            print("  [Token Optimizer] Restarted the dashboard daemon.", file=sys.stderr)
         elif _daemon_ensure == "restart-stale":
             # The dead-daemon restart came back still serving a stale version --
             # surface it instead of swallowing it silently until the throttle
@@ -45343,21 +45349,22 @@ def run_ensure_health():
                   "serving a stale version; run: measure.py setup-daemon",
                   file=sys.stderr)
         elif _daemon_ensure == "noop-install-failed":
-            # #107 named this state but routed it to stderr, where a SessionStart
-            # hook's output is swallowed (stdout is context, stderr is not --
-            # see the routing note near _install_task_scheduler_daemon). So the
-            # dashboard stayed silently dead, the exact wedge #107 set out to
-            # kill (mostly Windows: MS-Store Python, missing/policy-blocked
-            # schtasks). This ONE message is the deliberate exception to the
-            # "errors -> stderr" convention: it is not a transient error but a
-            # persistent, user-recoverable state, so it MUST reach the
-            # session-visible stdout stream. It self-clears the moment a
-            # verified-healthy daemon (or an explicit setup-daemon) removes the
-            # marker, so it can never nag past the fix.
+            # Persistent, user-recoverable state that the user MUST see.
+            # Three channels, three outcomes on a SessionStart hook:
+            #   - plain stdout  -> injected into model context every turn (tax)
+            #   - stderr        -> invisible in the CC UI on exit 0 (only in
+            #                      the Ctrl+O transcript), so the wedge goes
+            #                      silent -- the exact failure #107 fixed.
+            #   - systemMessage -> folded by the runner into the hook envelope,
+            #                      rendered to the USER as "<hook> says: ...",
+            #                      and NOT sent to the model (zero model tokens).
+            # So a systemMessage is the only channel that is both user-visible
+            # and model-silent. `measure.py doctor` also reports the marker.
             _mk_reason = _daemon_install_failed_reason()
-            print("  [Token Optimizer] Dashboard daemon self-heal disabled: "
-                  f"install failed permanently ({_mk_reason or 'reason unknown'}). "
-                  "Retry: python3 measure.py setup-daemon")
+            print(json.dumps({"systemMessage":
+                "  [Token Optimizer] Dashboard daemon self-heal disabled: "
+                f"install failed permanently ({_mk_reason or 'reason unknown'}). "
+                "Retry: python3 measure.py setup-daemon"}))
     except Exception as _e:
         print(f"  [Token Optimizer] dashboard daemon self-heal failed: {_e}", file=sys.stderr)
 
@@ -45395,7 +45402,7 @@ def run_ensure_health():
     try:
         _kw_repair = keepwarm_scheduler_repair()
         if _kw_repair == "repaired":
-            print("  [Token Optimizer] Repaired keep-warm scheduler agent.")
+            print("  [Token Optimizer] Repaired keep-warm scheduler agent.", file=sys.stderr)
     except Exception as _e:
         print(f"  [Token Optimizer] keep-warm scheduler repair failed: {_e}", file=sys.stderr)
 
@@ -45409,10 +45416,10 @@ def run_ensure_health():
         if platform.system() == "Windows":
             if not _read_config_flag("v52_windows_welcome_shown", False):
                 selfcheck_path = str(Path(__file__).resolve())
-                print("  [Token Optimizer v5.2.0] Windows support is now live.")
-                print("  v5.1.0 hooks ran via POSIX shell and failed silently on Windows;")
-                print("  v5.2.0 uses a cross-platform wrapper so everything now works.")
-                print("  Verify with: python3 \"" + selfcheck_path + "\" health-selfcheck")
+                print("  [Token Optimizer v5.2.0] Windows support is now live.", file=sys.stderr)
+                print("  v5.1.0 hooks ran via POSIX shell and failed silently on Windows;", file=sys.stderr)
+                print("  v5.2.0 uses a cross-platform wrapper so everything now works.", file=sys.stderr)
+                print("  Verify with: python3 \"" + selfcheck_path + "\" health-selfcheck", file=sys.stderr)
                 _write_config_flag("v52_windows_welcome_shown", True)
     except Exception:
         pass
@@ -45433,7 +45440,8 @@ def run_ensure_health():
                     if rewritten or removed_fossils:
                         print(
                             "  [Token Optimizer] Reconciled SessionEnd fossil hook(s) "
-                            f"(rewritten={rewritten}, removed={removed_fossils}). Restart to apply."
+                            f"(rewritten={rewritten}, removed={removed_fossils}). Restart to apply.",
+                            file=sys.stderr,
                         )
                 except Exception:
                     pass
@@ -45441,7 +45449,7 @@ def run_ensure_health():
                     cleanup_result = _cleanup_duplicate_plugin_hooks_from_settings(dry_run=False)
                     removed = cleanup_result.get("removed", 0)
                     if removed > 0:
-                        print(f"  [Token Optimizer] Removed {removed} duplicate hook(s) from settings.json. Restart to apply.")
+                        print(f"  [Token Optimizer] Removed {removed} duplicate hook(s) from settings.json. Restart to apply.", file=sys.stderr)
                     _write_config_flag("last_hook_heal_check", now)
                 else:
                     # Double-registration guard (2026-08-29): if our
@@ -45471,20 +45479,18 @@ def run_ensure_health():
                         heal_result = setup_all_hooks(dry_run=False, verbose=False)
                         added = heal_result.get("added", 0)
                         if added > 0:
-                            # Hook stdout is injected into agent context; route the
-                            # heal notice to stderr on the non-interactive path so a
-                            # human running `measure.py ensure-health` still sees it
-                            # but SessionStart context stays clean.
-                            _heal_out = sys.stderr if _running_under_hook() else sys.stdout
-                            print(f"  [Token Optimizer] Self-healed {added} missing hook(s) in settings.json. Restart to activate.", file=_heal_out)
+                            print(f"  [Token Optimizer] Self-healed {added} missing hook(s) in settings.json. Restart to activate.", file=sys.stderr)
                         elif added == 0 and not heal_result.get("error"):
                             _write_config_flag("last_hook_heal_check", now)
         except Exception:
             pass
     # v5.1: First-run welcome. Shows once when v5 is first seen on this machine.
+    # Routed to stderr so the welcome banner never enters the model's context.
     try:
         if not _read_config_flag("v5_welcome_shown", False):
-            _show_v5_welcome()
+            from contextlib import redirect_stdout as _redirect_welcome
+            with _redirect_welcome(sys.stderr):
+                _show_v5_welcome()
             _write_config_flag("v5_welcome_shown", True)
     except Exception:
         pass
@@ -45504,7 +45510,7 @@ def run_ensure_health():
         try:
             _stale_fixed = _fix_stale_settings_paths()
             if _stale_fixed:
-                print(f"  [Token Optimizer] Fixed {_stale_fixed} stale plugin path(s) in settings.json")
+                print(f"  [Token Optimizer] Fixed {_stale_fixed} stale plugin path(s) in settings.json", file=sys.stderr)
         except Exception as _e:
             print(f"  [Token Optimizer] stale path fix failed: {_e}", file=sys.stderr)
     # Lift an existing version-pinned statusLine onto the update-surviving
@@ -45515,7 +45521,7 @@ def run_ensure_health():
     if not _is_codex:
         try:
             if _migrate_statusline_to_stable_path():
-                print("  [Token Optimizer] Migrated statusLine to stable path")
+                print("  [Token Optimizer] Migrated statusLine to stable path", file=sys.stderr)
         except Exception as _e:
             print(f"  [Token Optimizer] statusLine path migration failed: {_e}", file=sys.stderr)
         # Same class for the keep-warm launchd agent: an existing plist pinned to a
@@ -45523,7 +45529,7 @@ def run_ensure_health():
         # dashboard's savings. Lift it onto the clone path (macOS-only in practice).
         try:
             if _heal_keepwarm_plist_path():
-                print("  [Token Optimizer] Healed keep-warm agent to stable path")
+                print("  [Token Optimizer] Healed keep-warm agent to stable path", file=sys.stderr)
         except Exception as _e:
             print(f"  [Token Optimizer] keep-warm path heal failed: {_e}", file=sys.stderr)
         # issue #107, same class again: a Windows install made by an older build
@@ -45533,7 +45539,7 @@ def run_ensure_health():
         # can never resurrect a declined/uninstalled/failed daemon.
         try:
             if _heal_windows_console_flash():
-                print("  [Token Optimizer] Healed Windows daemon launcher, console flashing removed")
+                print("  [Token Optimizer] Healed Windows daemon launcher, console flashing removed", file=sys.stderr)
         except Exception as _e:
             print(f"  [Token Optimizer] Windows console-flash heal failed: {_e}", file=sys.stderr)
     # Remove malformed hook commands (subshell patterns, double-$HOME paths).
@@ -45542,7 +45548,7 @@ def run_ensure_health():
         try:
             _malformed_fixed = _fix_malformed_hook_commands()
             if _malformed_fixed:
-                print(f"  [Token Optimizer] Removed {_malformed_fixed} malformed hook(s) from settings.json. Restart to apply.")
+                print(f"  [Token Optimizer] Removed {_malformed_fixed} malformed hook(s) from settings.json. Restart to apply.", file=sys.stderr)
         except Exception as _e:
             print(f"  [Token Optimizer] malformed hook fix failed: {_e}", file=sys.stderr)
     # Plugin cleanup is available as `measure.py plugin-cleanup` but NOT auto-run.
@@ -45675,7 +45681,8 @@ def run_ensure_health():
                                 print(
                                     "  [Token Optimizer] Quality statusline enabled "
                                     "(context % + quality score). "
-                                    "Opt out: measure.py setup-quality-bar --uninstall"
+                                    "Opt out: measure.py setup-quality-bar --uninstall",
+                                    file=sys.stderr,
                                 )
                     else:
                         statusline_cmd = (settings.get("statusLine") or {}).get("command", "") or ""
@@ -45688,7 +45695,8 @@ def run_ensure_health():
                         if has_statusline and not statusline_is_ours and has_cache_hook:
                             print(
                                 "  [Token Optimizer] Statusline was replaced (e.g. /statusline). "
-                                "Auto-restored. Opt out: measure.py setup-quality-bar --uninstall"
+                                "Auto-restored. Opt out: measure.py setup-quality-bar --uninstall",
+                                file=sys.stderr,
                             )
                             setup_quality_bar(force=True, quiet=True)
                         elif not has_statusline or (has_statusline and not has_cache_hook):
@@ -45739,13 +45747,15 @@ def run_ensure_health():
         if (_is_running_from_plugin_cache()
                 and not already_shown
                 and not qb_disabled):
-            print("")
-            print("  [Token Optimizer] First-run tip: enable auto-update for this marketplace")
-            print("  so you get bug fixes automatically. In Claude Code:")
-            print("")
-            print("      /plugin  ->  Marketplaces  ->  alexgreensh-token-optimizer")
-            print("               ->  Enable auto-update")
-            print("")
+            # User-visible onboarding tip. Emitted as a systemMessage so the
+            # CC UI shows it to the user without sending it to the model.
+            # See the noop-install-failed branch in the daemon block above for
+            # the full stdout/stderr/systemMessage rationale.
+            print(json.dumps({"systemMessage":
+                "  [Token Optimizer] First-run tip: enable auto-update for this marketplace\n"
+                "  so you get bug fixes automatically. In Claude Code:\n\n"
+                "      /plugin  ->  Marketplaces  ->  alexgreensh-token-optimizer\n"
+                "               ->  Enable auto-update"}))
             _write_config_flag("autoupdate_nudge_shown", True)
     except Exception:
         pass

@@ -903,7 +903,7 @@ def test_transient_install_failure_does_not_arm_the_marker(m, monkeypatch):
     monkeypatch.setattr(m, "_normalized_platform", lambda: "Darwin")
     monkeypatch.setattr(m, "_daemon_service_installed", lambda s=None: False)
     monkeypatch.setattr(m, "_verify_daemon_port", lambda **k: False)
-    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda: False)
+    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda **kw: False)
     assert not m.DAEMON_INSTALL_FAILED_BREADCRUMB.exists()
     assert m._ensure_dashboard_daemon(force=True) == "install-failed"
     assert not m.DAEMON_INSTALL_FAILED_BREADCRUMB.exists(), (
@@ -924,7 +924,7 @@ def test_installer_exception_does_not_arm_the_marker(m, monkeypatch):
     monkeypatch.setattr(m, "_normalized_platform", lambda: "Windows")
     monkeypatch.setattr(m, "_daemon_service_installed", lambda s=None: False)
     monkeypatch.setattr(m, "_verify_daemon_port", lambda **k: False)
-    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda: True)
+    monkeypatch.setattr(m, "_ensure_dashboard_file", lambda **kw: True)
     monkeypatch.setattr(m, "_get_or_create_daemon_token", lambda: "t")
 
     def _boom(**k):
