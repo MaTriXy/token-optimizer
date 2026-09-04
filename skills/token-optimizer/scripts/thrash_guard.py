@@ -77,9 +77,10 @@ INLINE_SCRIPT_MIN_CHARS = 300
 _VALID_SESSION_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 _NUDGE_TEMPLATE = (
-    "[Token Optimizer: `{label}` has now run {streak} times this session with "
-    "byte-identical output. Re-running it will not change the result; either "
-    "change the approach, or state plainly what is blocking you.]"
+    "[Token Optimizer: `{label}` has run {streak} times this session with "
+    "byte-identical output; files changed since last run: {files_changed}. "
+    "Before running again, state what you expect to differ; prefer a "
+    "targeted edit over rewriting the whole file.]"
 )
 
 _BURN_NUDGE_TEMPLATE = (
@@ -428,7 +429,8 @@ def check(
 
             if fire_identical:
                 return _NUDGE_TEMPLATE.format(
-                    label=_sanitize_label(safe_command), streak=streak
+                    label=_sanitize_label(safe_command), streak=streak,
+                    files_changed="yes" if workspace_changed else "none",
                 )
             if fire_burn:
                 return _BURN_NUDGE_TEMPLATE.format(

@@ -228,7 +228,8 @@ def test_hook_appends_nudge_and_never_denies():
     assert updated is not None, "nudge run must emit updatedToolOutput"
     assert updated.startswith(out), "original output must be preserved verbatim"
     assert "byte-identical output" in updated
-    assert "change the approach" in updated
+    assert "state what you expect to differ" in updated
+    assert "files changed since last run: none" in updated
 
 
 def test_hook_stays_silent_below_threshold():
@@ -387,6 +388,20 @@ def test_truncating_filter_does_not_block_other_nudges(guard):
     nudge = guard.check(cmd, "Error: c\nline 3\n", stderr="")
     assert nudge is not None
     assert "failed 3 times" in nudge
+
+
+def test_identical_nudge_wording_is_factual_and_actionable(guard):
+    """The nudge states what is known and guides the next action."""
+    out = "same\n"
+    guard.check("make all", out)
+    guard.check("make all", out)
+    nudge = guard.check("make all", out)
+    assert nudge is not None
+    assert "has run 3 times" in nudge
+    assert "files changed since last run: none" in nudge
+    assert "state what you expect to differ" in nudge
+    assert "change the approach" not in nudge
+    assert "\n" not in nudge  # one line
 
 
 def test_edit_between_runs_resets_identical_streak(guard):
