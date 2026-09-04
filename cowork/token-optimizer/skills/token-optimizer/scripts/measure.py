@@ -45331,10 +45331,14 @@ def run_ensure_health():
     try:
         _daemon_ensure = _ensure_dashboard_daemon()
         if _daemon_ensure == "installed":
-            print("  [Token Optimizer] Dashboard daemon installed. "
-                  f"URL: http://localhost:{DAEMON_PORT}/token-optimizer "
-                  "(path required). Opt out: measure.py setup-daemon --uninstall",
-                  file=sys.stderr)
+            # User-visible onboarding notice (bookmarkable URL). Emitted as a
+            # systemMessage so the CC UI shows it to the user without sending
+            # it to the model. See the noop-install-failed branch below for the
+            # full stdout/stderr/systemMessage rationale.
+            print(json.dumps({"systemMessage":
+                "  [Token Optimizer] Dashboard daemon installed. "
+                f"URL: http://localhost:{DAEMON_PORT}/token-optimizer "
+                "(path required). Opt out: measure.py setup-daemon --uninstall"}))
         elif _daemon_ensure == "restarted":
             print("  [Token Optimizer] Restarted the dashboard daemon.", file=sys.stderr)
         elif _daemon_ensure == "restart-stale":
@@ -45345,14 +45349,22 @@ def run_ensure_health():
                   "serving a stale version; run: measure.py setup-daemon",
                   file=sys.stderr)
         elif _daemon_ensure == "noop-install-failed":
-            # Persistent, user-recoverable state. Routed to stderr so it
-            # does not bloat the model's context every turn; the user
-            # sees it on the terminal or via `measure.py doctor`.
+            # Persistent, user-recoverable state that the user MUST see.
+            # Three channels, three outcomes on a SessionStart hook:
+            #   - plain stdout  -> injected into model context every turn (tax)
+            #   - stderr        -> invisible in the CC UI on exit 0 (only in
+            #                      the Ctrl+O transcript), so the wedge goes
+            #                      silent -- the exact failure #107 fixed.
+            #   - systemMessage -> folded by the runner into the hook envelope,
+            #                      rendered to the USER as "<hook> says: ...",
+            #                      and NOT sent to the model (zero model tokens).
+            # So a systemMessage is the only channel that is both user-visible
+            # and model-silent. `measure.py doctor` also reports the marker.
             _mk_reason = _daemon_install_failed_reason()
-            print("  [Token Optimizer] Dashboard daemon self-heal disabled: "
-                  f"install failed permanently ({_mk_reason or 'reason unknown'}). "
-                  "Retry: python3 measure.py setup-daemon",
-                  file=sys.stderr)
+            print(json.dumps({"systemMessage":
+                "  [Token Optimizer] Dashboard daemon self-heal disabled: "
+                f"install failed permanently ({_mk_reason or 'reason unknown'}). "
+                "Retry: python3 measure.py setup-daemon"}))
     except Exception as _e:
         print(f"  [Token Optimizer] dashboard daemon self-heal failed: {_e}", file=sys.stderr)
 
@@ -45735,13 +45747,15 @@ def run_ensure_health():
         if (_is_running_from_plugin_cache()
                 and not already_shown
                 and not qb_disabled):
-            print("", file=sys.stderr)
-            print("  [Token Optimizer] First-run tip: enable auto-update for this marketplace", file=sys.stderr)
-            print("  so you get bug fixes automatically. In Claude Code:", file=sys.stderr)
-            print("", file=sys.stderr)
-            print("      /plugin  ->  Marketplaces  ->  alexgreensh-token-optimizer", file=sys.stderr)
-            print("               ->  Enable auto-update", file=sys.stderr)
-            print("", file=sys.stderr)
+            # User-visible onboarding tip. Emitted as a systemMessage so the
+            # CC UI shows it to the user without sending it to the model.
+            # See the noop-install-failed branch in the daemon block above for
+            # the full stdout/stderr/systemMessage rationale.
+            print(json.dumps({"systemMessage":
+                "  [Token Optimizer] First-run tip: enable auto-update for this marketplace\n"
+                "  so you get bug fixes automatically. In Claude Code:\n\n"
+                "      /plugin  ->  Marketplaces  ->  alexgreensh-token-optimizer\n"
+                "               ->  Enable auto-update"}))
             _write_config_flag("autoupdate_nudge_shown", True)
     except Exception:
         pass

@@ -330,9 +330,11 @@ def test_marker_reason_helper(m):
 # ---------------------------------------------------------------------------
 def test_ensure_health_surfaces_the_wedge():
     """run_ensure_health must print a one-liner when the marker is suppressing
-    the daemon, naming the exact command that clears it. The message routes to
-    stderr so it does not inflate the model's context every turn; the user
-    sees it on the terminal or via `measure.py doctor`."""
+    the daemon, naming the exact command that clears it. The message is emitted
+    as a ``{"systemMessage": ...}`` JSON object on stdout so the CC UI shows it
+    to the user (rendered as "<hook> says: ...") WITHOUT sending it to the
+    model. stderr would be invisible in the CC UI on exit 0 (only in the
+    Ctrl+O transcript), which is the exact silence #107 set out to kill."""
     src = _measure_source()
     idx = src.index("def run_ensure_health")
     body = src[idx:]
@@ -345,9 +347,14 @@ def test_ensure_health_surfaces_the_wedge():
     assert "setup-daemon" in window, (
         "the suppression one-liner must name the clearing command"
     )
-    assert "file=sys.stderr" in window, (
-        "the suppression one-liner must route to stderr so it does not "
-        "enter the model's context on every turn"
+    assert "systemMessage" in window, (
+        "the suppression one-liner must be emitted as a systemMessage JSON "
+        "object so the CC UI shows it to the user without sending it to the "
+        "model -- stderr is invisible in the CC UI on exit 0"
+    )
+    assert "file=sys.stderr" not in window, (
+        "the suppression one-liner must NOT route to stderr -- stderr is "
+        "invisible in the CC UI on exit 0, which makes the wedge silent"
     )
     assert "_daemon_install_failed_reason" in window, (
         "the one-liner should include the recorded failure reason"
