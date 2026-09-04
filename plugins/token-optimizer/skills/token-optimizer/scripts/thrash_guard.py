@@ -236,12 +236,13 @@ def _looks_like_failure(
         return exit_code != 0
     if not stderr and not stdout:
         return False
-    # Cheap pre-screen: if neither text contains a colon (all the patterns
-    # require a colon or a specific keyword), skip the heavy import. This
-    # avoids importing bash_compress for the common case of clean short
-    # output, which is the hot path.
+    # Cheap pre-screen: if neither scanned text contains a colon (all the
+    # patterns require a colon or a specific keyword), skip the heavy import.
+    # This avoids importing bash_compress for the common case of clean short
+    # output, which is the hot path. Stdout is only scanned when redirected,
+    # so it only participates in the pre-screen in that case.
     has_potential = False
-    for text in (stderr, stdout):
+    for text in (stderr, stdout if redirected else ""):
         if text and (":" in text or "Traceback" in text or "FAILED" in text
                       or "Error" in text or "error" in text
                       or "fatal" in text or "panic" in text
@@ -331,9 +332,11 @@ def check(
             fresh = not prior or now - float(prior.get("last_ts") or 0) > STALE_SECONDS
             # An edit between two runs makes byte-identical output
             # meaningless as a stuck-loop signal: the workspace changed, so
-            # the streak restarts.
+            # the streak restarts. Only the identical-output branch cares,
+            # so the activity-log lookup runs only there.
             workspace_changed = (
                 bool(prior) and not fresh
+                and prior.get("output_hash") == out_h
                 and _workspace_changed_since(store, float(prior.get("last_ts") or 0))
             )
 

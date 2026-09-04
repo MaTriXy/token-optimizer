@@ -296,7 +296,7 @@ def test_no_heredoc_unchanged():
 
 # A successful numeric program whose output happens to contain error-looking
 # lines. "Error: 0.000835" is a metric, not a failure.
-_PI_MONTE_CARLO_OUTPUT = (
+_PI_ESTIMATE_OUTPUT = (
     "Estimated pi: 3.14\n"
     "Error: 0.000835\n"
     "Accuracy: 99.97%\n"
@@ -304,18 +304,18 @@ _PI_MONTE_CARLO_OUTPUT = (
 
 
 def test_numeric_error_metric_is_not_a_failure(guard):
-    """The Monte-Carlo output must never fire the burn nudge, even after 3 runs."""
+    """A successful numeric program's output must never fire the burn nudge."""
     cmd = "python3 estimate_pi.py"
     nudge = None
     for _ in range(3):
-        nudge = guard.check(cmd, _PI_MONTE_CARLO_OUTPUT, stderr="")
+        nudge = guard.check(cmd, _PI_ESTIMATE_OUTPUT, stderr="")
     assert nudge is None or "failed" not in nudge
 
 
 def test_numeric_error_metric_not_flagged_even_redirected(guard):
     """Even with 2>&1, an error keyword followed only by digits is a metric."""
     assert guard._looks_like_failure(
-        _PI_MONTE_CARLO_OUTPUT, "", redirected=True) is False
+        _PI_ESTIMATE_OUTPUT, "", redirected=True) is False
 
 
 def test_known_exit_code_is_the_sole_failure_signal(guard):
