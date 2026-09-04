@@ -39,6 +39,7 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -175,10 +176,10 @@ EXPECTED_BY_TOOL = {
     "Glob": ["archive_result", "context_intel", "quality_cache"],
     "Grep": ["archive_result", "context_intel", "quality_cache"],
     "Agent": ["archive_result", "quality_cache"],
-    "Edit": ["read_cache_invalidate", "quality_cache"],
-    "Write": ["read_cache_invalidate", "quality_cache"],
-    "MultiEdit": ["read_cache_invalidate", "quality_cache"],
-    "NotebookEdit": ["read_cache_invalidate", "quality_cache"],
+    "Edit": ["context_intel", "read_cache_invalidate", "quality_cache"],
+    "Write": ["context_intel", "read_cache_invalidate", "quality_cache"],
+    "MultiEdit": ["context_intel", "read_cache_invalidate", "quality_cache"],
+    "NotebookEdit": ["context_intel", "read_cache_invalidate", "quality_cache"],
     "mcp__server__thing": ["archive_result", "context_intel", "quality_cache"],
 }
 
@@ -471,8 +472,8 @@ def test_budget_exhaustion_skip_is_visible(monkeypatch, tmp_path, capsys):
 
 def test_deadline_budget_is_shared_not_per_subcommand(monkeypatch, tmp_path):
     """One deadline for the whole runner, seeded with the number of subcommands
-    that will ACTUALLY run for this tool -- an Edit runs two, not five, and must
-    get half the remaining budget each rather than a fifth."""
+    that will ACTUALLY run for this tool -- an Edit runs three, not five, and
+    must get a third of the remaining budget each rather than a fifth."""
     runner = _load_runner(monkeypatch, tmp_path)
     _no_real_deadline(monkeypatch, runner)
     _record_subcommands(monkeypatch, runner)
@@ -487,7 +488,7 @@ def test_deadline_budget_is_shared_not_per_subcommand(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "_runner_budget", _spy)
     monkeypatch.setattr(runner, "_read_hook_input", lambda: {"tool_name": "Edit"})
     runner.main()
-    assert seeds == [2], f"budget seeded with {seeds}, expected the 2 matching subcommands"
+    assert seeds == [3], f"budget seeded with {seeds}, expected the 3 matching subcommands"
 
 
 def test_runner_consumes_hook_runtime_per_entry_budgets(monkeypatch, tmp_path):
@@ -1019,3 +1020,122 @@ def test_delegation_restores_argv_even_when_the_gate_raises(monkeypatch, tmp_pat
         runner._delegate_to_quality_cache_gate({"session_id": "s"})
     assert sys.argv == argv_before
     assert quality_cache_gate._read_stdin_payload is reader_before
+
+
+# --------------------------------------------------------------------------- #
+# PostToolUseFailure wiring and the edit-activity pipeline
+# --------------------------------------------------------------------------- #
+
+
+def _fresh_store_modules():
+    """Drop cached store-side modules so env-var sandboxing takes effect."""
+    for name in ("session_store", "plugin_env", "context_intel",
+                 "activity_tracker", "thrash_guard"):
+        sys.modules.pop(name, None)
+
+
+def test_hooks_json_registers_posttoolusefailure_for_bash():
+    cfg = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))
+    entries = cfg["hooks"].get("PostToolUseFailure")
+    assert entries, "PostToolUseFailure must be registered: a failed Bash call is delivered on this event, not PostToolUse"
+    (entry,) = entries
+    assert entry["matcher"] == "Bash"
+    command = entry["hooks"][0]["command"]
+    assert "hooks/posttooluse_runner.py" in command
+
+
+def test_write_payload_records_an_edit_activity_row(monkeypatch, tmp_path):
+    """A Write tool call must land an 'edit' row in the session activity log.
+
+    The intervening-edit reset in the thrash guard reads that log; this pins
+    the wiring (runner -> context_intel -> activity_log), not just the query.
+    """
+    monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", str(tmp_path / "data"))
+    _fresh_store_modules()
+    runner = _load_runner(monkeypatch, tmp_path)
+    _no_real_deadline(monkeypatch, runner)
+    sid = "editrow-" + uuid.uuid4().hex[:8]
+    monkeypatch.setattr(runner, "_read_hook_input", lambda: {
+        "hook_event_name": "PostToolUse",
+        "session_id": sid,
+        "tool_name": "Write",
+        "tool_use_id": "toolu_01W",
+        "tool_input": {"file_path": "/tmp/x.py", "content": "print(1)\n"},
+        "tool_response": "File created successfully",
+    })
+    assert runner.main() == 0
+
+    from session_store import SessionStore
+    store = SessionStore(sid)
+    try:
+        rows = store._connect().execute(
+            "SELECT tool_name, tool_bucket FROM activity_log"
+        ).fetchall()
+    finally:
+        store.close()
+    assert ("Write", "edit") in [tuple(r) for r in rows], (
+        f"expected an edit row from the Write payload, got {[tuple(r) for r in rows]}")
+
+
+def test_posttooluse_failure_feeds_the_thrash_guard(monkeypatch, tmp_path, capsys):
+    """A failed Bash call on PostToolUseFailure drives the burn nudge end to
+    end: the exit code is authoritative, the nudge goes out as
+    additionalContext, and nothing is emitted as updatedToolOutput."""
+    monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", str(tmp_path / "data"))
+    _fresh_store_modules()
+    runner = _load_runner(monkeypatch, tmp_path)
+    _no_real_deadline(monkeypatch, runner)
+    sid = "failwire-" + uuid.uuid4().hex[:8]
+
+    def payload(n):
+        return {
+            "hook_event_name": "PostToolUseFailure",
+            "session_id": sid,
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_01F",
+            "tool_input": {"command": "make check"},
+            "error": f"Exit code 1\nattempt {n}\n",
+        }
+
+    for n in range(3):
+        monkeypatch.setattr(runner, "_read_hook_input", lambda n=n: payload(n))
+        assert runner.main() == 0
+    out = capsys.readouterr().out
+    assert "updatedToolOutput" not in out
+    doc = json.loads(out)
+    nudge = doc["hookSpecificOutput"]["additionalContext"]
+    assert "failed 3 times" in nudge
+
+
+def test_posttooluse_failure_stays_silent_without_a_nudge(monkeypatch, tmp_path, capsys):
+    """One failure emits nothing: no nudge, no replacement output."""
+    monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", str(tmp_path / "data"))
+    _fresh_store_modules()
+    runner = _load_runner(monkeypatch, tmp_path)
+    _no_real_deadline(monkeypatch, runner)
+    monkeypatch.setattr(runner, "_read_hook_input", lambda: {
+        "hook_event_name": "PostToolUseFailure",
+        "session_id": "failquiet-" + uuid.uuid4().hex[:8],
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_01Q",
+        "tool_input": {"command": "make check"},
+        "error": "Exit code 1\nonly one failure\n",
+    })
+    assert runner.main() == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_posttooluse_failure_ignores_unparseable_error(monkeypatch, tmp_path, capsys):
+    runner = _load_runner(monkeypatch, tmp_path)
+    _no_real_deadline(monkeypatch, runner)
+    monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", str(tmp_path / "data"))
+    _fresh_store_modules()
+    monkeypatch.setattr(runner, "_read_hook_input", lambda: {
+        "hook_event_name": "PostToolUseFailure",
+        "session_id": "failbad-" + uuid.uuid4().hex[:8],
+        "tool_name": "Bash",
+        "tool_input": {"command": "make check"},
+        "error": "something unexpected",
+    })
+    assert runner.main() == 0
+    assert capsys.readouterr().out.strip() == ""

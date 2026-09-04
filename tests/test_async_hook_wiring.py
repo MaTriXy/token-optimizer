@@ -131,6 +131,11 @@ EXPECTED_ASYNC = {
         "Bash|Read|Glob|Grep|Agent|Edit|Write|MultiEdit|NotebookEdit|mcp__.*",
         "posttooluse_runner.py",
     ): False,
+    # A failed Bash call is delivered on PostToolUseFailure, not PostToolUse.
+    # Sync (not async): the nudge rides additionalContext, which an async
+    # hook would discard, and the thrash guard's streak write must land
+    # before the next run of the same command.
+    ("PostToolUseFailure", "Bash", "posttooluse_runner.py"): False,
     ("PostCompact", None, "quality-cache --force"): False,
     ("CwdChanged", None, "read_cache.py --clear"): False,
 }

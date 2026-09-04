@@ -128,6 +128,9 @@ EXPECTED = {
     # for a script-mode install that invokes those entry points directly (pinned
     # by the over-budget parametrization below, which is unchanged).
     ("PostToolUse", "posttooluse_runner", ""): BUDGET_POSTTOOL_RUNNER,
+    # The failure event shares the runner; its only work is one thrash-guard
+    # streak write, so it gets the same runner budget as PostToolUse.
+    ("PostToolUseFailure", "posttooluse_runner", ""): BUDGET_POSTTOOL_RUNNER,
     ("PreCompact", "measure", "dynamic-compact-instructions"): BUDGET_POSTTOOL_MEASURE,
     ("PreCompact", "measure", "compact-capture"): BUDGET_STOP,
     ("PreCompact", "read_cache", "--clear"): BUDGET_POSTTOOL_MEASURE,
