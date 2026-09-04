@@ -46,9 +46,12 @@ except Exception:
     _CRED_PATTERNS_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
-# Minimum size gate: outputs below this are never compressed.
+# Minimum size gate: outputs below this are never compressed. The gate is on
+# line count, not bytes: build/test tools (valgrind, integration runners)
+# emit 30-40+ short boilerplate lines that add up to only ~1.5-2 KB, which a
+# byte gate would skip despite being highly compressible.
 # ---------------------------------------------------------------------------
-_MIN_COMPRESS_BYTES = 2048  # ~2 KB
+_MIN_COMPRESS_LINES = 25
 
 # ---------------------------------------------------------------------------
 # Head/tail preservation window.
@@ -98,13 +101,13 @@ _BUILD_TEST_COMMANDS: dict[str, frozenset[str] | None] = {
     "tox": None, "nox": None,
     # Ruby
     "rspec": None, "rake": None,
+    # Python project/dependency manager (uv run pytest, uv pip install, ...)
+    "uv": frozenset({"run", "sync", "pip"}),
+    # Debuggers / instrumentation
+    "valgrind": None,
+    "gdb": frozenset({"-batch"}),
+    "ctest": None,
 }
-
-# Python -m module patterns that are build/test/run.
-_PYTHON_M_BUILD_MODULES = frozenset({
-    "pytest", "unittest", "tox", "nox", "mypy", "ruff",
-    "pip", "setuptools", "build", "wheel",
-})
 
 # F5: command-name keywords that make a command eligible for the shape
 # fallback. The shape fallback catches unknown build/test tools by output
@@ -352,11 +355,14 @@ def classify(command: str) -> bool:
         if "/" in cmd:
             cmd = cmd.rsplit("/", 1)[-1]
 
-        # Python -m <module> (handles python, python3, python2, python3.11, etc.)
-        if cmd.startswith("python") and subcmd == "-m":
-            if cmd_start + 2 < len(tokens):
-                module = tokens[cmd_start + 2]
-                return module in _PYTHON_M_BUILD_MODULES
+        # Python: running a module (-m <anything>) or a script (first
+        # non-flag argument ending in .py) is a build/test/run invocation.
+        if cmd.startswith("python"):
+            if subcmd == "-m":
+                return cmd_start + 2 < len(tokens)
+            if (subcmd and not subcmd.startswith("-")
+                    and subcmd.endswith(".py")):
+                return True
             return False
 
         # Direct command match
@@ -430,13 +436,13 @@ def classify_by_shape(output: str, command: str = "") -> bool:
     ``./deploy.sh`` are never shape-compressed. Never raises.
     """
     try:
-        if not output or len(output) < _MIN_COMPRESS_BYTES:
+        if not output:
             return False
         # F5: gate on command name to avoid compressing side-effecting commands
         if command and not _command_eligible_for_shape_fallback(command):
             return False
         lines = output.splitlines()
-        if len(lines) < 10:
+        if len(lines) < _MIN_COMPRESS_LINES:
             return False
         match_count = 0
         for line in lines:
@@ -534,6 +540,55 @@ def _collapse_near_identical_warnings(lines: list[str]) -> list[str]:
     return result
 
 
+_TRACEBACK_FILE_RE = re.compile(r"^\s+File ")
+
+
+def _collapse_traceback_frames(lines: list[str]) -> list[str]:
+    """Collapse the middle frames of each Python traceback block.
+
+    A traceback block is the ``Traceback (most recent call last):`` header
+    plus the consecutive ``  File ...`` frames (each frame includes its
+    source and caret lines). The header, the first frame, the last two
+    frames, and every non-frame line (the exception text) are kept; frames
+    in between are replaced by a count marker. Exception lines match the
+    error-line patterns and are preserved by the caller regardless.
+    """
+    if not lines:
+        return list(lines)
+    result: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        if "Traceback (most recent call last)" not in lines[i]:
+            result.append(lines[i])
+            i += 1
+            continue
+        header = lines[i]
+        i += 1
+        frames: list[list[str]] = []
+        while i < n and _TRACEBACK_FILE_RE.match(lines[i]):
+            frame = [lines[i]]
+            i += 1
+            while (i < n
+                   and lines[i][:1] in (" ", "\t")
+                   and not _TRACEBACK_FILE_RE.match(lines[i])):
+                frame.append(lines[i])
+                i += 1
+            frames.append(frame)
+        result.append(header)
+        if len(frames) > 3:
+            for frame in frames[:1]:
+                result.extend(frame)
+            for frame in frames[-2:]:
+                result.extend(frame)
+            result.append(
+                f"  ... [{len(frames) - 3} traceback frames dropped] ...")
+        else:
+            for frame in frames:
+                result.extend(frame)
+    return result
+
+
 def _find_distinct_error_lines(lines: list[str]) -> list[str]:
     """Find every DISTINCT error line (deduplicated by exact text).
 
@@ -582,7 +637,7 @@ def compress(command: str, output: str) -> str | None:
       - Appending the thrash nudge
     """
     try:
-        if not output or len(output) < _MIN_COMPRESS_BYTES:
+        if not output:
             return None
 
         # F7: fail-closed. If credential_patterns could not be imported at
@@ -592,7 +647,7 @@ def compress(command: str, output: str) -> str | None:
             return None
 
         lines = output.splitlines()
-        if len(lines) < 10:
+        if len(lines) < _MIN_COMPRESS_LINES:
             return None
 
         # --- single O(n) pass: credential scan + noise drop + error/summary ---
@@ -643,6 +698,7 @@ def compress(command: str, output: str) -> str | None:
         # --- collapse repetition (each pass is O(n) over kept_lines) ---
         collapsed = _collapse_identical_runs(kept_lines)
         collapsed = _collapse_near_identical_warnings(collapsed)
+        collapsed = _collapse_traceback_frames(collapsed)
 
         # If we didn't actually reduce the line count meaningfully, bail out
         if len(collapsed) >= len(lines) * 0.85 and noise_dropped < len(lines) * 0.10:

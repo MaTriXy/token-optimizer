@@ -46,6 +46,11 @@ import time
 from pathlib import Path
 
 
+# Prefix Claude Code puts on a Bash tool_response delivered as a string when
+# the command exited non-zero. The remainder of the string is the output.
+_EXIT_CODE_RESPONSE_RE = re.compile(r"^Error: Exit code (\d+)\s*\n?")
+
+
 def main() -> None:
     """Read PostToolUse hook input, compress Bash stdout if eligible."""
     try:
@@ -69,19 +74,34 @@ def main() -> None:
     if tool_name != "Bash":
         return
 
-    # Extract tool response
+    # Extract tool response. Claude Code delivers a non-zero-exit Bash result
+    # as a plain string ("Error: Exit code N\n<output>"), not a dict. Parse
+    # that form here, once, so every consumer below (thrash guard, build/test
+    # compressor) sees the same stdout and a known exit code.
     tool_response = payload.get("tool_response", {})
-    if not tool_response or not isinstance(tool_response, dict):
-        return
+    exit_code: int | None = None
+    if isinstance(tool_response, str):
+        m = _EXIT_CODE_RESPONSE_RE.match(tool_response)
+        if m is None:
+            return
+        exit_code = int(m.group(1))
+        stdout = tool_response[m.end():]
+        stderr = ""
+    else:
+        if not tool_response or not isinstance(tool_response, dict):
+            return
 
-    # Skip interrupted or image output
-    if tool_response.get("interrupted", False):
-        return
-    if tool_response.get("isImage", False):
-        return
+        # Skip interrupted or image output
+        if tool_response.get("interrupted", False):
+            return
+        if tool_response.get("isImage", False):
+            return
 
-    stdout = tool_response.get("stdout", "") or ""
-    stderr = tool_response.get("stderr", "") or ""
+        stdout = tool_response.get("stdout", "") or ""
+        stderr = tool_response.get("stderr", "") or ""
+        structured_exit = tool_response.get("exit_code")
+        if isinstance(structured_exit, int):
+            exit_code = structured_exit
 
     # Get the command that was run
     tool_input = payload.get("tool_input", {})
@@ -102,7 +122,8 @@ def main() -> None:
     _nudge = None
     try:
         from thrash_guard import check as _thrash_check
-        _nudge = _thrash_check(command, stdout, stderr=stderr)
+        _nudge = _thrash_check(command, stdout, stderr=stderr,
+                               exit_code=exit_code)
     except Exception:
         pass  # Fail open: the raw output stands
 
@@ -130,17 +151,17 @@ def main() -> None:
             # compress PostToolUse: the command already ran, we only compress
             # the captured stdout. Fail-open at every step.
             #
-            # Performance guard: the size gate and the
+            # Performance guard: the line-count gate and the
             # command-string classify() must run BEFORE importing
             # build_output_compress, so small non-read-only commands (the
-            # common case) pay no import cost.
-            if stdout and len(stdout) >= 2048:
+            # common case) pay no import cost. The gate mirrors
+            # build_output_compress._MIN_COMPRESS_LINES without the import.
+            if stdout and len(stdout.splitlines()) >= 25:
                 try:
                     # Stage 1: command-string classification (no import needed
                     # for the check itself; classify() is a pure function that
                     # only uses shlex + a static dict).
                     from build_output_compress import classify as _build_classify
-                    from build_output_compress import _MIN_COMPRESS_BYTES
                     _is_build = _build_classify(command)
                     # Stage 2: shape fallback only if command didn't match and
                     # the output is large enough to justify the scan.

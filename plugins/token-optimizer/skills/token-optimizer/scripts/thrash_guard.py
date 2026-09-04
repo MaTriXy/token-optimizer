@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import time
 
 # Fire once a command has produced byte-identical output this many times in
@@ -76,9 +77,10 @@ INLINE_SCRIPT_MIN_CHARS = 300
 _VALID_SESSION_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 _NUDGE_TEMPLATE = (
-    "[Token Optimizer: `{label}` has now run {streak} times this session with "
-    "byte-identical output. Re-running it will not change the result; either "
-    "change the approach, or state plainly what is blocking you.]"
+    "[Token Optimizer: `{label}` has run {streak} times this session with "
+    "byte-identical output; files changed since last run: {files_changed}. "
+    "Before running again, state what you expect to differ; prefer a "
+    "targeted edit over rewriting the whole file.]"
 )
 
 _BURN_NUDGE_TEMPLATE = (
@@ -155,25 +157,89 @@ def _sanitize_label(command: str) -> str:
     return label
 
 
-def _looks_like_failure(stdout: str, stderr: str) -> bool:
-    """Detect failure from stdout/stderr when no exit code is available.
+# A line that is an error keyword followed only by digits/dots is a metric
+# (e.g. "Error: 0.000835" from a numeric accuracy report), not a failure.
+_NUMERIC_ERROR_LINE_RE = re.compile(r"^\s*error\s*:\s*[\d.]+\s*$", re.IGNORECASE)
 
-    Reuses the ``_ERROR_STDERR_PATTERNS`` list from ``bash_compress`` (the
-    same patterns the compression pipeline uses to skip failure output),
-    applied to both stderr and stdout. When stderr is redirected to stdout
-    (2>&1), error lines appear on stdout, so both must be checked.
+# Final pipeline stages whose visible output is identical by construction:
+# a truncating filter shows the same slice of its input regardless of whether
+# the underlying data changed, so byte-identical output is not evidence of a
+# stuck loop.
+_TRUNCATING_FILTER_CMDS = frozenset({"tail", "head", "wc"})
 
-    Fast path: when there is no stderr and the stdout is short and contains
-    no error-like keyword, return False without importing ``bash_compress``
-    (which is a heavy module). This keeps the hot path — short, clean output
-    — at the same cost as the existing identical-output streak check.
+
+def _ends_with_truncating_filter(command: str) -> bool:
+    """True when the command's last pipeline stage truncates its output.
+
+    ``progress.log | tail -10`` is byte-identical on every run no matter how
+    the log changed underneath, so its output can never be evidence of a
+    stuck loop. Counts (``wc``, ``grep -c``) behave the same way.
     """
+    try:
+        last_stage = command.rstrip().split("|")[-1].strip()
+        tokens = shlex.split(last_stage)
+        if not tokens:
+            return False
+        cmd = tokens[0].rsplit("/", 1)[-1]
+        if cmd in _TRUNCATING_FILTER_CMDS:
+            return True
+        if cmd in ("grep", "egrep", "fgrep"):
+            # -c counts matches; -m N / -N cap how many are shown.
+            return any(
+                t.startswith("-") and not t.startswith("--")
+                and (re.search(r"[cm\d]", t))
+                for t in tokens[1:]
+            )
+        return False
+    except Exception:
+        return False
+
+
+def _workspace_changed_since(store, ts: float) -> bool:
+    """True when a file-writing tool ran after ``ts`` (best effort).
+
+    Reads the session's activity log, which records every tool use with a
+    timestamp. If the agent edited files between two runs of the same
+    command, byte-identical output is not evidence of a stuck loop.
+    """
+    try:
+        row = store._connect().execute(
+            "SELECT 1 FROM activity_log "
+            "WHERE tool_bucket = 'edit' AND timestamp > ? LIMIT 1",
+            (ts,),
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
+def _looks_like_failure(
+    stdout: str,
+    stderr: str,
+    exit_code: int | None = None,
+    redirected: bool = False,
+) -> bool:
+    """Decide whether a Bash run failed.
+
+    The exit code is authoritative when known: non-zero means failure, zero
+    means success, and stdout is never scanned in that case. A program that
+    prints an accuracy metric like ``Error: 0.000835`` and exits 0 is a
+    success, not a failure.
+
+    When no exit code is available, fall back to text: stderr is always
+    scanned; stdout is scanned only when the command redirected stderr into
+    stdout (``2>&1``), because otherwise an error-looking line on stdout is
+    just data. Redirected stdout is scanned line by line, anchored to line
+    start, with purely numeric payloads after the colon excluded.
+    """
+    if exit_code is not None:
+        return exit_code != 0
     if not stderr and not stdout:
         return False
     # Cheap pre-screen: if neither text contains a colon (all the patterns
     # require a colon or a specific keyword), skip the heavy import. This
     # avoids importing bash_compress for the common case of clean short
-    # output, which is the hot path the brief asks us not to regress.
+    # output, which is the hot path.
     has_potential = False
     for text in (stderr, stdout):
         if text and (":" in text or "Traceback" in text or "FAILED" in text
@@ -187,12 +253,18 @@ def _looks_like_failure(stdout: str, stderr: str) -> bool:
         return False
     try:
         from bash_compress import _ERROR_STDERR_PATTERNS
-        for text in (stderr, stdout):
-            if not text:
-                continue
+        if stderr:
             for pat in _ERROR_STDERR_PATTERNS:
-                if pat.search(text):
+                if pat.search(stderr):
                     return True
+        if stdout and redirected:
+            for line in stdout.splitlines():
+                if _NUMERIC_ERROR_LINE_RE.match(line):
+                    continue
+                stripped = line.lstrip()
+                for pat in _ERROR_STDERR_PATTERNS:
+                    if pat.match(stripped):
+                        return True
     except Exception:
         pass
     return False
@@ -203,6 +275,7 @@ def check(
     output: str,
     now: float | None = None,
     stderr: str = "",
+    exit_code: int | None = None,
 ):
     """Record this Bash run and return a nudge line when the streak warrants it.
 
@@ -210,7 +283,9 @@ def check(
     Never raises; never denies — the caller decides how to surface the nudge.
     ``now`` is injectable for tests and defaults to ``time.time()``.
     ``stderr`` is the tool response's stderr, used for failure detection when
-    no exit code is available.
+    no exit code is available. ``exit_code`` is the command's exit status when
+    the caller knows it; when present it is the sole failure signal and the
+    output text is never scanned.
 
     Three signals share one store record:
     1. Identical-output streak (existing): fires when the same command
@@ -244,31 +319,46 @@ def check(
         # agent stays on the live (unredacted) command the agent already sees.
         safe_command = _redact_credentials(normalized)[:500]
         now = time.time() if now is None else now
-        is_fail = _looks_like_failure(output, stderr)
+        is_fail = _looks_like_failure(
+            output, stderr, exit_code=exit_code,
+            redirected="2>&1" in command,
+        )
         body = _heredoc_body(command)
         has_inline_script = body is not None and len(body) >= INLINE_SCRIPT_MIN_CHARS
         store = SessionStore(session_id)
         try:
             prior = store.get_command_streak(cmd_h)
             fresh = not prior or now - float(prior.get("last_ts") or 0) > STALE_SECONDS
+            # An edit between two runs makes byte-identical output
+            # meaningless as a stuck-loop signal: the workspace changed, so
+            # the streak restarts.
+            workspace_changed = (
+                bool(prior) and not fresh
+                and _workspace_changed_since(store, float(prior.get("last_ts") or 0))
+            )
 
             # --- Identical-output streak (existing signal) ---
             if (
                 prior
                 and prior.get("output_hash") == out_h
                 and not fresh
+                and not workspace_changed
             ):
                 streak = int(prior.get("streak") or 0) + 1
                 nudged_streak = _int_or_none(prior.get("nudged_streak"))
             else:
-                # Material change (different output), a new command, or a stale
-                # streak: start over. This is the "never fire when the output
-                # changed materially" guarantee.
+                # Material change (different output), a new command, a stale
+                # streak, or an intervening edit: start over. This is the
+                # "never fire when the output changed materially" guarantee.
                 streak = 1
                 nudged_streak = None
 
-            fire_identical = streak >= STREAK_THRESHOLD and (
-                nudged_streak is None or streak >= nudged_streak + REPEAT_AFTER
+            fire_identical = (
+                streak >= STREAK_THRESHOLD
+                and not _ends_with_truncating_filter(command)
+                and (
+                    nudged_streak is None or streak >= nudged_streak + REPEAT_AFTER
+                )
             )
 
             # --- Burn streak (new signal) ---
@@ -339,7 +429,8 @@ def check(
 
             if fire_identical:
                 return _NUDGE_TEMPLATE.format(
-                    label=_sanitize_label(safe_command), streak=streak
+                    label=_sanitize_label(safe_command), streak=streak,
+                    files_changed="yes" if workspace_changed else "none",
                 )
             if fire_burn:
                 return _BURN_NUDGE_TEMPLATE.format(
