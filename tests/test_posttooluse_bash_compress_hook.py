@@ -193,6 +193,49 @@ class TestHookCompressesOutput:
         assert len(compressed) < len(du_output)
 
 
+class TestFailedBuildCompression:
+    """A non-zero exit arrives as a string tool response; failed builds must
+    be compressed through the same classifier, with every distinct error
+    line preserved."""
+
+    def _string_payload(self, command: str, response: str,
+                        session_id: str) -> str:
+        return json.dumps({
+            "session_id": session_id,
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/Users/test/project",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "tool_response": response,
+        })
+
+    def test_failed_build_string_response_is_compressed(self):
+        sid = "test-failbuild-" + uuid.uuid4().hex[:8]
+        cmd = "make test"
+        body = "\n".join(
+            "running suite ... ok" for _ in range(60)
+        ) + "\nerror: assertion failed: expected 4, got 5\n" \
+             "fatal error: tests exited with failures\n"
+        response = "Error: Exit code 2\n" + body
+        proc = subprocess.run(
+            [sys.executable, str(BASH_COMPRESS_HOOK)],
+            input=self._string_payload(cmd, response, sid),
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=30,
+            env={**{k: v for k, v in os.environ.items()
+                    if k != "CLAUDE_PLUGIN_ROOT"}},
+        )
+        assert proc.returncode == 0, f"Hook crashed: {proc.stderr}"
+        compressed = _get_updated_stdout(proc)
+        assert compressed is not None, (
+            "Expected the failed build output to be compressed"
+        )
+        assert len(compressed) < len(response)
+        assert "error: assertion failed: expected 4, got 5" in compressed
+        assert "fatal error: tests exited with failures" in compressed
+
+
 # ============================================================================
 # Safety: side-effecting commands pass through UNMODIFIED
 # ============================================================================

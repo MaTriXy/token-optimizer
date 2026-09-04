@@ -151,17 +151,17 @@ def main() -> None:
             # compress PostToolUse: the command already ran, we only compress
             # the captured stdout. Fail-open at every step.
             #
-            # Performance guard: the size gate and the
+            # Performance guard: the line-count gate and the
             # command-string classify() must run BEFORE importing
             # build_output_compress, so small non-read-only commands (the
-            # common case) pay no import cost.
-            if stdout and len(stdout) >= 2048:
+            # common case) pay no import cost. The gate mirrors
+            # build_output_compress._MIN_COMPRESS_LINES without the import.
+            if stdout and len(stdout.splitlines()) >= 25:
                 try:
                     # Stage 1: command-string classification (no import needed
                     # for the check itself; classify() is a pure function that
                     # only uses shlex + a static dict).
                     from build_output_compress import classify as _build_classify
-                    from build_output_compress import _MIN_COMPRESS_BYTES
                     _is_build = _build_classify(command)
                     # Stage 2: shape fallback only if command didn't match and
                     # the output is large enough to justify the scan.

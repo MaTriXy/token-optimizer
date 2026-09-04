@@ -39,7 +39,8 @@ from build_output_compress import (
     _is_error_line,
     _is_progress_noise,
     _is_summary_line,
-    _MIN_COMPRESS_BYTES,
+    _MIN_COMPRESS_LINES,
+    _collapse_traceback_frames,
 )
 
 
@@ -262,9 +263,16 @@ class TestClassify:
     def test_python_m_unittest(self):
         assert classify("python -m unittest discover") is True
 
-    def test_python_m_json_tool(self):
-        # json.tool is not a build/test module
-        assert classify("python -m json.tool data.json") is False
+    def test_python_m_any_module(self):
+        # Any -m module is a build/test/run invocation
+        assert classify("python -m json.tool data.json") is True
+        assert classify("python3 -m compileall src/") is True
+
+    def test_python_script(self):
+        assert classify("python3 estimate_pi.py") is True
+        assert classify("python tools/build.py --release") is True
+        assert classify("python -c 'print(1)'") is False
+        assert classify("python --version") is False
 
     def test_dotnet_build(self):
         assert classify("dotnet build") is True
@@ -297,6 +305,22 @@ class TestClassify:
     def test_gradlew_path(self):
         assert classify("./gradlew build") is True
 
+    def test_uv(self):
+        assert classify("uv run pytest -q") is True
+        assert classify("uv sync") is True
+        assert classify("uv pip install -r requirements.txt") is True
+        assert classify("uv tool list") is False
+
+    def test_valgrind(self):
+        assert classify("valgrind --leak-check=full ./app") is True
+
+    def test_gdb_batch(self):
+        assert classify("gdb -batch -ex run ./a.out") is True
+        assert classify("gdb ./a.out") is False
+
+    def test_ctest(self):
+        assert classify("ctest --output-on-failure") is True
+
 
 # ---------------------------------------------------------------------------
 # classify_by_shape() tests
@@ -323,6 +347,77 @@ class TestClassifyByShape:
 
 
 # ---------------------------------------------------------------------------
+# Line-count gate and traceback handling
+# ---------------------------------------------------------------------------
+
+def _valgrind_style_output(n_lines=35):
+    """Short boilerplate lines totalling well under 2 KB but over the line gate."""
+    lines = ["==12345== Memcheck, a memory error detector"]
+    for i in range(n_lines - 3):
+        lines.append("==12345==    at 0x4C2B0E0: malloc (in /usr/lib/libc.so)")
+    lines.append("==12345== ERROR SUMMARY: 0 errors from 0 contexts")
+    lines.append("==12345== For counts of detected and suppressed errors rerun with: -v")
+    return "\n".join(lines)
+
+
+class TestLineGate:
+    def test_valgrind_style_output_compresses_despite_small_bytes(self):
+        output = _valgrind_style_output()
+        assert len(output) < 2048
+        assert len(output.splitlines()) >= _MIN_COMPRESS_LINES
+        assert compress("valgrind ./app", output) is not None
+
+    def test_long_but_few_lines_stays_raw(self):
+        # Over 2 KB but only 5 lines: under the line gate, byte-identical out
+        output = "\n".join("x" * 600 for _ in range(5))
+        assert len(output) >= 2048
+        assert compress("gcc -c main.c", output) is None
+
+
+def _traceback_output(n_frames=12):
+    lines = ["Traceback (most recent call last):"]
+    for i in range(n_frames):
+        lines.append(f'  File "app/layer_{i}.py", line {10 * i}, in handler_{i}')
+        lines.append(f"    result = step_{i}(data)")
+    lines.append("ValueError: unexpected payload shape")
+    return "\n".join(lines)
+
+
+class TestTracebackCompression:
+    def test_traceback_keeps_header_first_and_last_frames(self):
+        out = _traceback_output(12)
+        result = compress("python3 app/main.py", out)
+        assert result is not None
+        assert "Traceback (most recent call last):" in result
+        assert 'File "app/layer_0.py"' in result          # first frame
+        assert 'File "app/layer_11.py"' in result         # last frame
+        assert 'File "app/layer_10.py"' in result         # second-to-last frame
+        assert "ValueError: unexpected payload shape" in result
+        assert "traceback frames dropped" in result
+
+    def test_traceback_drops_middle_frames(self):
+        out = _traceback_output(12)
+        result = compress("python3 app/main.py", out)
+        assert 'File "app/layer_5.py"' not in result
+
+    def test_short_traceback_kept_whole(self):
+        out = _traceback_output(3)
+        result = _collapse_traceback_frames(out.splitlines())
+        assert result == out.splitlines()
+
+    def test_every_distinct_error_line_survives(self):
+        out = (_traceback_output(12) + "\n"
+               + "RuntimeError: secondary failure\n"
+               + "KeyError: 'missing_field'\n")
+        result = compress("python3 app/main.py", out)
+        assert result is not None
+        for err in ("ValueError: unexpected payload shape",
+                    "RuntimeError: secondary failure",
+                    "KeyError: 'missing_field'"):
+            assert err in result
+
+
+# ---------------------------------------------------------------------------
 # compress() tests — the core invariants
 # ---------------------------------------------------------------------------
 
@@ -330,9 +425,9 @@ class TestCompress:
     def test_small_output_returns_none(self):
         assert compress("gcc -c main.c", "Compiling main.c...\nDone.\n") is None
 
-    def test_under_2kb_returns_none(self):
+    def test_under_line_gate_returns_none(self):
         output = "Compiling main.c...\n" * 10
-        assert len(output) < _MIN_COMPRESS_BYTES
+        assert len(output.splitlines()) < _MIN_COMPRESS_LINES
         assert compress("gcc -c main.c", output) is None
 
     def test_gcc_success_compresses(self):
