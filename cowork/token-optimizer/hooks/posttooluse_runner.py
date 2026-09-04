@@ -304,7 +304,7 @@ def _rebind_shared_stdin(module) -> None:
 
 _MATCHER_BASH_COMPRESS = "Bash"
 _MATCHER_ARCHIVE = "Bash|Read|Glob|Grep|Agent|mcp__.*"
-_MATCHER_CONTEXT_INTEL = "Bash|Read|Grep|Glob|mcp__.*"
+_MATCHER_CONTEXT_INTEL = "Bash|Read|Grep|Glob|Edit|Write|MultiEdit|NotebookEdit|mcp__.*"
 _MATCHER_READ_CACHE_INVALIDATE = "Edit|Write|MultiEdit|NotebookEdit"
 _MATCHER_QUALITY_CACHE = (
     "Bash|Read|Glob|Grep|Agent|Edit|Write|MultiEdit|NotebookEdit|mcp__.*"
@@ -981,9 +981,56 @@ def _subcommand_table():
     )
 
 
+# --------------------------------------------------------------------------- #
+# PostToolUseFailure (matcher "Bash", its own hooks.json entry).
+#
+# Claude Code delivers a failed Bash call on this event, not on PostToolUse:
+# the payload carries the exit status in ``error`` ("Exit code N\n<output>")
+# and there is no tool_response to rewrite. The only consumer is the thrash
+# guard, which gets the authoritative exit code; a nudge, if any, goes out as
+# ``additionalContext`` (the one output field this event supports). Nothing is
+# emitted when there is nothing to say, and any failure here is swallowed: a
+# broken hook must never turn a tool failure into a worse one.
+# --------------------------------------------------------------------------- #
+
+# "Exit code N" followed by the command's output (may be empty, may be
+# multi-line, hence DOTALL).
+_FAILURE_ERROR_RE = re.compile(r"^Exit code (\d+)\n?(.*)$", re.DOTALL)
+
+
+def _handle_post_tool_use_failure(hook_input: dict) -> None:
+    try:
+        if str(hook_input.get("tool_name") or "") != "Bash":
+            return
+        m = _FAILURE_ERROR_RE.match(str(hook_input.get("error") or ""))
+        if m is None:
+            return
+        command = str((hook_input.get("tool_input") or {}).get("command") or "")
+        if not command:
+            return
+        session_id = str(hook_input.get("session_id") or "")
+        if session_id and not os.environ.get("CLAUDE_SESSION_ID"):
+            os.environ["CLAUDE_SESSION_ID"] = session_id
+        from thrash_guard import check as _thrash_check
+        nudge = _thrash_check(
+            command, m.group(2) or "", stderr="", exit_code=int(m.group(1))
+        )
+        if nudge:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PostToolUseFailure",
+                "additionalContext": nudge,
+            }}))
+    except Exception:
+        pass  # Fail open: never add a hook failure on top of a tool failure
+
+
 def main() -> int:
     hook_input = _read_hook_input()
     tool_name = str(hook_input.get("tool_name") or "")
+
+    if hook_input.get("hook_event_name") == "PostToolUseFailure":
+        _handle_post_tool_use_failure(hook_input)
+        return 0
 
     _install_shared_stdin(hook_input)
 

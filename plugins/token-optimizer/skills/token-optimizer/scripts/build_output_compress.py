@@ -703,13 +703,17 @@ def compress(command: str, output: str) -> str | None:
         # If we didn't actually reduce the line count meaningfully, bail out
         if len(collapsed) >= len(lines) * 0.85 and noise_dropped < len(lines) * 0.10:
             # Not enough repetition to justify compression.
-            # Still re-inject preserved lines in case they were dropped.
+            # Still re-inject preserved, error, and summary lines in case a
+            # collapse pass dropped them (traceback-frame collapse removes
+            # middle frames, which can carry error-matching source lines).
             result = "\n".join(collapsed)
-            if preserved_lines:
-                collapsed_set = set(collapsed)
-                appended = [p for p in preserved_lines if p not in collapsed_set]
-                if appended:
-                    result = result + "\n" + "\n".join(appended)
+            collapsed_set = set(collapsed)
+            appended: list[str] = []
+            for line in preserved_lines + distinct_errors + summary_lines:
+                if line not in collapsed_set and line not in appended:
+                    appended.append(line)
+            if appended:
+                result = result + "\n" + "\n".join(appended)
             if result != output:
                 return result
             return None

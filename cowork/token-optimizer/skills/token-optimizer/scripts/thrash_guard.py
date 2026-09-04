@@ -78,9 +78,8 @@ _VALID_SESSION_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 _NUDGE_TEMPLATE = (
     "[Token Optimizer: `{label}` has run {streak} times this session with "
-    "byte-identical output; files changed since last run: {files_changed}. "
-    "Before running again, state what you expect to differ; prefer a "
-    "targeted edit over rewriting the whole file.]"
+    "byte-identical output. Before running again, state what you expect to "
+    "differ; prefer a targeted edit over rewriting the whole file.]"
 )
 
 _BURN_NUDGE_TEMPLATE = (
@@ -157,23 +156,45 @@ def _sanitize_label(command: str) -> str:
     return label
 
 
-# A line that is an error keyword followed only by digits/dots is a metric
-# (e.g. "Error: 0.000835" from a numeric accuracy report), not a failure.
-_NUMERIC_ERROR_LINE_RE = re.compile(r"^\s*error\s*:\s*[\d.]+\s*$", re.IGNORECASE)
+# A line that is an error keyword followed only by a number is a metric
+# ("Error: 0.000835" from a numeric report, "fatal: 8.35e-04" from a loss
+# printout), not a failure. Scientific notation included.
+_NUMERIC_ERROR_LINE_RE = re.compile(
+    r"^\s*(?:error|fatal)\s*:\s*[-+]?[\d.]+(?:e[-+]?\d+)?\s*$", re.IGNORECASE
+)
 
-# Final pipeline stages whose visible output is identical by construction:
-# a truncating filter shows the same slice of its input regardless of whether
-# the underlying data changed, so byte-identical output is not evidence of a
-# stuck loop.
+
+def _text_has_failure(text: str) -> bool:
+    """True when any line of ``text`` matches a failure pattern.
+
+    Per line, so a pattern can match anywhere in the line (gcc/clang
+    ``file.c:5:3: error: ...``, pytest ``test_b FAILED``), while a line that
+    is only an error keyword plus a number is skipped as a metric.
+    """
+    from bash_compress import _ERROR_STDERR_PATTERNS
+    for line in text.splitlines():
+        if _NUMERIC_ERROR_LINE_RE.match(line):
+            continue
+        for pat in _ERROR_STDERR_PATTERNS:
+            if pat.search(line):
+                return True
+    return False
+
+# Final pipeline stages whose visible output can stay identical while the
+# underlying data changes (a truncating filter shows the same slice; a count
+# can repeat). Byte-identical output from these is weaker evidence of a stuck
+# loop, so they need a longer streak before the nudge fires -- they are
+# delayed, never silenced.
 _TRUNCATING_FILTER_CMDS = frozenset({"tail", "head", "wc"})
 
 
 def _ends_with_truncating_filter(command: str) -> bool:
     """True when the command's last pipeline stage truncates its output.
 
-    ``progress.log | tail -10`` is byte-identical on every run no matter how
-    the log changed underneath, so its output can never be evidence of a
-    stuck loop. Counts (``wc``, ``grep -c``) behave the same way.
+    ``progress.log | tail -10`` can be byte-identical across runs even while
+    the log grows, and ``wc -l`` / ``grep -c`` can repeat on unchanged data,
+    so these commands must survive a longer identical-output streak before
+    the nudge fires.
     """
     try:
         last_stage = command.rstrip().split("|")[-1].strip()
@@ -184,12 +205,17 @@ def _ends_with_truncating_filter(command: str) -> bool:
         if cmd in _TRUNCATING_FILTER_CMDS:
             return True
         if cmd in ("grep", "egrep", "fgrep"):
-            # -c counts matches; -m N / -N cap how many are shown.
-            return any(
-                t.startswith("-") and not t.startswith("--")
-                and (re.search(r"[cm\d]", t))
-                for t in tokens[1:]
-            )
+            # -c counts matches; -m N caps how many are shown. Context flags
+            # (-A/-B/-C) do not truncate.
+            for t in tokens[1:]:
+                if not t.startswith("-") or t.startswith("--"):
+                    continue
+                cluster = t[1:]
+                if cluster and all(ch in "cm0123456789" for ch in cluster):
+                    if any(ch in cluster for ch in "cm") or any(
+                            ch.isdigit() for ch in cluster):
+                        return True
+            return False
         return False
     except Exception:
         return False
@@ -254,18 +280,10 @@ def _looks_like_failure(
         return False
     try:
         from bash_compress import _ERROR_STDERR_PATTERNS
-        if stderr:
-            for pat in _ERROR_STDERR_PATTERNS:
-                if pat.search(stderr):
-                    return True
-        if stdout and redirected:
-            for line in stdout.splitlines():
-                if _NUMERIC_ERROR_LINE_RE.match(line):
-                    continue
-                stripped = line.lstrip()
-                for pat in _ERROR_STDERR_PATTERNS:
-                    if pat.match(stripped):
-                        return True
+        if stderr and _text_has_failure(stderr):
+            return True
+        if stdout and redirected and _text_has_failure(stdout):
+            return True
     except Exception:
         pass
     return False
@@ -356,9 +374,15 @@ def check(
                 streak = 1
                 nudged_streak = None
 
+            # A truncating filter's identical output is weaker evidence, so
+            # it takes twice the streak to fire.
+            identical_threshold = (
+                2 * STREAK_THRESHOLD
+                if _ends_with_truncating_filter(command)
+                else STREAK_THRESHOLD
+            )
             fire_identical = (
-                streak >= STREAK_THRESHOLD
-                and not _ends_with_truncating_filter(command)
+                streak >= identical_threshold
                 and (
                     nudged_streak is None or streak >= nudged_streak + REPEAT_AFTER
                 )
@@ -433,7 +457,6 @@ def check(
             if fire_identical:
                 return _NUDGE_TEMPLATE.format(
                     label=_sanitize_label(safe_command), streak=streak,
-                    files_changed="yes" if workspace_changed else "none",
                 )
             if fire_burn:
                 return _BURN_NUDGE_TEMPLATE.format(
