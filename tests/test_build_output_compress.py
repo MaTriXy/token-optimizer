@@ -416,6 +416,24 @@ class TestTracebackCompression:
                     "KeyError: 'missing_field'"):
             assert err in result
 
+    def test_error_line_inside_dropped_frame_survives_bail_out(self):
+        """A distinct error line inside a collapsed middle frame survives even
+        when the compressor takes the not-enough-repetition bail-out."""
+        lines = [f"step {i}: processed normally" for i in range(26)]
+        lines.append("Traceback (most recent call last):")
+        for i in range(6):
+            lines.append(f'  File "app/layer_{i}.py", line {10 * i}, in handler_{i}')
+            if i == 2:
+                lines.append(
+                    '    raise AssertionError("FAILED: widget count mismatch") from exc')
+            else:
+                lines.append(f"    result = step_{i}(data)")
+        lines.append("ValueError: unexpected payload shape")
+        out = "\n".join(lines)
+        result = compress("python3 app/main.py", out)
+        assert result is not None
+        assert 'raise AssertionError("FAILED: widget count mismatch") from exc' in result
+
 
 # ---------------------------------------------------------------------------
 # compress() tests — the core invariants

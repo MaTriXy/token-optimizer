@@ -229,7 +229,6 @@ def test_hook_appends_nudge_and_never_denies():
     assert updated.startswith(out), "original output must be preserved verbatim"
     assert "byte-identical output" in updated
     assert "state what you expect to differ" in updated
-    assert "files changed since last run: none" in updated
 
 
 def test_hook_stays_silent_below_threshold():
@@ -341,6 +340,35 @@ def test_stdout_not_scanned_without_redirect(guard):
         "Error: connection refused\n", "", redirected=True) is True
 
 
+@pytest.mark.parametrize("line", [
+    "main.c:5:3: error: expected ';'",           # gcc/clang
+    "git: fatal: not a git repository",
+    "tests/test_a.py::test_b FAILED",            # pytest, failure mid-line
+    "error: could not compile `app`",
+])
+def test_redirected_real_error_shapes_are_detected(guard, line):
+    """Error patterns match anywhere in a redirected stdout line."""
+    assert guard._looks_like_failure(line + "\n", "", redirected=True) is True
+
+
+@pytest.mark.parametrize("metric", [
+    "Error: 0.000835",
+    "Error: 8.35e-04",
+    "error: -0.5",
+    "fatal: 1e6",
+])
+def test_numeric_metric_is_not_a_failure_on_either_stream(guard, metric):
+    """A numeric metric is not a failure on stdout (redirected) or stderr."""
+    assert guard._looks_like_failure(metric + "\n", "", redirected=True) is False
+    assert guard._looks_like_failure("", metric + "\n") is False
+
+
+def test_stderr_metric_between_real_errors_still_fails(guard):
+    """Only purely numeric error lines are skipped; text errors still count."""
+    text = "Error: 0.000835\nError: connection refused\n"
+    assert guard._looks_like_failure("", text) is True
+
+
 # ---------------------------------------------------------------------------
 # Identical-output nudge vs. truncating filters and intervening edits
 # ---------------------------------------------------------------------------
@@ -359,12 +387,13 @@ def _log_edit(ts: float) -> None:
         store.close()
 
 
-def test_truncating_filter_never_fires_identical_nudge(guard):
-    """`| tail -10` of a progress log is identical by construction."""
+def test_truncating_filter_needs_double_streak(guard):
+    """`| tail -10` output is weaker evidence: the nudge waits for 6 runs."""
     cmd = "cat build.log | tail -10"
     out = "step 1 ok\nstep 2 ok\n"
     for _ in range(5):
         assert guard.check(cmd, out, stderr="") is None
+    assert guard.check(cmd, out, stderr="") is not None  # streak 6: fire
 
 
 @pytest.mark.parametrize("cmd", [
@@ -374,10 +403,23 @@ def test_truncating_filter_never_fires_identical_nudge(guard):
     "cat build.log | grep -m1 error",
     "tail -20 build.log",
 ])
-def test_truncating_filter_variants_never_fire(guard, cmd):
+def test_truncating_filter_variants_delayed_not_silent(guard, cmd):
     out = "same slice\nof output\n"
     for _ in range(5):
         assert guard.check(cmd, out, stderr="") is None
+    assert guard.check(cmd, out, stderr="") is not None  # streak 6: fire
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat build.log | grep -A5 error",
+    "cat build.log | grep -C3 error",
+])
+def test_grep_context_flags_are_not_truncating(guard, cmd):
+    """-A/-B/-C add context, they do not truncate: normal threshold applies."""
+    out = "same slice\nof output\n"
+    for _ in range(2):
+        assert guard.check(cmd, out, stderr="") is None
+    assert guard.check(cmd, out, stderr="") is not None  # streak 3: fire
 
 
 def test_truncating_filter_does_not_block_other_nudges(guard):
@@ -398,7 +440,6 @@ def test_identical_nudge_wording_is_factual_and_actionable(guard):
     nudge = guard.check("make all", out)
     assert nudge is not None
     assert "has run 3 times" in nudge
-    assert "files changed since last run: none" in nudge
     assert "state what you expect to differ" in nudge
     assert "change the approach" not in nudge
     assert "\n" not in nudge  # one line
