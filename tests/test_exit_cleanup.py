@@ -1,4 +1,4 @@
-"""Adversarial defeat-probes for the three exit-cleanup fixes.
+"""Exit-cleanup regression probes.
 
 This file is written by the **defeat-validator**.  It does NOT test happy paths
 (those are covered by ``test_rollup_deadline.py``, ``test_locks_orphan_sweep.py``,
