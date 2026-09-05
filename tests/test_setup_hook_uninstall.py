@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for ``setup-hook --uninstall`` (issue #78, workstream B1).
+"""Regression tests for ``setup-hook --uninstall``.
 
 Before the fix, the ``setup-hook --uninstall`` handler called
 ``setup_hook(dry_run=dry)`` with NO uninstall param, so ``--uninstall``

@@ -386,7 +386,7 @@ def test_windows_gui_python_is_posix_noop(m):
         pytest.skip("POSIX-only assertion")
     assert m._windows_gui_python() is None
     assert m._detached_python_exe() == (sys.executable or "python3"), (
-        "POSIX interpreter selection must be byte-identical to pre-#107"
+        "POSIX interpreter selection must be byte-identical to the pre-fix form"
     )
 
 
@@ -413,7 +413,7 @@ def test_schtasks_xml_emits_pythonw_command_and_arguments(m):
 
 
 def test_schtasks_xml_omits_arguments_for_cmd_fallback(m):
-    """The fallback must produce the exact pre-#107 XML shape (no empty
+    """The fallback must produce the exact pre-fix XML shape (no empty
     <Arguments/>, which some Task Scheduler builds reject)."""
     xml = m._generate_schtasks_xml(
         task_name="TokenOptimizerDashboard",
@@ -662,7 +662,7 @@ def test_heal_is_idempotent(m, monkeypatch):
 
 
 def test_heal_never_creates_an_absent_task(m, monkeypatch):
-    """#59: healing an absent task would resurrect a daemon the user declined or
+    """Healing an absent task would resurrect a daemon the user declined or
     uninstalled. A failed /Query means 'no task', never 'install one'."""
     _, installs = _heal_env(m, monkeypatch, "irrelevant", query_rc=1)
     assert m._heal_windows_console_flash() is False
@@ -1029,11 +1029,11 @@ def test_marker_survives_a_fresh_session(m, monkeypatch):
 
 
 def test_marker_clear_sites_are_bounded():
-    """Structural guard, updated for #107: the clear helper
+    """Structural guard, updated for the no-flash fix: the clear helper
     may be called ONLY from ``setup_daemon`` (explicit install success) and
     ``_ensure_dashboard_daemon`` (verified success / live-daemon disproof).
     Anything else -- a timer, a session hook, a heal that didn't verify --
-    would restore the #107 retry loop."""
+    would restore the retry loop."""
     src = _measure_source()
     tree = ast.parse(src)
     owner = _enclosing_functions(tree)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression tests for `install.sh --opencode --uninstall` (issue #78, C1).
+# Regression tests for `install.sh --opencode --uninstall`.
 #
 # Before the fix, OpenCode had NO uninstaller: install_opencode() copied a
 # bundled token-optimizer.js into ~/.config/opencode/plugins/ and nothing

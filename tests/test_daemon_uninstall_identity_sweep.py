@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daemon uninstall sweeps all token-optimizer-* identities (issue #106).
+"""Daemon uninstall sweeps all token-optimizer-* identities.
 
 Root cause: daemon paths derive from one module-level ``SNAPSHOT_DIR`` (the
 resolved identity), but multiple installs create multiple

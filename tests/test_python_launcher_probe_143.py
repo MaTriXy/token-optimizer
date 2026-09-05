@@ -1,4 +1,4 @@
-"""Issue #143: _probe_windowsapps_candidate() must decide liveness from the
+"""_probe_windowsapps_candidate() must decide liveness from the
 CANDIDATE itself, not from a sibling "twin" (pythonw.exe).
 
 In WindowsApps each App Execution Alias name is claimed independently, so a LIVE
@@ -129,15 +129,15 @@ def test_dead_stub_rejected_even_when_marker_probe_cannot_run(tmp_path):
     bin_ = _write_fake(tmp_path / "python3.exe", mode="dead")
     assert _run_probe(bin_, break_mktemp=True) != 0, (
         "a dead stub reached via the no-temp path must be rejected on --version "
-        "output; a passing rc means the exit-code false-pass survived (issue #143)"
+        "output; a passing rc means the exit-code false-pass survived"
     )
 
 
 def test_dead_stub_is_rejected(tmp_path):
-    """The core #143 guarantee: a dead stub (no marker on -c, no version on
+    """The core guarantee: a dead stub (no marker on -c, no version on
     --version) is rejected on every path."""
     bin_ = _write_fake(tmp_path / "python3.exe", mode="dead")
     assert _run_probe(bin_) != 0, (
         "a dead Store stub must be rejected; a passing rc means it false-passed "
-        "(issue #143 regression)"
+        "(regression)"
     )

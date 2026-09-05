@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for #101: PreCompact leaves the LIVE session's SQLite
-read-cache intact after compaction.
+"""Regression tests for the live-session read-cache clear after compaction.
 
 Before the fix, ``hooks.json`` PreCompact ran ``read_cache.py --clear --quiet``
 with no ``--session``, so ``main()`` defaulted to ``session_id="all"`` and
@@ -189,7 +188,7 @@ def test_bare_clear_without_session_retains_all_behavior(tmp_path):
     )
     # The fresh store is <48h old so cleanup_old_stores leaves it; the file_reads
     # row is NOT cleared by the 'all' branch (only legacy json + pruning). This
-    # is exactly the gap #101 fixes via --clear-compacted for the live session.
+    # is exactly the gap the new flag fills via --clear-compacted for the live session.
     assert _file_entries(snapshot_dir, SESSION_S), (
         "bare --clear 'all' does not clear a fresh session's file_reads -- "
         "that is the documented behavior the NEW flag exists to fill"
@@ -312,7 +311,7 @@ def test_clear_compacted_then_read_not_denied_end_to_end(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# #101 follow-up: contention safety. The compacted-clear must NEVER be a
+# follow-up: contention safety. The compacted-clear must NEVER be a
 # silent exit-0 no-op. Under a sibling write lock on the same per-session
 # sqlite db it must either LAND the DELETE (after waiting out the lock within
 # the hook budget) or SCREAM on stderr. These tests are bounded and cannot
@@ -385,7 +384,7 @@ def test_clear_compacted_lands_delete_under_brief_lock(tmp_path):
 def test_clear_compacted_screams_on_stderr_under_held_lock(tmp_path):
     """When the write lock is held past a SHORT per-call busy_timeout, the
     clear must SCREAM on stderr (never a silent exit-0 no-op) and leave
-    file_reads intact so #101 is not silently resurrected. Bounded: the held
+    file_reads intact so the live-session clear is not silently resurrected. Bounded: the held
     lock is released in a finally; the subprocess busy_timeout is tiny."""
     _seed_and_db(tmp_path)
     db_path = _session_db_path(tmp_path, SESSION_S)
@@ -420,13 +419,13 @@ def test_clear_compacted_screams_on_stderr_under_held_lock(tmp_path):
     entries = _file_entries(tmp_path, SESSION_S)
     assert entries, (
         "file_reads must be LEFT INTACT when the clear screamed -- a silent "
-        f"resurrection of #101 would leave an empty table; got {entries}"
+        f"resurrection of the live-session leak would leave an empty table; got {entries}"
     )
 
 
 def test_clear_compacted_screams_on_no_stdin(tmp_path):
     """Abort branch: no stdin hook input must emit a stderr note, not silent
-    exit 0 (a silent no-op here would leave #101 uncleared with no signal)."""
+    exit 0 (a silent no-op here would leave the live-session leak uncleared with no signal)."""
     out = _run_read_cache(tmp_path, ["--clear-compacted"], None)
     assert out.returncode == 0, out.stderr
     assert "[read_cache] --clear-compacted FAILED" in out.stderr, (
@@ -451,7 +450,7 @@ def test_clear_compacted_screams_on_missing_session(tmp_path):
 # ---------------------------------------------------------------------------
 # GAUNTLET C5: --quiet must NOT silence FAILED branches. --quiet suppresses
 # success chatter ONLY. A silent exit-0 no-op on a broken/partial install
-# resurrects #101 with zero signal, contradicting the docstring.
+# resurrects the live-session leak with zero signal, contradicting the docstring.
 # ---------------------------------------------------------------------------
 
 def test_clear_compacted_screams_on_no_stdin_even_with_quiet(tmp_path):

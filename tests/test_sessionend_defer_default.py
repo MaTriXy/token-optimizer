@@ -1,4 +1,4 @@
-"""Issue #114: session-end-flush must defer by DEFAULT.
+"""session-end-flush must defer by DEFAULT.
 
 A legacy bare `measure.py session-end-flush` hook (pre-5.11.77 script installs,
 no --defer flag) fossilizes in ~/.claude/settings.json, and no self-heal path

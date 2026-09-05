@@ -295,7 +295,7 @@ def test_no_bun_spawn_on_runtime_surface() -> None:
 
     assert not offenders, (
         "Bun.spawn has no windowsHide equivalent, so a console child spawned "
-        "through it flashes a window on Windows with no per-call fix (#107). "
+        "through it flashes a window on Windows with no per-call fix. "
         "Use `await import('node:child_process')` with `windowsHide: true`:\n  "
         + "\n  ".join(offenders)
     )

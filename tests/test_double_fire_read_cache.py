@@ -366,7 +366,7 @@ def test_double_fire_denies_first_read_as_redundant(tmp_path):
 
     # Fire #2: SAME tool call (same tool_use_id). This is the damage scenario:
     # the double-hook registration makes the same PreToolUse/Read fire twice.
-    # Without F1b, the second fire sees the cache entry from fire #1 and denies
+    # Without the guard, the second fire sees the cache entry from fire #1 and denies
     # the read as "redundant" -- even though the user has never actually read
     # this file before (the first fire's deny/skeleton prevented the full file
     # from entering context, or the first fire allowed it but the second fire

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for GitHub #75 — Codex hook path must survive version upgrades.
+"""Regression tests for Codex hook path surviving version upgrades.
 
 A Codex marketplace install lives in .../token-optimizer/<X.Y.Z>/, which is
 deleted when a newer version installs. The old code baked that versioned absolute

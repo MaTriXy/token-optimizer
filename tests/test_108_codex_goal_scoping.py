@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for issue #108: Codex goal reports must be scoped to the
+"""Regression tests: Codex goal reports must be scoped to the
 active goal subtree, not the whole state/goals database.
 
 Before the fix, ``codex_state.subagent_costs()`` and ``goal_budgets()`` ran an

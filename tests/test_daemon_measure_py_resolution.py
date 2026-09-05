@@ -36,7 +36,7 @@ def _load_resolver(fallback: str, tmp_log: Path):
 
     src = measure._generate_daemon_script()
 
-    # issue #160: _resolve_measure_py now guards _MEASURE_PY_CACHE with
+    # _resolve_measure_py now guards _MEASURE_PY_CACHE with
     # _STATE_LOCK; give the extracted function a real lock so it runs in-isolation.
     ns = {"os": os, "json": __import__("json"), "time": __import__("time"),
           "DASHBOARD": "",

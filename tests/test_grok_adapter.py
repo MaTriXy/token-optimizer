@@ -31,7 +31,7 @@ sys.path.insert(0, str(SCRIPTS))
 # sys.modules while later test FILES (e.g. test_runtime_env_wsl_mnt) still hold
 # the instance bound at collection time, so the later test patches one instance
 # while measure.py dynamically imports the replacement — the same duplicate
-# module leak #107's test files already defend against.
+# module leak test files already defend against.
 @pytest.fixture(autouse=True)
 def _restore_sys_modules():
     saved = sys.modules.copy()

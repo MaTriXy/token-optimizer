@@ -191,7 +191,7 @@ def test_every_spawn_site_carries_create_no_window():
                     f"{name}:{call.lineno} {dotted}(...) creationflags={flags!r} "
                     "does not include CREATE_NO_WINDOW"
                 )
-    assert not offenders, "unguarded spawn sites (#107):\n  " + "\n  ".join(offenders)
+    assert not offenders, "unguarded spawn sites:\n  " + "\n  ".join(offenders)
 
 
 def test_no_banned_shell_spawns():
@@ -268,7 +268,7 @@ def test_detach_spawn_kwargs_nt_includes_create_no_window(monkeypatch):
                         ("CREATE_NO_WINDOW", _CREATE_NO_WINDOW)):
         monkeypatch.setattr(spawn_utils.subprocess, _name, _val, raising=False)
     flags = spawn_utils.detach_spawn_kwargs()["creationflags"]
-    assert flags & _CREATE_NO_WINDOW, "CREATE_NO_WINDOW must be present (#107)"
+    assert flags & _CREATE_NO_WINDOW, "CREATE_NO_WINDOW must be present"
     assert flags & 0x8, "DETACHED_PROCESS must be preserved"
     assert flags & 0x200, "CREATE_NEW_PROCESS_GROUP must be preserved"
     assert flags & 0x1000000, "CREATE_BREAKAWAY_FROM_JOB must be preserved"
@@ -318,7 +318,7 @@ def test_bash_compress_main_passes_creationflags(monkeypatch, tmp_path):
         bash_compress.main()
     assert cap.get("argv") == ["git", "status"], "the user's command must still run"
     assert cap.get("creationflags") == _CREATE_NO_WINDOW, (
-        "the Bash-tool wrapper must spawn with CREATE_NO_WINDOW (#107)"
+        "the Bash-tool wrapper must spawn with CREATE_NO_WINDOW"
     )
 
 

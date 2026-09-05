@@ -119,7 +119,7 @@ _COWORK_SYNCED_PLUGIN_MARKER = "/plugins/synced/"
 # resolves to claude, not codex. Copilot's explicit-env tier is
 # _COPILOT_HOME_ENVS below, NOT the ancestor-process signal (which stays at the
 # weak tier) -- a process scan cannot run ahead of CLAUDECODE without
-# reintroducing the #57 shadowing it was added to prevent.
+# reintroducing the shadowing it was added to prevent.
 _CLAUDE_CODE_ENVS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID")
 # Claude Code's official config-dir override. When set, Claude stores
 # projects/, settings.json, etc. under this directory instead of ~/.claude.
@@ -148,7 +148,7 @@ _CURSOR_HOOK_ENVS = ("CURSOR_PROJECT_DIR", "CURSOR_VERSION")
 # inherits CLAUDECODE=1) still resolves to copilot, mirroring the Codex/Hermes
 # guard. The ancestor-process signal (_copilot_signal's ps scan) stays at the
 # weak tier below CLAUDECODE, since a process scan ahead of CLAUDECODE would
-# re-introduce the #57 OpenCode-shadowing problem for the copilot path too.
+# re-introduce the OpenCode-shadowing problem for the copilot path too.
 _COPILOT_HOME_ENVS = (_COPILOT_HOME_ENV, _TO_COPILOT_HOME_ENV)
 # Google Antigravity CLI/app/IDE home override. Antigravity is a distinct
 # product from Gemini CLI and ships its own `agy` binary; its data lives under
@@ -193,7 +193,7 @@ _PROC_SCAN_DISABLE_ENV = "TOKEN_OPTIMIZER_NO_PROC_SCAN"
 # separator-normalized path variants resolve to separate module objects). Two
 # module objects mean two module-level sets, so a module global deduped the
 # warning per-copy and it still printed twice. Anchoring the set on ``sys``
-# makes every copy share one registry. (assafbem, native-Windows, #78.)
+# makes every copy share one registry. (assafbem, native-Windows.)
 _WARN_REGISTRY_ATTR = "_token_optimizer_warned_messages"
 
 
@@ -452,7 +452,7 @@ def _autodetect_wsl_copilot_home(mnt_root: Path | None = None) -> Path | None:
 
 
 def _looks_like_mnt_path(raw: str) -> bool:
-    """True when ``raw`` is an absolute WSL /mnt/ path (the #78 footgun value)."""
+    """True when ``raw`` is an absolute WSL /mnt/ path (the footgun value)."""
     try:
         return Path(raw).is_absolute() and raw.replace("\\", "/").startswith("/mnt/")
     except (OSError, ValueError):
@@ -523,7 +523,7 @@ def _safe_home_from_env(env_var: str, fallback: Path, *, mnt_root: Path | None =
         and _is_safe_home_dir_relaxed(candidate)
     ):
         return candidate.resolve(strict=False)
-    # Name the most common reason so the fix is obvious (assafbem, #78): a
+    # Name the most common reason so the fix is obvious (assafbem): a
     # ``/mnt/...`` value is a WSL mount path and is only honored inside WSL; on
     # native Windows it points nowhere, so it is rejected. The /mnt opt-in above
     # already accepted any legitimately-WSL value, so reaching here with a /mnt
@@ -560,7 +560,7 @@ def _opencode_env_signal() -> bool:
 #    opencode ancestor"), keyed by parent pid + parent process start time
 #    (Linux /proc only) + runtime-signal env signature. Only the negative
 #    result is cached: a stale entry can then only ever reproduce the
-#    pre-#57 claude-tier fallback for at most one TTL window, never flip a
+#    pre-fix claude-tier fallback for at most one TTL window, never flip a
 #    genuine Claude/Codex session into another runtime's home. The start-time
 #    component prevents PID reuse from suppressing a live OpenCode ancestor:
 #    a reused PID has a different incarnation and produces a different key.
@@ -895,7 +895,7 @@ def _opencode_in_process_tree() -> bool:
     reuse from flipping an OpenCode session into claude: a reused PID has a
     different incarnation and produces a different key. On non-Linux the
     start time is unavailable cheaply; a stale entry can flip an OpenCode
-    session into claude for at most one TTL window (worst case: the pre-#57
+    session into claude for at most one TTL window (worst case: the pre-fix
     claude-tier fallback). Same safety envelope as
     ``_ancestor_in_process_tree``: disabled on Windows, behind a short timeout,
     skippable via TOKEN_OPTIMIZER_NO_PROC_SCAN, and never raises.
@@ -1028,7 +1028,7 @@ def _antigravity_signal() -> bool:
 
     The Antigravity hook bridge always sets TOKEN_OPTIMIZER_RUNTIME=antigravity
     explicitly; this signal is the safety net for direct invocations from inside
-    an Antigravity session (the same #57 class of bugs: never let an
+    an Antigravity session (the same class of bugs: never let an
     unrecognized host fall through to the Claude default and write ~/.claude).
     """
     if os.environ.get(_TO_ANTIGRAVITY_HOME_ENV):
@@ -1172,8 +1172,8 @@ def is_cowork() -> bool:
 
     Doc vs observed: only (1) is in the published docs; (2)-(4) are live-observed
     Cowork markers kept as fallback so detection still holds if a future build
-    stops exporting CLAUDE_CODE_REMOTE into the hook env (issues #24529/#66557
-    show env injection is not guaranteed). Never raises; a missing/blank env just
+    stops exporting CLAUDE_CODE_REMOTE into the hook env (Claude Code does
+    not guarantee env injection). Never raises; a missing/blank env just
     contributes no signal.
     """
     if _truthy_env(_COWORK_REMOTE_ENV):

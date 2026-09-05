@@ -1,4 +1,4 @@
-"""Issue #114 Fix 3: collect and dashboard CLI dispatches must install a HookDeadline."""
+"""collect and dashboard CLI dispatches must install a HookDeadline."""
 
 from __future__ import annotations
 

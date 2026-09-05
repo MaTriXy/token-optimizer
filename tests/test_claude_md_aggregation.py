@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Regression test: CLAUDE.md findings must report per-file, not blended.
 
-Reimplements the direction of external PR #100 by danikdanik
-(https://github.com/alexgreensh/token-optimizer/pull/100), reconciled onto the
+Reimplements the direction of the per-file CLAUDE.md aggregation by danikdanik,
+reconciled onto the
 current tree (our savings math moved from the ~4,500-token internal heuristic
 to Anthropic's documented 200-line guidance, so the assertions here check the
 per-file BEHAVIOR rather than the PR's original wording).

@@ -183,7 +183,7 @@ def test_sidechain_delta_independent_of_main_session_count(measure):
 # ------------------------------------------------------- leak 2: now-arm mix source
 
 def test_now_arm_mix_ignores_rolled_up_subagent_usage(measure):
-    """all_model_usage_json includes subagent tokens (fix #18 rollup); the main
+    """all_model_usage_json includes subagent tokens (the rollup); the main
     pool's actual arm must be priced at the parent-thread mix only. Sidechain
     work has its own pool."""
     mod, tmp = measure

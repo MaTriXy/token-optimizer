@@ -1,9 +1,9 @@
-"""Regression coverage for #148, #149, #150.
+"""Regression coverage for the Hermes fleet adapter fixes.
 
-- #148: hermes_install ships spawn_utils.py (hermes_hook_bridge imports it).
-- #149: HermesAdapter.scan() reads ~/.hermes/state.db instead of silently
+- hermes_install ships spawn_utils.py (hermes_hook_bridge imports it).
+- HermesAdapter.scan() reads ~/.hermes/state.db instead of silently
   returning zero runs.
-- #150: unpriced models (MiniMax, Kimi, ...) surface as a warning + keep their
+- unpriced models (MiniMax, Kimi, ...) surface as a warning + keep their
   DB-reported cost instead of collapsing to a fake $0.00.
 
 Run: python3 -m pytest tests/test_hermes_fleet_147_150.py -v
@@ -46,7 +46,7 @@ def test_148_hermes_install_ships_spawn_utils():
 
     assert "spawn_utils.py" in hermes_install._RUNTIME_MODULES, (
         "hermes_hook_bridge imports `from spawn_utils import spawn_detached`; "
-        "omitting it from _RUNTIME_MODULES breaks the installed plugin (#148)."
+        "omitting it from _RUNTIME_MODULES breaks the installed plugin."
     )
 
 
@@ -58,7 +58,7 @@ def test_148_bridge_actually_imports_spawn_utils():
 
 
 # ---------------------------------------------------------------------------
-# Synthetic ~/.hermes/state.db for #149 / #150
+# Synthetic ~/.hermes/state.db for the scan + unpriced-model tests
 # ---------------------------------------------------------------------------
 
 def _make_state_db(path: Path, rows: list[dict]):

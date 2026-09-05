@@ -43,7 +43,7 @@ def test_interactive_marker_defeats_hook_detection(m, monkeypatch):
 
 def test_hook_still_detected_without_marker(m, monkeypatch):
     """Without the marker, the explicit hook signals still bound the run (the
-    freeze guard from #114 must survive)."""
+    freeze guard must survive)."""
     monkeypatch.delenv("TOKEN_OPTIMIZER_INTERACTIVE", raising=False)
     monkeypatch.setenv("TOKEN_OPTIMIZER_HOOK", "1")
     monkeypatch.setattr(sys, "argv", ["measure.py", "dashboard"])

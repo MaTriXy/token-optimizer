@@ -18,13 +18,13 @@ points at a deterministic reconstruct-from-a-degraded-read.
 Root cause: ``setup_quality_bar`` opened with the LOSSY ``_read_settings_json()``,
 which collapses a missing / malformed / unreadable file to ``{}``, then wrote
 that dict back. Under a PLUGIN install the UserPromptSubmit cache hook is
-deliberately skipped (it comes from hooks.json, GitHub #7), so the only key the
+deliberately skipped (it comes from hooks.json, plugin hooks.json), so the only key the
 rebuild wrote was ``statusLine`` -- which is exactly why the wipe artifact has
 no ``hooks`` key. ``run_ensure_health`` calls ``setup_quality_bar(quiet=True)``
 on EVERY SessionStart for a plugin user whose settings.json has no cache hook,
 which matches the observed every-4-8-minutes clustering during session spawns.
 
-#106 added ``_read_settings_json_checked()`` for exactly this class but
+The fix added ``_read_settings_json_checked()`` for exactly this class but
 converted only 2 of 20 ``_write_settings_atomic`` call sites, so the class
 stayed live.
 

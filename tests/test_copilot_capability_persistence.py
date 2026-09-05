@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for issue #78 — Copilot capability matrix stuck at "unknown".
+"""Regression tests for Copilot capability matrix stuck at "unknown".
 
 Root cause: capability seeding runs `copilot --version`. In a WSL-root context
 (the user runs `bash install.sh` from PowerShell, and Copilot spawns hooks there

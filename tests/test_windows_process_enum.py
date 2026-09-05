@@ -1,4 +1,4 @@
-"""Regression and smoke coverage for #117: Windows process enumeration.
+"""Regression and smoke coverage for Windows process enumeration.
 
 ``tasklist /v /fo csv /nh`` is pathologically slow for standard (non-elevated)
 users on Windows 11: the /v flag queries verbose info (incl. window titles)
@@ -64,7 +64,7 @@ def test_windows_sessions_use_get_process_not_tasklist(monkeypatch):
     joined = " ".join(str(a) for a in argv)
     assert "tasklist" not in joined
     assert "Get-Process" in joined
-    # Non-ASCII safety and the console-less spawn guard (#107) preserved.
+    # Non-ASCII safety and the console-less spawn guard preserved.
     assert kwargs.get("errors") == "replace"
     assert kwargs.get("creationflags") == measure._NO_WINDOW
     assert kwargs.get("timeout") == 10

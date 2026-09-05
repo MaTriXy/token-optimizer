@@ -120,7 +120,7 @@ def test_build_cowork_hooks_drops_sessionstart_and_non_cowork_events():
 
 @_needs_cowork_events
 def test_userpromptsubmit_carries_remapped_runonce_plus_originals():
-    # Issue #139: the six UserPromptSubmit subcommands (the three originals
+    # The six UserPromptSubmit subcommands (the three originals
     # -- quality-cache --warn, prompt-continuity, verbosity-steer -- plus the
     # three run-once features remapped off SessionStart: ensure-health,
     # quality-cache --force, compact-restore --new-session-only) are consolidated

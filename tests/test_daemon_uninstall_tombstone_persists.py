@@ -150,7 +150,7 @@ def test_reinstall_is_the_only_path_that_clears_the_tombstone(measure, tmp_path)
         "start a daemon that immediately exits noop-tombstoned"
     )
     assert '_unlink_if_exists(files["thrash_breadcrumb"])' not in source, (
-        "an uninstall path unlinks the tombstone again -- #106 F2 P1 regression"
+        "an uninstall path unlinks the tombstone again -- regression"
     )
 
 
@@ -246,5 +246,5 @@ def test_uninstall_reclaims_the_daemon_port(measure, tmp_path, monkeypatch):
 
     assert set(ports) == {24842, 24843, 24844, 24845, 24846, 24847, 24848}, (
         "uninstall did not reclaim every runtime's daemon port -- a sibling "
-        "runtime's daemon keeps serving its CSRF token (#106 F2 P1b / G3 B-F1)"
+        "runtime's daemon keeps serving its CSRF token"
     )

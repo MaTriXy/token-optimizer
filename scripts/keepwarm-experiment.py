@@ -40,7 +40,7 @@ import tempfile
 import time
 from pathlib import Path
 
-# Windows console-flash guard (#107). A console-subsystem child spawned from a
+# Windows console-flash guard. A console-subsystem child spawned from a
 # console-less parent gets a NEW console allocated by Windows -- the flashing cmd
 # window. CREATE_NO_WINDOW suppresses it. The attribute exists only on Windows
 # builds, so getattr(..., 0) makes this a no-op on POSIX (0 is the documented

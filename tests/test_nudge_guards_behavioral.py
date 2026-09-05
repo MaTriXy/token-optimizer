@@ -31,7 +31,7 @@ OTHER_SID = "768b1b27-7a17-45b0-859a-58d4ee8620c6"
 
 # Fill and SessionEfficiency satisfy the gentle tier, so a silent result can
 # only come from a guard and never from the tier thresholds. ResourceHealth is
-# present independently because issue #112 split the displayed/gating metrics.
+# present independently because the displayed/gating metrics were split.
 FIRING_CACHE = ("{'fill_pct': 47, 'score': 73, 'session_efficiency': 60, "
                 "'nudge_count': 0, 'last_nudge_time': 0}")
 

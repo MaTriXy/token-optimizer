@@ -122,7 +122,7 @@ _is_safe_prefix() {
         # locations only -- never derived from MISE_DATA_DIR/PYENV_ROOT, which
         # would reopen the PATH-hijack vector. POSIX shims are covered generically
         # by the ownership fallback below; Windows has no reliable stat, so its
-        # managers are enumerated here. (mise pattern via #146, trekie86.)
+        # managers are enumerated here. (mise pattern, trekie86.)
         /[a-zA-Z]/Users/*/AppData/Local/mise/shims/*)                   return 0 ;;
         /[a-zA-Z]/Users/*/.pyenv/pyenv-win/shims/*)                     return 0 ;;
         # All-users `py` launcher lives in the (admin-only-writable) Windows dir.
@@ -474,11 +474,11 @@ _exec_cached_interpreter "$@" || :
 # --version` on every cache miss, which is exactly the flash this launcher
 # exists to prevent.
 #
-# Design (revised for #143): the CANDIDATE ITSELF must supply POSITIVE PROOF
+# Design (revised for the WindowsApps probe fix): the CANDIDATE ITSELF must supply POSITIVE PROOF
 # OF LIFE by writing a marker to a temp file whose content we then require. A
 # dead AppExecutionAlias stub exits without writing it. We do NOT trust a bare
 # exit code (a dead alias can exit 0 silently, see measure.py), and we do NOT
-# trust a sibling "twin" (pythonw.exe): #143 proved that in WindowsApps each
+# trust a sibling "twin" (pythonw.exe): the WindowsApps probe proved that in WindowsApps each
 # alias name is claimed independently, so a LIVE pythonw twin can sit beside a
 # DEAD python3.exe from a different package -- the old twin probe then cached
 # and exec'd the dead stub on every hook. Only the candidate's own liveness

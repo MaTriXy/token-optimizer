@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for OpenCode runtime detection in runtime_env (issue #57).
+"""Regression tests for OpenCode runtime detection in runtime_env.
 
 Two failure modes are covered:
 
@@ -211,7 +211,7 @@ def test_detect_opencode_when_process_signal_true():
 
 
 def test_detect_coexistence_opencode_beats_claude_env():
-    # Issue #57 core: Claude plugin env present AND under an opencode ancestor.
+    # Core: Claude plugin env present AND under an opencode ancestor.
     # The definitive process signal must win.
     assert _detect_with(
         env={"CLAUDE_PLUGIN_ROOT": "/home/me/.claude/plugins"},

@@ -1,6 +1,6 @@
-"""Issue #114 mechanism test: the 20s HookDeadline closes the hook stdout pipe.
+"""Mechanism test: the 20s HookDeadline closes the hook stdout pipe.
 
-The Windows hang (#114): a fossilized SessionEnd hook runs the raw shape
+The Windows hang: a fossilized SessionEnd hook runs the raw shape
 ``python measure.py collect --quiet && python measure.py dashboard --quiet``
 directly from settings.json. When the host TerminateProcess-es the hook
 runner, the measure.py grandchild can keep the inherited stdout pipe open
@@ -161,7 +161,7 @@ def test_collect_deadline_closes_stdout_pipe(tmp_path):
         assert eof, (
             f"stdout pipe did NOT EOF within {EOF_UPPER + 4:.0f}s of a blocking "
             f"collect (elapsed={elapsed:.1f}s). The 20s HookDeadline never fired "
-            f"os._exit(0) -- the #114 fix is absent or regressed. stderr="
+            f"os._exit(0) -- the fix is absent or regressed. stderr="
             f"{proc.stderr.read().decode(errors='replace')[:300]!r}"
         )
         assert EOF_LOWER < elapsed < EOF_UPPER, (
@@ -240,9 +240,9 @@ def test_collect_without_budget_hangs_past_window(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Windows-native #114 proof. The tests above block collect with a FIFO and use
+# Windows-native proof. The tests above block collect with a FIFO and use
 # SIGKILL -> both POSIX-only (skipped on win32). This one exercises the exact
-# load-bearing #114 mechanism -- HookDeadline's os._exit(0) releasing an
+# load-bearing mechanism -- HookDeadline's os._exit(0) releasing an
 # inherited stdout pipe when a hook process stalls -- with NO mkfifo and NO
 # SIGKILL, so it runs on NATIVE WINDOWS in CI. It is the real-Windows evidence
 # that a wedged, budget-bounded hook can never hold the host's pipe open.
@@ -255,7 +255,7 @@ _DEADLINE_SECONDS = 2.0
 def test_hookdeadline_closes_inherited_stdout_pipe_crossplatform():
     """A child that arms HookDeadline(2) and then blocks forever must have its
     inherited stdout pipe EOF at ~2s (the deadline's os._exit(0)) on EVERY OS,
-    Windows included. Proves the #114 pipe-closure mechanism natively on Windows
+    Windows included. Proves the pipe-closure mechanism natively on Windows
     where the FIFO/SIGKILL harness above cannot run."""
     child = (
         "import sys, time\n"
@@ -289,6 +289,6 @@ def test_hookdeadline_closes_inherited_stdout_pipe_crossplatform():
         f"stdout pipe EOF'd at {elapsed:.2f}s, outside the HookDeadline window "
         f"(~{_DEADLINE_SECONDS}s). A sub-{_DEADLINE_SECONDS}s EOF means the child "
         f"exited without the deadline; a >{_DEADLINE_SECONDS + 6:.0f}s EOF means "
-        "os._exit never fired and the pipe was held open (the #114 wedge)."
+        "os._exit never fired and the pipe was held open (the wedge)."
     )
     assert proc.returncode == 0, f"HookDeadline must os._exit(0); got {proc.returncode}"

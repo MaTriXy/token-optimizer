@@ -1,4 +1,4 @@
-"""Regression tests for issue #97 — Claude 5 family context-window resolution.
+"""Regression tests for Claude 5 family context-window resolution.
 
 `_MODEL_CONTEXT_WINDOWS` in hermes_session.py resolves versioned model ids by
 prefix match, but the Claude 5 family (claude-fable-5, claude-sonnet-5, ...)
@@ -29,7 +29,7 @@ _200K = 200_000
 @pytest.mark.parametrize(
     "model,expected",
     [
-        # --- issue #97 repro (the exact ids from the bug report) ---
+        # --- repro (the exact ids from the bug report) ---
         ("claude-fable-5", _1M),
         ("claude-sonnet-5", _1M),
         ("claude-opus-4-8", _1M),  # was already correct via prefix match
@@ -65,5 +65,5 @@ def test_no_claude5_model_resolves_to_the_bare_default():
     """The bug signature: a real 1M model resolving to exactly 200K by fallthrough."""
     for model in ("claude-fable-5", "claude-sonnet-5", "claude-mythos-5", "claude-opus-5"):
         assert context_window_for_model(model) == _1M, (
-            f"{model} regressed to the default window (bug #97)"
+            f"{model} regressed to the default window"
         )

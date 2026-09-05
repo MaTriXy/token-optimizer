@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Regression: ensure-health must not re-add the legacy quality-cache hook (#155).
+"""Regression: ensure-health must not re-add the legacy quality-cache hook.
 
-Since #139 (a299bf7, v5.11.93) the shipped ``UserPromptSubmit`` hook is a single
+Since the UserPromptSubmit hook was consolidated into a single
 in-process dispatcher whose command execs ``hooks/userpromptsubmit_runner.py``
 and runs ``quality-cache`` INSIDE the runner. The literal ``quality-cache``
 substring no longer appears in the hook command.
@@ -29,7 +29,7 @@ sys.path.insert(0, str(SCRIPTS))
 import measure  # noqa: E402
 
 
-# The exact canonical UserPromptSubmit command shipped since #139 (hooks.json).
+# The exact canonical UserPromptSubmit command shipped since the consolidation (hooks.json).
 # It runs quality-cache inside userpromptsubmit_runner.py and, crucially, does
 # NOT contain the literal substring "quality-cache".
 _DISPATCHER_CMD = (
@@ -62,7 +62,7 @@ def _count_legacy_hooks(settings):
 # --- premise: the dispatcher command really has no "quality-cache" substring ---
 
 def test_dispatcher_command_has_no_literal_quality_cache_substring():
-    # Guards the whole point of #155: the naive substring check silently misses
+    # Guards the whole point of the dispatcher-recognition fix: the naive substring check silently misses
     # the consolidated dispatcher.
     assert "quality-cache" not in _DISPATCHER_CMD
 
@@ -153,7 +153,7 @@ def test_setup_quality_bar_does_not_readd_legacy_hook(monkeypatch, tmp_path):
     final = written.get("data", settings)
     assert _count_legacy_hooks(final) == 0, (
         "ensure-health/setup_quality_bar re-added the legacy quality-cache hook "
-        "despite the #139 dispatcher already being installed (regression of #155)"
+        "despite the consolidated dispatcher already being installed (regression)"
     )
     # The canonical dispatcher must still be present and untouched.
     cmds = [
@@ -166,7 +166,7 @@ def test_setup_quality_bar_does_not_readd_legacy_hook(monkeypatch, tmp_path):
 
 def test_plugin_cache_fallback_recognizes_shipped_hook(monkeypatch, tmp_path):
     """The plugin-cache fallback in _is_quality_bar_installed must recognize the
-    shipped canonical hooks.json dispatcher too (issue #155 notes it would not)."""
+    shipped canonical hooks.json dispatcher too."""
     import json
 
     plugin_hooks_dir = tmp_path / "plugins" / "cache" / "mkt" / "token-optimizer" / "1.0" / "hooks"

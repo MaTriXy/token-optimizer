@@ -1,6 +1,6 @@
 """Observed tokens above the window mean a wrong window, not a full context.
 
-Origin: issue #95. The fill percentage was computed as
+Origin: a misdetected context window. The fill percentage was computed as
 min(1.0, tokens / window). When the window is misdetected too small, that clamp
 converts an impossible ratio into a confident-looking 100% -- the single most
 plausible-looking output the code can produce, and indistinguishable from a
@@ -48,7 +48,7 @@ def test_nudge_is_suppressed_when_the_window_is_contradicted():
     assert 'if cached.get("context_window_contradicted"):' in SRC
     suppress_at = SRC.index('if cached.get("context_window_contradicted"):')
     # It must bail before the tier logic that would emit a percentage-based nudge.
-    # Anchor updated for issue #112 when ResourceHealth stopped being labeled
+    # Anchor updated when ResourceHealth stopped being labeled
     # as quality. The invariant is unchanged: suppression first, tiers after.
     # If this index() ever raises, repoint the anchor; do not delete the assertion.
     tier_at = SRC.index('f"[Token Optimizer] Context {fill_pct:.0f}%{window_note}, resource health')

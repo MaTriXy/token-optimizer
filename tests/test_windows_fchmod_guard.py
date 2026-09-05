@@ -1,4 +1,4 @@
-"""Issue #144: os.fchmod() does not exist on Windows (POSIX-only; unlike os.chmod
+"""os.fchmod() does not exist on Windows (POSIX-only; unlike os.chmod
 there is no Windows implementation, so a bare call raises AttributeError, which is
 NOT an OSError subclass and so slips past `except OSError` guards). Two atomic-write
 sites in measure.py were unguarded -- the dashboard generator and the keep-warm
@@ -36,7 +36,7 @@ MEASURE = SCRIPTS / "measure.py"
 def test_every_fchmod_call_is_guarded():
     # Scan EVERY shipped copy of measure.py, not just the canonical one: the repo
     # keeps three byte-identical mirrors (skills/, plugins/, cowork/), and an
-    # unguarded os.fchmod in any of them crashes Windows just the same (issue #144).
+    # unguarded os.fchmod in any of them crashes Windows just the same.
     measures = sorted(REPO.glob("**/token-optimizer/scripts/measure.py"))
     assert measures, "no measure.py copies found to scan"
     unguarded = []
@@ -51,7 +51,7 @@ def test_every_fchmod_call_is_guarded():
                     unguarded.append(f"{mp.relative_to(REPO)}:{i + 1}")
     assert not unguarded, (
         f"unguarded os.fchmod() call(s) at {unguarded} -- os.fchmod does not exist on "
-        "Windows; wrap with `if hasattr(os, \"fchmod\"):` (issue #144)"
+        "Windows; wrap with `if hasattr(os, \"fchmod\"):`"
     )
 
 
@@ -87,7 +87,7 @@ def test_dashboard_generation_survives_missing_fchmod(m, monkeypatch):
         m.generate_standalone_dashboard(quiet=True, force=True)
     except AttributeError as e:
         if "fchmod" in str(e):
-            pytest.fail(f"dashboard generation hit the unguarded os.fchmod (issue #144): {e}")
+            pytest.fail(f"dashboard generation hit the unguarded os.fchmod: {e}")
         raise
     assert m.DASHBOARD_PATH.exists(), "dashboard file was not written under the Windows sim"
 
@@ -102,7 +102,7 @@ def test_keepwarm_marker_write_survives_missing_fchmod(m, monkeypatch):
     # bootstrap_rc defaults to a sentinel, so a bare call reaches the fchmod line.
     result = m._keepwarm_write_scheduler_marker()
     assert result is True, (
-        "keep-warm marker write should succeed under the Windows sim (issue #144); "
+        "keep-warm marker write should succeed under the Windows sim; "
         f"got {result!r} -- an unguarded os.fchmod AttributeError would propagate here "
         "since it is not an OSError caught by the writer's except clause"
     )

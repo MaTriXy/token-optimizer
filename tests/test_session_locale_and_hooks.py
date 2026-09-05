@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Regression tests for v5.11.19 fixes:
 
-1. GitHub #73 — under a non-English locale (e.g. he_IL.UTF-8) `ps` emits
+1. Under a non-English locale (e.g. he_IL.UTF-8) `ps` emits
    localized lstart dates, breaking measure.py's positional parser so every
    session is dropped. The `ps` subprocesses must force LC_ALL=C / LC_TIME=C.
 2. Codex async-hook bug — `measure.py setup-hook` writes a Claude Code hook
    with {"async": true} into settings.json. Codex skips async hooks, so
    setup-hook must no-op under any non-Claude runtime.
-3. Lean-output nudge — issue #112: the gentle verbosity-steer tier must use
+3. Lean-output nudge: the gentle verbosity-steer tier must use
    SessionEfficiency for its degradation gate and displayed metric.
 
 Run directly:  python3 tests/test_session_locale_and_hooks.py
@@ -37,7 +37,7 @@ def _run(code, env=None):
     )
 
 
-# ---------- 1. Locale-proof ps (GitHub #73) ----------
+# ---------- 1. Locale-proof ps ----------
 
 _CAPTURE_PS_ENV = """
 import sys; sys.path.insert(0, '.')
@@ -142,7 +142,7 @@ print('AT30:' + ('1' if _probe(30, transcript_path=_TP) else '0'))
 print('AT25:' + ('1' if _probe(25, transcript_path=_TP) else '0'))
 print('AT24:' + ('1' if _probe(24, transcript_path=_TP) else '0'))
 print('AT19:' + ('1' if _probe(19, transcript_path=_TP) else '0'))
-# Reporter-validated issue #112 scenarios. ResourceHealth 66 at 63% fill does
+# Reporter-validated scenarios. ResourceHealth 66 at 63% fill does
 # not mean a flawless session is behaviorally degraded, so the gentle tier must
 # stay silent when SessionEfficiency is 100.
 flawless = _probe(63, score=66, session_efficiency=100, transcript_path=_TP)

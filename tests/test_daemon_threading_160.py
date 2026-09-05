@@ -1,4 +1,4 @@
-"""Regression tests for issue #160: daemon threading + non-blocking health.
+"""Regression tests for daemon threading + non-blocking health.
 
 The generated dashboard daemon used `socketserver.TCPServer` (single-threaded),
 so a synchronous `POST /api/regenerate` (10-17s build) blocked EVERY other
@@ -6,7 +6,7 @@ request. Liveness probes (`/api/health`, `/__to_ping`) use 0.5-1s timeouts, so
 during a regen the daemon read as DEAD, which could trigger a revive ->
 `kickstart -k` that restarted the daemon mid-regen and aborted the click.
 
-The fix (issue #160):
+The fix:
   1. Switch the server to `socketserver.ThreadingTCPServer`.
   2. Guard shared per-request globals (`_regen_inflight`, `_last_regen`,
      `_MEASURE_PY_CACHE`, `_REJECT_LOG_LAST_TS`) with `_STATE_LOCK`.
@@ -68,7 +68,7 @@ def test_generated_daemon_uses_threading_server():
     src = _generated_src()
     assert "ThreadingTCPServer" in src, (
         "generated daemon is not on a ThreadingTCPServer; a synchronous regen "
-        "would block liveness probes again (issue #160)"
+        "would block liveness probes again"
     )
     assert "socketserver.TCPServer((" not in src, (
         "generated daemon still instantiates the single-threaded TCPServer"
@@ -385,8 +385,8 @@ def test_health_probe_is_not_blocked_during_regen(live_daemon):
     except (urllib.error.URLError, OSError) as e:
         live_daemon._stop()
         pytest.fail(
-            "health probe was blocked/timed out during a regen (issue #160 "
-            "regression): %r" % e
+            "health probe was blocked/timed out during a regen "
+            "regression: %r" % e
         )
 
     assert elapsed < 2 * REGEN_STEP_SLEEP, (
@@ -525,7 +525,7 @@ def test_saturation_returns_503_and_does_not_spawn_unbounded_threads(live_daemon
 
         assert data.startswith(b"HTTP/1.1 503"), (
             "a connection past the worker cap was not refused with 503 (unbounded "
-            "thread creation regression, issue #160 follow-up); got %r" % data[:80]
+            "thread creation regression); got %r" % data[:80]
         )
     finally:
         for s in held:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cleanup command orchestrator test (issue #106 + cleanup).
+"""Cleanup command orchestrator test (uninstall + cleanup).
 
 The ``cleanup`` command orchestrates three uninstall surfaces:
 1. Daemon (identity-sweeping, dry-run-aware).

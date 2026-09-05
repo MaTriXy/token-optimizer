@@ -5,7 +5,7 @@ drops resume recall fails CI; a change that surfaces on fresh fails CI.
 
 Fixtures: tests/fixtures/history/openings_and_checkpoints.json -- sanitized real
 openings (derived from real Claude Code session first-prompts) + topic-faithful
-checkpoint sidecars + incident fixtures (#129, #61, own-session, non-UTF-8, CJK).
+checkpoint sidecars + incident fixtures (stale-pool, cross-project, own-session, non-UTF-8, CJK).
 
 Three lock types:
   1. Resume-direction: each resume opening -> the RIGHT checkpoint wins AND

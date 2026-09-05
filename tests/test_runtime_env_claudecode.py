@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for Claude Code runtime detection in runtime_env (issue #120).
+"""Regression tests for Claude Code runtime detection in runtime_env.
 
 Bug: on a host running under Claude Code (CLAUDECODE=1) with a coexisting
 ``~/.codex`` DIRECTORY, the shell heuristic's ``elif [ -d "$HOME/.codex" ]``

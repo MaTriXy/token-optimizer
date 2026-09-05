@@ -41,7 +41,7 @@ def _load_reject_logger(tmp_log: Path):
     a copy that could drift away from what users actually run.
     """
     src = _generated_src()
-    # issue #160: _log_reject_regen now guards _REJECT_LOG_LAST_TS with
+    # _log_reject_regen now guards _REJECT_LOG_LAST_TS with
     # _STATE_LOCK; give the extracted function a real lock so it runs in-isolation.
     ns = {"time": time, "os": __import__("os"), "_STATE_LOCK": threading.Lock()}
     # _REJECT_LOG_LAST_TS is now a per-path dict with a type annotation

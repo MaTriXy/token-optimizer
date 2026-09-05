@@ -282,7 +282,7 @@ def test_report_desktop_path_unchanged(monkeypatch, capsys):
 
 
 def test_compact_restore_envelope_event_derives_from_hook_event_name():
-    """PR #142 (@danikdanik): the compact-restore dispatch must choose the emitted
+    """The compact-restore dispatch must choose the emitted
     envelope's hookEventName from the firing hook's stdin `hook_event_name`, NOT
     from is_cowork(). is_cowork() false-positives on the local CLI (hook
     subprocesses inherit the harness AI_AGENT marker), so the old static
@@ -298,5 +298,5 @@ def test_compact_restore_envelope_event_derives_from_hook_event_name():
     )
     # And must NOT reinstate the is_cowork-based static choice at the emit site.
     assert '_buf.getvalue(), event="UserPromptSubmit" if _cw else "SessionStart"' not in src, (
-        "compact-restore reverted to the is_cowork static event choice (PR #142 regression)"
+        "compact-restore reverted to the is_cowork static event choice (regression)"
     )

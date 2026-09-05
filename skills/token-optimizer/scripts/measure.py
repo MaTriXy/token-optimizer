@@ -214,7 +214,7 @@ _OPENCODE_CLAUDE_TARGET_CMDS = _CLAUDE_TARGET_CMDS
 # adapter: hermes_session.py, _collect_hermes_sessions, hermes_doctor.py) —
 # before this, trends/savings/quality/drift/coach fell through to the
 # CLAUDE_DIR scan path in measure_components()/_find_all_jsonl_files() and
-# produced empty output against the wrong tree (the #57 isolation leak).
+# produced empty output against the wrong tree (the isolation leak).
 _FOREIGN_RUNTIMES = frozenset({"opencode", "copilot", "hermes", "cursor", "antigravity", "grok"})
 
 # Per-runtime exemptions: foreign-runtime subcommands that a NATIVE flow
@@ -230,7 +230,7 @@ _FOREIGN_RUNTIMES = frozenset({"opencode", "copilot", "hermes", "cursor", "antig
 # measure_components() routes to _measure_hermes_components() (no ~/.claude
 # scan), and _find_all_jsonl_files() returns [] under hermes (sessions come
 # from state.db via hermes-rollup, not ~/.claude/projects JSONL). So allowing
-# it does not violate the #57 isolation principle.
+# it does not violate the isolation principle.
 #
 # Cursor exempts ``dashboard`` for the same reason as Hermes: its hook bridge
 # shells to ``measure.py dashboard`` on session-end, the daemon is runtime-
@@ -246,7 +246,7 @@ _FOREIGN_RUNTIMES = frozenset({"opencode", "copilot", "hermes", "cursor", "antig
 # _measure_antigravity_components() (no ~/.claude scan), and
 # _find_all_jsonl_files() returns [] under antigravity (sessions come from the
 # read-only conversation store via antigravity-rollup, not ~/.claude/projects
-# JSONL). So allowing it does not violate the #57 isolation principle.
+# JSONL). So allowing it does not violate the isolation principle.
 #
 # OpenCode and Copilot exempt NOTHING: their native flows (the OpenCode TS
 # plugin; copilot_hook_bridge.py) never invoke a _CLAUDE_TARGET_CMDS
@@ -1466,7 +1466,7 @@ def _encode_project_dir_name(path_str):
     `D:\\Code\\my app` must become `D--Code-my-app` -- the old `/`-and-`_`-only
     replacement left the drive colon, backslashes, and spaces intact, so the
     encoded name never matched and `find_projects_dir` fell back to the most
-    recently modified project across ALL projects (GitHub #61, cross-project
+    recently modified project across ALL projects (cross-project
     leak). A leading separator still yields the leading '-' on POSIX, and POSIX
     paths with spaces now encode correctly too.
     """
@@ -2315,7 +2315,7 @@ def measure_components():
     # and <cwd>/.claude/agents/, injected into the system prompt like skills.
     # Without this count the "estimated vs real" calibration line silently
     # absorbs the agent frontmatter tokens, understating the reported total
-    # by the same 5-7% the skills half of #161 measured.)
+    # by the same 5-7% the skills half of the agent-scan fix measured.)
     agent_count = 0
     agent_tokens = 0
     agent_names = []
@@ -3429,7 +3429,7 @@ def quick_scan(as_json=False):
         if eager > 0:
             detail += f" ({eager} with eager-loaded tools)"
         offenders.append(("mcp", mcp_count, mcp.get("tokens", 0), detail))
-    # Per-file CLAUDE.md offenders (PR #100, danikdanik). measure_components()
+    # Per-file CLAUDE.md offenders. measure_components()
     # keys each ancestor CLAUDE.md separately (claude_md_global,
     # claude_md_home, claude_md_project_<dir>), mirroring how Claude Code loads
     # them up the directory tree. Blending them into one "CLAUDE.md" entry
@@ -3505,7 +3505,7 @@ def quick_scan(as_json=False):
                 "extend": f"Improves stable prompt-cache prefix and extends peak quality by ~{savings:,} tokens",
             }
     if not quick_win and _claude_md_files:
-        # PR #100 (danikdanik): pick the LARGEST single CLAUDE.md rather than
+        # Pick the LARGEST single CLAUDE.md rather than
         # blending every ancestor file, so the action names a file the user can
         # actually open. Savings math stays ours: Anthropic's documented
         # 200-line guidance, with tokens-per-line taken from that one file, and
@@ -4974,7 +4974,7 @@ def _serve_dashboard(filepath, port=8080, host="127.0.0.1"):
                 # An env-managed feature can't be toggled from the dashboard: a
                 # config.json write would be silently shadowed by the env var,
                 # leaving the UI out of sync with runtime. Reject it honestly
-                # rather than pretend the toggle took effect. Issue #77.
+                # rather than pretend the toggle took effect.
                 if _resolve_feature_env(V5_FEATURES[name]["env_var"]) is not None:
                     self._json_response(409, {
                         "ok": False,
@@ -7499,7 +7499,7 @@ def _spawn_detached_dashboard_selfheal(days=30, force=False):
 
     ``force`` appends ``--force`` so the child bypasses the 60s write throttle.
     Used by the version-bump self-heal: a stale file written seconds ago by a
-    just-killed regen must not throttle-skip the heal. The PR #154 version guard
+    just-killed regen must not throttle-skip the heal. The version guard
     still applies inside generate_standalone_dashboard (force governs the throttle,
     not version precedence), so a forced heal never clobbers a newer dashboard.
     """
@@ -7641,7 +7641,7 @@ def _dispatch_dashboard(args):
         quiet = "--quiet" in args or "-q" in args
         # --force bypasses the 60s write throttle. The detached version-bump
         # self-heal passes it so a stale file just written by a killed regen
-        # cannot throttle-skip the heal (the PR #154 version guard still applies).
+        # cannot throttle-skip the heal (the version guard still applies).
         force = "--force" in args
         for i, a in enumerate(args):
             if a == "--days" and i + 1 < len(args):
@@ -7665,7 +7665,7 @@ def _dispatch_dashboard(args):
         # the file catches up without ever blocking the session. forward
         # `force` -- a killed --force regen just wrote a stale file seconds ago, so
         # the detached retry must ALSO bypass the 60s write throttle or it
-        # throttle-skips and the file stays stale (the PR #154 version guard still
+        # throttle-skips and the file stays stale (the version guard still
         # applies, so a forced heal never clobbers a newer dashboard).
         if timed_out:
             _spawn_detached_dashboard_selfheal(days=days, force=force)
@@ -7959,7 +7959,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
         )
 
     # --- Rule 2: CLAUDE.md too large (PER FILE) ---
-    # PR #100 (danikdanik). measure_components() keys each ancestor CLAUDE.md as
+    # measure_components() keys each ancestor CLAUDE.md as
     # its own component (claude_md_global, claude_md_home,
     # claude_md_project_<dir>), mirroring how Claude Code loads CLAUDE.md files
     # up the directory tree. Summing N files into one "Slim CLAUDE.md" number
@@ -8238,7 +8238,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
             f"These skills are loaded {len(paths_example)}+ times each because the plugin registry "
             f"has multiple install paths: {', '.join(dupe_names[:5])}.\n"
             f"  Claude Code loads skills from EVERY registered install path, so duplicates "
-            f"genuinely consume extra context tokens (Claude Code bug #27721).\n"
+            f"genuinely consume extra context tokens (a Claude Code bug).\n"
             f"  Fix: `python3 measure.py plugin-cleanup` (or `--dry-run` to preview). "
             f"Run `--dry-run` first to preview changes. "
             f"~{wasted:,} tokens recoverable."
@@ -8259,7 +8259,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
                 f"**Plugin loaded from worktree directory ({len(worktree)} path{'s' if len(worktree) > 1 else ''})**: "
                 f"Plugin '{worktree[0]['plugin']}' has install paths inside worktree directories. "
                 f"These accumulate as you create worktrees and may cause duplicate skill loading "
-                f"(Claude Code bug #27069).\n"
+                f"(a Claude Code bug).\n"
                 f"  Fix: 1) Remove old manual worktrees: `git worktree list` then `git worktree remove <name>` "
                 f"for unused ones. 2) Use `claude -w` instead of `git worktree add` going forward, "
                 f"the built-in flag avoids the duplication bug. "
@@ -8332,7 +8332,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
 
     # --- Rule 15: claude.ai MCP servers ---
     # Resolve across process env + all settings files (project overrides global)
-    # so a project-level opt-out suppresses this nudge too. Issue #77 class.
+    # so a project-level opt-out suppresses this nudge too (same class).
     claudeai_val = _resolve_feature_env("ENABLE_CLAUDEAI_MCP_SERVERS") or ""
     if str(claudeai_val).lower() != "false":
         # Estimate: each cloud-synced server adds ~300-500 tokens (tool defs + instructions)
@@ -9385,7 +9385,7 @@ def _extract_skills_and_agents_from_subagent(filepath):
 
     Returns (skills_dict, subagents_dict) without extracting token usage.
     Model-level token attribution is handled separately in collect_sessions()
-    via _parse_session_jsonl() on each subagent file (see fix #18).
+    via _parse_session_jsonl() on each subagent file (the model attribution fix).
     """
     skills = {}
     subagents = {}
@@ -13764,7 +13764,7 @@ def _keepwarm_tripwire_off():
 #   * Install marker sidecar (0600) records installed_at + plist path. ensure-
 #     health's repair keys on marker AND consent: a user-deleted plist with a
 #     marker + consent=enabled is regenerated; declined/unasked/absent-marker is
-#     NEVER (re)installed (the #59 sticky-opt-out lesson).
+#     NEVER (re)installed (the sticky-opt-out lesson).
 # Per-OS honesty: macOS launchd is implemented fully. The dashboard
 # dispatcher's systemd/schtasks arms ARE real installers, but keep-warm only
 # implements macOS in this unit; Linux/Windows print an honest documented-gap
@@ -14370,7 +14370,7 @@ def keepwarm_scheduler_repair(gate=None):
 
     Regenerate + bootstrap the keep-warm agent ONLY when ALL hold:
       * consent gate allows (api + consent=enabled / limits-lab);
-      * the install marker exists (WE installed here before) -- #59 lesson;
+      * the install marker exists (WE installed here before) -- sticky-opt-out lesson;
       * the plist is missing or stale (label drift / older content).
     Otherwise NO-OP. The hot path when nothing needs repair is cheap file-
     existence checks only -- NO subprocess, NO launchctl -- to honour the <50ms
@@ -18930,7 +18930,7 @@ def _rebuild_aggregate_tables(conn):
 
 
 def _needs_model_daily_rebuild(conn):
-    """Check if DB predates the #18 model attribution fix (schema version < 2)."""
+    """Check if DB predates the model attribution fix (schema version < 2)."""
     try:
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
         return ver < 2
@@ -18951,7 +18951,7 @@ def _needs_streaming_dedup_rebuild(conn):
 
 
 def _migrate_model_daily(conn, quiet=False):
-    """One-time migration for fix #18: wipe model_daily so it rebuilds correctly.
+    """One-time migration for the model attribution fix: wipe model_daily so it rebuilds correctly.
 
     Only deletes model_daily (lightweight aggregate table). session_log is
     preserved. New sessions collected after this get correct model attribution.
@@ -18964,7 +18964,7 @@ def _migrate_model_daily(conn, quiet=False):
         conn.execute("DELETE FROM model_daily")
         conn.commit()
         if not quiet:
-            print("[Token Optimizer] Migrated model_daily for corrected model attribution (fix #18).")
+            print("[Token Optimizer] Migrated model_daily for corrected model attribution.")
             print("  New sessions will have correct model mix. For full historical accuracy:")
             print("  python3 measure.py collect --rebuild")
     except sqlite3.Error as e:
@@ -20227,7 +20227,7 @@ def collect_sessions(days=90, quiet=False, rebuild=False):
 
     Skips files already collected. Safe to run repeatedly.
     With rebuild=True, drops and re-collects all data (e.g., after a
-    measurement fix like #18 model attribution).
+    measurement fix like model attribution).
     """
     if _use_hermes_session_adapter():
         return _collect_hermes_sessions(days=days, quiet=quiet, rebuild=rebuild)
@@ -20246,7 +20246,7 @@ def collect_sessions(days=90, quiet=False, rebuild=False):
 
     conn = _init_trends_db()
 
-    # One-time migration for fix #18: wipe model_daily (safe, fast, no data loss)
+    # One-time migration for the model attribution fix: wipe model_daily (safe, fast, no data loss)
     if _needs_model_daily_rebuild(conn):
         _migrate_model_daily(conn, quiet=quiet)
 
@@ -21528,7 +21528,7 @@ def _find_session_version_for_pid(pid):
             ["ps", "-o", "lstart=", "-p", str(pid)],
             capture_output=True, text=True, timeout=5,
             # Force C locale so ps emits English lstart regardless of host
-            # locale (e.g. he_IL.UTF-8 emits Hebrew month names). GitHub #73.
+            # locale (e.g. he_IL.UTF-8 emits Hebrew month names).
             env={**os.environ, "LC_ALL": "C", "LC_TIME": "C"}, creationflags=_NO_WINDOW,
         )
         if result.returncode != 0:
@@ -21627,7 +21627,7 @@ def _collect_posix_claude_sessions(process_name="claude"):
             # Force C locale so lstart is always English 5-field format. Under
             # non-English locales (e.g. he_IL.UTF-8) ps emits localized dates
             # with a different field count, breaking the positional parse below
-            # and dropping every session. GitHub #73.
+            # and dropping every session.
             env={**os.environ, "LC_ALL": "C", "LC_TIME": "C"}, creationflags=_NO_WINDOW,
         )
     except (subprocess.SubprocessError, OSError):
@@ -22201,7 +22201,7 @@ def health_selfcheck():
                 ["ps", "-eo", "pid,tty,lstart,etime,command"],
                 capture_output=True, text=True, timeout=10,
                 # Match the production collectors: force C locale so this
-                # diagnostic mirrors what _collect_posix_claude_sessions sees. GitHub #73.
+                # diagnostic mirrors what _collect_posix_claude_sessions sees.
                 env={**os.environ, "LC_ALL": "C", "LC_TIME": "C"}, creationflags=_NO_WINDOW,
             )
             ok = res.returncode == 0 and len(res.stdout.strip().split("\n")) > 1
@@ -22638,10 +22638,10 @@ def _write_settings_atomic_locked(settings_data, allow_removing_keys=None, _repo
 
     Never call this without already holding ``_settings_lock()``; it provides
     no serialization of its own. Same tempfile + os.replace + mode/symlink
-    semantics as ``_write_settings_atomic`` (see #106). Returns True iff the
+    semantics as ``_write_settings_atomic`` (see the checked-read fix). Returns True iff the
     write landed.
     """
-    # #106: write THROUGH a symlink and preserve the mode.
+    # Write THROUGH a symlink and preserve the mode.
     # os.replace onto the link path detaches it, turning a dotfiles-managed
     # symlink into a regular file (the user's repo silently stops tracking
     # their settings) and dropping 0644 to mkstemp's 0600. Resolve the link
@@ -23203,7 +23203,7 @@ def setup_hook(dry_run=False, uninstall=False):
     uses {"async": true}. Async hooks are a Claude Code feature; Codex skips
     them (see codex_doctor) and other runtimes use their own installers. So
     never write this hook under a non-Claude runtime — Codex must go through
-    codex-install, which writes a synchronous .codex/hooks.json entry. GitHub #73-adjacent.
+    codex-install, which writes a synchronous .codex/hooks.json entry.
     """
     if detect_runtime() != "claude":
         # Informational on every path (including dry-run / uninstall) so a
@@ -23257,7 +23257,7 @@ def setup_hook(dry_run=False, uninstall=False):
     installed = _is_hook_installed(settings)
     current = _is_hook_current(settings)
 
-    # Plugin users get this hook from hooks.json — skip writing to settings.json (GitHub #7)
+    # Plugin users get this hook from hooks.json — skip writing to settings.json
     is_plugin = _is_running_from_plugin_cache() or _is_plugin_installed()
     if is_plugin:
         if installed:
@@ -24950,7 +24950,7 @@ def _resolve_hook_command(template_cmd, plugin_root):
 def _windows_hook_command_is_stale(existing_cmd, resolved_cmd):
     """True when SessionStart should replace a legacy Windows hook command.
 
-    Legacy means the pre-#118 native cmd.exe form (list2cmdline argv + a cmd
+    Legacy means the pre-fix native cmd.exe form (list2cmdline argv + a cmd
     null redirect), which fails under Git Bash. The current form is the bash
     launcher, identical in shape to POSIX.
     """
@@ -26184,9 +26184,9 @@ def _windows_gui_python():
 
     Thin alias over ``_resolve_windows_pythonw`` (which already refuses MS Store
     App Execution Aliases -- those do not resolve under Task Scheduler's launch
-    context) so #107 call sites read by intent rather than by platform trivia.
+    context) so the no-flash call sites read by intent rather than by platform trivia.
     Returns None off Windows and whenever no usable twin exists; every caller
-    must fall back to its pre-#107 behaviour.
+    must fall back to its pre-fix behaviour.
     """
     if os.name != "nt":
         return None
@@ -26198,7 +26198,7 @@ def _windows_gui_python():
         # flavour disagrees with os.name (real case: a POSIX box with os.name
         # monkeypatched; plausible case: an embedded/frozen interpreter with a
         # non-path sys.executable). Degrade to "no twin" -> caller keeps
-        # sys.executable, which is exactly the pre-#107 behaviour.
+        # sys.executable, which is exactly the pre-fix behaviour.
         return None
 
 
@@ -26295,11 +26295,11 @@ def _generate_windows_launcher_cmd(daemon_script_path, log_dir):
     ``%ERRORLEVEL%`` inside a ``( ... )`` block expands once at block-parse
     time, so a block form would test a stale value.
 
-    #107: the bare-PATH ``pythonw.exe`` rung needs a
+    # The bare-PATH ``pythonw.exe`` rung needs a
     WindowsApps guard: a Microsoft Store App Execution Alias exits 0 SILENTLY
     under Task Scheduler's non-interactive token, so an unguarded first rung
     would "succeed", ``exit /b 0``, and no daemon would ever start -- on hosts
-    where the pre-#107 ``py -3``-first ladder worked. The rung therefore
+    where the pre-fix ``py -3``-first ladder worked. The rung therefore
     resolves the PATH hit with ``%%~$PATH:I`` (pure cmd, no extra process --
     where.exe is banned here) and skips itself when the hit lives under
     WindowsApps. pyw.exe/py.exe are real launchers in C:\\Windows, never Store
@@ -26395,7 +26395,7 @@ def _generate_schtasks_xml(task_name, user_id, command, arguments=""):
     ``_windows_task_exec_action`` and are normally pythonw.exe + the daemon
     script, NOT the .cmd launcher. See that helper for why <Hidden> was never
     enough. ``<Arguments>`` is emitted only when non-empty so the .cmd fallback
-    still produces the exact pre-#107 XML shape.
+    still produces the exact pre-fix XML shape.
     """
     from xml.sax.saxutils import escape as _xml_escape
 
@@ -28017,8 +28017,8 @@ def _windows_task_action_info(task_name=None):
     ignored): False when the user disabled the task (Task Scheduler UI
     right-click Disable, or ``schtasks /Change /DISABLE``), True when
     explicitly enabled, None when the XML carries no Settings-level flag.
-    #107: a disabled task must be treated exactly like a
-    tombstone -- pre-#107 that opt-out was durable, and the heal must not
+    A disabled task must be treated exactly like a
+    tombstone -- pre-fix that opt-out was durable, and the heal must not
     re-register it ``<Enabled>true</Enabled>``.
 
     ``schtasks /Query /XML`` emits UTF-16, which text-mode decoding turns into
@@ -28154,7 +28154,7 @@ def _heal_windows_task_action(stop_first=False, throttle=False):
     installer that RAISES must not strand the daemon) -- but ONLY when the
     still-registered action is neither a console flasher nor a dead path
     (/Run-ing a .cmd action IS one extra console flash per session,
-    the exact bug #107 set out to remove; the LogonTrigger revives the daemon
+    the exact console flash the fix set out to remove; the LogonTrigger revives the daemon
     at next logon instead).
 
     ``throttle``: the ensure-health path passes True so a persistently-failing
@@ -28635,7 +28635,7 @@ _CHECKPOINT_MAX_FILES = _int_env("TOKEN_OPTIMIZER_CHECKPOINT_FILES", 10)
 # fire-cooldown is handled separately by _CHECKPOINT_COOLDOWN_SECONDS.
 _CHECKPOINT_RETENTION_DAYS = _int_env("TOKEN_OPTIMIZER_CHECKPOINT_RETENTION_DAYS", 7)
 _CHECKPOINT_RETENTION_MAX = _int_env("TOKEN_OPTIMIZER_CHECKPOINT_RETENTION_MAX", 50)
-# Relevance gating (GitHub #82): the lightweight prompt-continuity hint used to
+# Relevance gating: the lightweight prompt-continuity hint used to
 # inject a full multi-line `[RECOVERED DATA ...]` block for any prior session
 # scoring as low as 0.30, even when the prior session was on a DIFFERENT topic.
 # A two-tier gate fixes that without losing the signal entirely:
@@ -30496,7 +30496,7 @@ def _score_attention(sections_analyzed):
 
 
 # ---------------------------------------------------------------------------
-# Memory Review — structural auditor for MEMORY.md and CLAUDE.md (Issue #15)
+# Memory Review — structural auditor for MEMORY.md and CLAUDE.md
 # ---------------------------------------------------------------------------
 
 _MR_MEMORY_LINE_LIMIT = 200  # Claude auto-loads only the first N lines of MEMORY.md
@@ -32183,7 +32183,7 @@ def _security_report(as_json=False):
         },
         "credential_scanning": {"pattern_count": cred_count, "types": cred_types},
         "hooks": {"count": len(hooks_list), "source": str(hooks_json_path) if hooks_json_path else None},
-        "dashboard": {"daemon_pid": daemon_pid, "daemon_running": daemon_running, "token_file_exists": DAEMON_TOKEN_PATH.exists(), "token_file_permissions": _file_info(DAEMON_TOKEN_PATH).get("permissions"), "bind_address": (_read_dashboard_host_file() or "127.0.0.1")},  # #59: reflect persisted host
+        "dashboard": {"daemon_pid": daemon_pid, "daemon_running": daemon_running, "token_file_exists": DAEMON_TOKEN_PATH.exists(), "token_file_permissions": _file_info(DAEMON_TOKEN_PATH).get("permissions"), "bind_address": (_read_dashboard_host_file() or "127.0.0.1")},  # reflect persisted host
         "transcript_preservation": {"cleanup_period_days": cleanup_period, "note": "Intentional: preserves transcripts for trend analysis. Transcripts are host platform data."},
     }
 
@@ -34080,7 +34080,7 @@ _RESUME_INTENT_RE = re.compile(
 # session") so we fall back to the most-recent same-project checkpoint.
 _RESUME_NAMED_TOPIC_BAR = _float_env("TOKEN_OPTIMIZER_RESUME_TOPIC_BAR", 0.22)
 
-# Staleness cap for the VAGUE-continue fallback (GitHub #129): when the prompt
+# Staleness cap for the VAGUE-continue fallback: when the prompt
 # names no distinguishing topic we may only surface the most-recent same-project
 # checkpoint if it is fresher than this. Beyond it, blindly reopening whichever
 # sibling session was last active in the same folder is how an UNRELATED session's
@@ -34214,7 +34214,7 @@ def _checkpoint_in_project(sidecar, cwd):
     # `rstrip("/")` was a no-op and `root + "/"` could never prefix a
     # backslash-separated path -- this always returned False on Windows, silently
     # disabling the same-project filter and leaking cross-project context
-    # (GitHub #61). macOS/Windows default filesystems are case-insensitive, so we
+    # (cross-project leak). macOS/Windows default filesystems are case-insensitive, so we
     # casefold there too for a robust match.
     _case_insensitive = platform.system() in ("Windows", "Darwin")
 
@@ -34278,7 +34278,7 @@ def _recover_item_tokens(text):
 
 
 def _keep_recovered_item(item_text, keep_tokens):
-    """Set-overlap keep/drop rule for a single recovered item (GitHub #103).
+    """Set-overlap keep/drop rule for a single recovered item.
 
     KEEP iff the item has < 3 distinctive tokens (inconclusive -> keep) OR its
     token set has nonempty intersection with ``keep_tokens``. DROP iff it has
@@ -34343,7 +34343,7 @@ def _is_absolute_path(p):
 
 def _cross_project_file_drop(p, cwd):
     """True when file path ``p`` is an attributable absolute path that does
-    NOT live under ``cwd`` — a cross-project file (GitHub #103).
+    NOT live under ``cwd`` — a cross-project file.
 
     The set-overlap tokenizer treats a full path as a SINGLE token (the
     regex ``[a-zA-Z0-9_./:-]+`` includes slashes), so it has < 3 distinctive
@@ -34362,7 +34362,7 @@ def _cross_project_file_drop(p, cwd):
 def _checkpoint_has_cross_project_path(sidecar, cwd):
     """True when the checkpoint sidecar carries at least one attributable
     absolute file path that is NOT under ``cwd`` — the checkpoint genuinely
-    spans multiple projects (GitHub #103).
+    spans multiple projects.
 
     DECISION filtering is gated on this: a single-project checkpoint (every
     attributable path in-project, or no attributable paths) has nothing to
@@ -34410,7 +34410,7 @@ def _in_project_paths(sidecar, cwd):
 
 
 def _continuity_keep_tokens(prompt_text, cwd, in_project_paths):
-    """Build the keep-token set for per-item relevance filtering (GitHub #103).
+    """Build the keep-token set for per-item relevance filtering.
 
     = prompt topic tokens (same extraction as ``_recover_item_tokens``)
       ∪ tokens of the cwd basename
@@ -34432,7 +34432,7 @@ def _continuity_resume_block(text, checkpoints, sid_safe, cwd):
     reconstruction of the right same-project session, or "" to fall through to
     the lightweight hint.
 
-    Selection order (GitHub #129): (1) a session id NAMED in the prompt wins and
+    Selection order: (1) a session id NAMED in the prompt wins and
     is scoped strictly to that session -- never silently substituted; (2) else the
     keyword winner when the prompt names a topic (best same-project score >=
     _RESUME_NAMED_TOPIC_BAR); (3) else the most-recent same-project session, but
@@ -34511,7 +34511,7 @@ def _continuity_resume_block(text, checkpoints, sid_safe, cwd):
     else:
         # (3) Vague "continue last session" -> most-recent same-project, but only
         # if fresh. A stale freshest pick is almost certainly an unrelated sibling
-        # session (GitHub #129), so decline rather than guess.
+        # session, so decline rather than guess.
         chosen = max(same_project, key=lambda x: x[1]["created"].timestamp())
         age_min = (datetime.now() - chosen[1]["created"]).total_seconds() / 60
         if age_min > _RESUME_RECENCY_CAP_MIN:
@@ -34631,10 +34631,10 @@ def _continuity_prompt_hint(prompt_text="", session_id=None, cwd=None, max_age_m
                 continue
             score, sidecar = _checkpoint_topic_score(text, checkpoint, cwd=cwd)
             # Collect from the teaser floor (default 0.3); the full-block gate
-            # is applied later when rendering the TOP session (GitHub #82).
+            # is applied later when rendering the TOP session.
             if score >= _RELEVANCE_TEASER_FLOOR:
                 # Project-scope when cwd is known: the lightweight hint must NOT
-                # surface checkpoints from OTHER projects (GitHub #61 -- a fresh
+                # surface checkpoints from OTHER projects (a fresh
                 # prompt in project A was receiving project B's tasks/decisions).
                 # The resume path already filters this way; the lightweight pool
                 # now mirrors it. cwd unknown -> best-effort global (unchanged).
@@ -34670,7 +34670,7 @@ def _continuity_prompt_hint(prompt_text="", session_id=None, cwd=None, max_age_m
     checkpoint = top["checkpoint"]
     sidecar = top["sidecar"]
 
-    # GitHub #82 -- relevance gating for the lightweight prompt-continuity hint.
+    # Relevance gating for the lightweight prompt-continuity hint.
     # The TOP session cleared the collection floor (_RELEVANCE_TEASER_FLOOR,
     # default 0.3) but a low-relevance, cross-topic session should NOT inject a
     # full multi-line `[RECOVERED DATA ...]` block by default. Below the
@@ -34731,7 +34731,7 @@ def _continuity_prompt_hint(prompt_text="", session_id=None, cwd=None, max_age_m
             f"- Prior context quality: {quality.get('grade', '?')} "
             f"({quality.get('score', '?')}/100), fill {quality.get('breakdown', {}).get('context_fill_degradation', {}).get('fill_pct', '?')}%"
         )
-    # Per-item relevance filter (GitHub #103): a checkpoint that passed the
+    # Per-item relevance filter: a checkpoint that passed the
     # same-project gate may still carry session-wide Key Decisions / Files that
     # name ONLY the other project in a two-project session. Drop those with the
     # set-overlap rule (no float threshold): filter FIRST, then apply the
@@ -34741,14 +34741,14 @@ def _continuity_prompt_hint(prompt_text="", session_id=None, cwd=None, max_age_m
     # over-prune failure mode, forbidden).
     # Gated on the prompt+cwd sentinel (matches build_lean_resume_context): a
     # legacy caller with cwd absent gets the UNFILTERED hint with NO fabricated
-    # disclosure (GitHub #103 #6). The hint surface previously computed
+    # disclosure (legacy behavior). The hint surface previously computed
     # keep_tokens unconditionally, so cwd=None callers were token-filtered on
     # prompt text alone and got a misleading "scoped to current project" line.
     keep_tokens = (
         _continuity_keep_tokens(text, cwd, _in_project_paths(sidecar, cwd))
         if (text and cwd) else None
     )
-    # Decision filtering is gated on checkpoint mixture (GitHub #103): a
+    # Decision filtering is gated on checkpoint mixture: a
     # single-project checkpoint has nothing to scope, so its decisions are
     # kept verbatim even when they name no project token. Only a checkpoint
     # that genuinely spans projects (>= 1 attributable path outside cwd) gets
@@ -34992,7 +34992,7 @@ def _lean_list(items, n, width=140, keep_tokens=None):
 
     When ``keep_tokens`` is provided, the set-overlap keep/drop filter
     (``_keep_recovered_item``) is applied FIRST and the ``n`` slice is taken
-    from the survivors (GitHub #103). When ``keep_tokens`` is None the behavior
+    from the survivors. When ``keep_tokens`` is None the behavior
     is byte-identical to the pre-filter implementation (first ``n`` items)."""
     if not isinstance(items, (list, tuple)):
         return []
@@ -35026,7 +35026,7 @@ def build_lean_resume_context(session_id, max_chars=3500, prompt_text=None, cwd=
     context, never instructions.
 
     When ``prompt_text`` and ``cwd`` are both supplied, the per-item relevance
-    filter (GitHub #103) drops Key Decisions / Modified files / Recently read
+    filter drops Key Decisions / Modified files / Recently read
     that name only a DIFFERENT project from this same checkpoint, and emits one
     disclosure line when anything is dropped. Without them (e.g. the CLI
     ``--resume-lean`` caller) the block is unfiltered for backward compat.
@@ -35074,7 +35074,7 @@ def build_lean_resume_context(session_id, max_chars=3500, prompt_text=None, cwd=
         oq = _lean_list(sidecar.get("open_questions", []), 3)
         if oq:
             body.append("- Open questions: " + "; ".join(repr(q) for q in oq))
-        # Per-item relevance filter (GitHub #103): filter FIRST, then slice.
+        # Per-item relevance filter: filter FIRST, then slice.
         # Disclosure counts = filter drops ONLY, never slice truncation.
         # Decision filtering is gated on checkpoint mixture: a single-project
         # checkpoint has nothing to scope, so its decisions are kept verbatim.
@@ -36046,7 +36046,7 @@ def _is_running_from_synced_plugin():
     audit: "the resolver's search paths didn't include the synced plugins
     location"), NOT under ``/plugins/cache/``. That path segment is the reliable
     self-location marker in Cowork -- ``${CLAUDE_PLUGIN_ROOT}`` is not always
-    injected into the hook env (issues #24529/#66557), so we recognize the synced
+    injected into the hook env (Claude Code does not guarantee env injection), so we recognize the synced
     tree by our own resolved location. Desktop paths never contain it.
     """
     resolved = str(Path(__file__).resolve())
@@ -36073,7 +36073,8 @@ def _read_settings_json():
 
     Lossy by design for read-only callers: a missing file, malformed JSON, and
     an unreadable file all collapse to ``{}``. Any caller that will WRITE the
-    result back must use ``_read_settings_json_checked`` instead -- see #106,
+    result back must use ``_read_settings_json_checked`` instead -- see the
+    checked-read fix,
     where a failed re-read returned ``{}`` and that empty dict was
     written straight over the user's whole settings.json.
     """
@@ -36275,7 +36276,7 @@ def setup_smart_compact(dry_run=False, uninstall=False, status_only=False):
         return
 
     # Install
-    # Plugin users get all smart compact hooks from hooks.json — skip settings.json (GitHub #7).
+    # Plugin users get all smart compact hooks from hooks.json — skip settings.json.
     # Synced (Cowork) installs get them from the cowork hooks.json too; include the
     # synced check so we never bake a ${CLAUDE_PLUGIN_ROOT} path into settings.json for
     # them (a single-quoted placeholder only resolves on text-substitution hosts).
@@ -38412,15 +38413,14 @@ def _is_malformed_to_hook(cmd):
 
 # Marker substrings that prove a UserPromptSubmit hook already drives the
 # quality-cache update. Two shapes exist in the wild and BOTH must count as
-# "installed", or ensure-health appends a duplicate legacy hook every session
-# (GitHub #155):
+# "installed", or ensure-health appends a duplicate legacy hook every session:
 #   * legacy standalone hook  -> `python3 '<mp>' quality-cache --quiet`
 #     (pre-5.11.93 script installs; the literal "quality-cache" is present).
-#   * #139 consolidated dispatcher (a299bf7, v5.11.93+) ->
+#   * consolidated dispatcher (v5.11.93+) ->
 #     `... hooks/userpromptsubmit_runner.py ...`, which runs quality-cache
 #     *inside* the runner, so "quality-cache" NEVER appears in the command.
 # Matching only the first shape made every detection site treat the shipped
-# consolidated dispatcher as "hook missing", regressing #139.
+# consolidated dispatcher as "hook missing", regressing the consolidation.
 _QUALITY_CACHE_HOOK_MARKERS = ("quality-cache", "userpromptsubmit_runner.py")
 
 
@@ -38442,7 +38442,7 @@ def _quality_cache_hook_present(groups):
     for h in groups)`` scan: it stringifies each group so it stays robust to the
     canonical ``{"hooks": [{"command": ...}]}`` shape and any bare/legacy entry,
     while recognizing the consolidated dispatcher that carries no literal
-    "quality-cache" substring (GitHub #155).
+    "quality-cache" substring.
     """
     return any(_command_drives_quality_cache(str(group)) for group in (groups or []))
 
@@ -38464,7 +38464,7 @@ def _is_quality_bar_installed(settings=None):
         result["statusline"] = True
 
     # Check UserPromptSubmit hook (settings.json). Recognizes both the legacy
-    # standalone hook and the #139 consolidated dispatcher (GitHub #155).
+    # standalone hook and the consolidated dispatcher.
     hooks = (settings.get("hooks") or {})
     for group in (hooks.get("UserPromptSubmit") or []):
         for hook in (group.get("hooks") or []):
@@ -38811,7 +38811,7 @@ _TRUTHY_ENV_VALUES = ("1", "true", "yes", "on")
 def _settings_env_paths():
     # Path.cwd() raises FileNotFoundError if the working directory was deleted out
     # from under a long-lived process (plausible for the daemon). Degrade to the
-    # global settings only rather than crashing every caller. Issue #77.
+    # global settings only rather than crashing every caller.
     paths = []
     try:
         cwd = Path.cwd()
@@ -38869,7 +38869,7 @@ def _settings_env_value(var_name):
     block (project local/shared first, then global), or None if absent.
 
     Lets feature-enablement detection see flags a user set in settings.json even
-    when the generating process did not inherit that env injection. Issue #77.
+    when the generating process did not inherit that env injection.
     """
     for path in _settings_env_paths():
         loaded = _load_settings_file(path)
@@ -38896,7 +38896,7 @@ def _resolve_settings_value(key, default=None):
     """Return a top-level settings.json key (e.g. includeGitInstructions, model)
     resolving project local/shared over global local/shared, first match wins.
     Lets recommendations honour a setting the user marked at the project level,
-    not just in global ~/.claude/settings.json. Issue #77 (same class)."""
+    not just in global ~/.claude/settings.json. (same class)."""
     for path in _settings_env_paths():
         loaded = _load_settings_file(path)
         if loaded is None:
@@ -38912,7 +38912,7 @@ def _env_val_enables(feature_name, env_val):
     Retained for any external/test caller. Resolves tri-state via the registry's
     env_truthy_value and coerces the shared interpreter's "unrecognized" (None)
     to the feature default, preserving the historical bool return. New code
-    should call plugin_env.interpret_flag_value directly. Issue #77 / #79."""
+    should call plugin_env.interpret_flag_value directly."""
     feat = V5_FEATURES.get(feature_name) or {}
     r = interpret_flag_value(env_val, env_truthy_value=feat.get("env_truthy_value"))
     return r if r is not None else bool(feat.get("default", False))
@@ -39026,7 +39026,7 @@ def _get_v5_feature_status():
     for name, feat in V5_FEATURES.items():
         # Resolve env from the process AND settings.json so the dashboard sees
         # flags a user "marked" even when this process (e.g. the daemon) did not
-        # inherit Claude Code's env injection. Issue #77.
+        # inherit Claude Code's env injection.
         env_val = _resolve_feature_env(feat["env_var"])
         config_val = _read_config_flag(feat["config_key"], None)
         enabled = _is_v5_feature_enabled(name)
@@ -39114,7 +39114,7 @@ def _get_v5_savings_recommendation():
 
     # Also include non-recommended but safe features for a secondary estimate.
     # An env-managed feature is excluded: if the user set it off via env that is a
-    # deliberate opt-out, not headroom we should pitch back to them. Issue #77.
+    # deliberate opt-out, not headroom we should pitch back to them.
     _excluded_sources = {"codex api gap", "codex experimental hook", "env"}
     additional_impact = sum(
         f["impact_pct"] for f in disabled
@@ -39167,7 +39167,7 @@ def setup_quality_bar(dry_run=False, uninstall=False, status_only=False, force=F
     advisory and install chatter) while preserving every side-effect. Used by
     the automated self-heal callers (UserPromptSubmit / SessionStart hooks) so
     a silent repair never re-injects the integration advisory into context on
-    every turn (GitHub #53). The advisory is only shown on an explicit,
+    every turn. The advisory is only shown on an explicit,
     interactive `setup-quality-bar` run.
 
     Side-effects on config.json:
@@ -39276,7 +39276,7 @@ def setup_quality_bar(dry_run=False, uninstall=False, status_only=False, force=F
 
     # 1. UserPromptSubmit hook for quality cache
     # Skip when running as a plugin — hooks.json already provides this hook,
-    # and writing it to settings.json creates a stale-path risk (GitHub #7).
+    # and writing it to settings.json creates a stale-path risk.
     if is_plugin and current["hook"]:
         skipped.append("cache hook (plugin hooks.json; settings.json entry is redundant)")
     elif is_plugin:
@@ -41823,7 +41823,7 @@ def _mix_from_session_rows(cutoff):
 
     Prices the transformation's ACTUAL arm, which describes MAIN work only:
     model_usage_json is the parent-thread usage, while all_model_usage_json also
-    contains rolled-up SUBAGENT tokens (fix #18). Blending subagent usage into
+    contains rolled-up SUBAGENT tokens (the model attribution fix). Blending subagent usage into
     the main arm double-dips with the sidechain pool and skews the mix toward
     whatever models the subagents ran. So the parent-thread JSON is preferred;
     all_model_usage_json is only a fallback for legacy rows that never stored a
@@ -42008,7 +42008,7 @@ def _opus_baseline_shares(opus_share):
 
 def _opus_floor_consented():
     """Whether the 0.95-Opus pre-TO default may be applied for an Anthropic user with
-    NO measured baseline. Gated (#5) so a brand-new user who never ran mostly Opus is
+    NO measured baseline. Gated so a brand-new user who never ran mostly Opus is
     not handed a fabricated baseline that over-counts. Returns True only on explicit
     opt-in: env override, or a config flag set by one-time consent. A user with a real
     measured frozen baseline never reaches this gate (the frozen share is trusted)."""
@@ -42883,7 +42883,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
         baseline_mix_available = bool(anthropic and frozen_opus and frozen_opus > 0) or (
             anthropic and _opus_floor_consented())
 
-        # SUBAGENT (sidechain) pool (#3), read from sidechain transcripts and priced at
+        # SUBAGENT (sidechain) pool, read from sidechain transcripts and priced at
         # each subagent's real model vs the ~95% Opus baseline. Subagent tokens do roll
         # up into session_log rows (v5.4.9), but the main pool prices only the FROZEN
         # anchor (rows contribute a count and a hit rate), and the main mix is built
@@ -42918,7 +42918,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
             # Price the FROZEN typical session's cache-write at `shares`. The pre-TO TTL
             # split is not recorded in the baseline, so treat it as 5m (conservative,
             # matching the current-window no-split fallback). Cache-write IS a routing
-            # lever (#2): cache-creation tokens bill at the WRITING model's rate (Opus
+            # lever: cache-creation tokens bill at the WRITING model's rate (Opus
             # $6.25 vs Sonnet $3.75 /MTok), so each arm prices CW at its OWN mix.
             # Pass cache_write as the positional `cache_create`; with no 1h/5m split given,
             # _get_model_cost prices the whole amount at the 5m rate (the conservative
@@ -42971,7 +42971,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
         actual_monthly = now_cps * recent_n
         counterfactual_monthly = old_cps * recent_n
 
-        # COMPRESSION ADD-BACK (#4): the VOLUME-REDUCTION lever. Token Optimizer REMOVES
+        # COMPRESSION ADD-BACK: the VOLUME-REDUCTION lever. Token Optimizer REMOVES
         # tokens from context (tool_archive, structure_map skeletons, resume_lean,
         # checkpoint_restore, delta_read). Those tokens are real volume the OLD way would
         # have kept re-reading and paying for. They are NOT in session_log (already removed
@@ -43202,7 +43202,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
         # two UNROUNDED steps telescope to the headline. Sequential attribution is
         # order-dependent (fixed + disclosed via `waterfall_index`).
         # v_route_s = the typical session's baseline cache split (bfi/bcr) + CW + output
-        # repriced at today's mix. CW carries the routing reprice (#2), so the routing lever
+        # repriced at today's mix. CW carries the routing reprice, so the routing lever
         # captures the cache-write mix-delta too. Computed per-session, then x recent_n so
         # the levers telescope to the per-session-based main_transformation exactly.
         # Always decompose the main pool, even when it is net-negative, so the waterfall sums
@@ -43332,7 +43332,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
         # can still price differently because the OLD way used the baseline session's native
         # cache-read fraction while NOW redistributes the same pool at the current hit rate.
         # Surfacing both fractions makes that cost delta explainable rather than looking
-        # impossible ("same tokens, same mix, different cost" -- contradiction #1).
+        # impossible ("same tokens, same mix, different cost" -- the contradiction).
         # DISPLAYED hit rate counts cache-WRITE as a miss: creating a cache entry bills
         # 1.25x the input rate, so a session that rewrites its context every turn is not
         # "99.95% cached" in any sense the user would recognise. The pool-only ratio
@@ -45393,7 +45393,7 @@ def run_ensure_health():
 
     # Keep-warm scheduler repair. ADDITIVE + consent-gated +
     # cheap. Regenerates a user-deleted/stale keep-warm agent ONLY when the
-    # install marker exists AND consent allows (the #59 sticky-opt-out lesson:
+    # install marker exists AND consent allows (the sticky-opt-out lesson:
     # user-removed != regen-target unless WE installed it and consent still
     # holds). The no-op hot path is file-existence checks only (no subprocess)
     # so it stays well inside the ensure-health budget. Completely separate from
@@ -45504,7 +45504,7 @@ def run_ensure_health():
             print(_star_msg)
     except Exception:
         pass
-    # Fix stale versioned plugin cache paths in settings.json (GitHub #7).
+    # Fix stale versioned plugin cache paths in settings.json.
     # Claude Code only: reads/writes ~/.claude/settings.json.
     if not _is_codex:
         try:
@@ -45660,13 +45660,13 @@ def run_ensure_health():
                     has_statusline = bool(settings.get("statusLine"))
                     if _eh_is_plugin:
                         # Plugin/marketplace installs: the cache hook is supplied by
-                        # hooks.json (intentionally absent from settings.json, GitHub
-                        # #7), so there is no settings.json cache-hook signal to detect
+                        # hooks.json (intentionally absent from settings.json,
+                        # so there is no settings.json cache-hook signal to detect
                         # a clobber with. Manage only the statusLine, and act solely
                         # when it is ABSENT. This makes the quality bar default-on for
                         # plugin users without (a) re-running every session once it is
                         # present, (b) re-emitting the foreign-statusline advisory
-                        # (GitHub #53), or (c) overwriting a user's own custom
+                        # or (c) overwriting a user's own custom
                         # statusLine. setup_quality_bar skips the redundant settings
                         # hook for plugin installs; here it only ever writes our
                         # statusLine into an otherwise-empty slot.
@@ -45688,9 +45688,9 @@ def run_ensure_health():
                         statusline_cmd = (settings.get("statusLine") or {}).get("command", "") or ""
                         statusline_is_ours = "statusline.js" in statusline_cmd and "token-optimizer" in statusline_cmd
                         hooks = settings.get("hooks", {}).get("UserPromptSubmit", [])
-                        # Recognize the #139 consolidated dispatcher as well as
+                        # Recognize the consolidated dispatcher as well as
                         # the legacy standalone hook, else this re-adds the
-                        # legacy hook every SessionStart (GitHub #155).
+                        # legacy hook every SessionStart.
                         has_cache_hook = _quality_cache_hook_present(hooks)
                         if has_statusline and not statusline_is_ours and has_cache_hook:
                             print(
@@ -47660,7 +47660,7 @@ if __name__ == "__main__":
             # emitted hookEventName always matches the hook that actually fired
             # (Claude Code rejects "expected SessionStart but got
             # UserPromptSubmit"). Falls back to SessionStart if the field is absent
-            # (older harnesses). Credit: @danikdanik (PR #142).
+            # (older harnesses).
             _run_hook_emitting_json(
                 _run_compact_restore,
                 event=str(hook_input.get("hook_event_name") or "SessionStart"))
@@ -47818,10 +47818,10 @@ if __name__ == "__main__":
             #
             # Skip entirely for plugin installs: the hook is provided by the
             # plugin's hooks.json and is intentionally kept OUT of settings.json
-            # (GitHub #7), so it is permanently "missing" here. Calling
+            # (plugin hooks.json), so it is permanently "missing" here. Calling
             # setup_quality_bar() every turn was futile (it can never add the
             # hook to settings.json for a plugin) and re-emitted the
-            # foreign-status-line advisory on every prompt (GitHub #53).
+            # foreign-status-line advisory on every prompt.
             _is_plugin = _is_running_from_plugin_cache() or _is_plugin_installed()
             try:
                 _qb_disabled = False
@@ -47831,9 +47831,9 @@ if __name__ == "__main__":
                 if not _is_plugin and not _qb_disabled and SETTINGS_PATH.exists():
                     _sh_settings = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
                     _sh_hooks = _sh_settings.get("hooks", {}).get("UserPromptSubmit", [])
-                    # Recognize the #139 consolidated dispatcher too, so a script
+                    # Recognize the consolidated dispatcher too, so a script
                     # install whose canonical hook is already present is not
-                    # "healed" by appending a duplicate legacy hook (GitHub #155).
+                    # "healed" by appending a duplicate legacy hook.
                     if not _quality_cache_hook_present(_sh_hooks):
                         setup_quality_bar(quiet=True)
             except Exception:

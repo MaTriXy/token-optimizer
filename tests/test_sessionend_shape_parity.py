@@ -1,7 +1,7 @@
-"""Issue #114: every shipped SessionEnd command must use session-end-flush.
+"""Every shipped SessionEnd command must use session-end-flush.
 
 The collect --quiet && dashboard --quiet shape runs the heavy flush inline
-with no budget and wedges Windows stop-hooks at 3/4. Both prior #114 fixes
+with no budget and wedges Windows stop-hooks at 3/4. Both prior fixes
 only covered the session-end-flush argv path; this test would have caught
 the still-shipped HOOK_COMMAND / hooks-starter.json fossil.
 """
@@ -121,7 +121,7 @@ def _assert_stop_shape(label: str, cmd: str) -> None:
 
     The consolidated stop_runner.py dispatcher internally calls
     compact-capture --trigger stop, session-end-flush --trigger stop --defer,
-    and keepwarm-arm; the hooks.json command points at the runner. The #114
+    and keepwarm-arm; the hooks.json command points at the runner. The
     fossil is the ``collect --quiet && dashboard --quiet`` chain, which must
     never appear on Stop (it is the inline heavy flush that wedges Windows
     stop-hooks at 3/4). A direct session-end-flush hook on Stop must use
@@ -167,7 +167,7 @@ def test_cowork_hooks_json_sessionend_is_flush_if_present():
 def test_root_hooks_json_stop_is_flush_not_collect():
     """Root hooks.json Stop event must use session-end-flush --trigger stop.
 
-    The #114 bug is literally a stop-hooks hang; the Stop event is where the
+    The bug is literally a stop-hooks hang; the Stop event is where the
     fossil wedges Windows at 3/4. Asserting only SessionEnd left Stop
     unverified, so a Stop fossil could ship undetected.
     """
@@ -277,7 +277,7 @@ def test_codex_installer_does_not_emit_collect_dashboard_chain():
 
 
 # --- Repo-wide glob guard -------------------------------------------------
-# The #114 recurrence: two prior fixes missed a still-shipped source because
+# The recurrence: two prior fixes missed a still-shipped source because
 # each fix only checked the exact identity it had just rewritten. This glob is
 # the belt to the per-file whitelist's suspenders: it asserts that NO shipped
 # hooks.json / hooks-starter / example hook JSON anywhere in the repo carries
@@ -306,7 +306,7 @@ def test_no_shipped_hooks_json_carries_collect_dashboard_chain():
     """Repo-wide: no shipped hooks.json/starter/example carries the
     ``collect --quiet &&`` / ``dashboard --quiet`` fossil in SessionEnd or Stop.
 
-    This is the recurrence guard for #114: the fossil survived two fixes by
+    This is the recurrence guard: the fossil survived two fixes by
     living in a source the per-file parity tests did not glob. Every shipped
     hook JSON is scanned so a new source carrying the chain fails here even if
     no per-file test pins it yet.
@@ -326,7 +326,7 @@ def test_no_shipped_hooks_json_carries_collect_dashboard_chain():
             if "dashboard --quiet" in cmd:
                 offenders.append(f"{path} {event}: dashboard --quiet chain: {cmd!r}")
     assert not offenders, (
-        "shipped hook JSON carries the #114 collect/dashboard fossil chain:\n  "
+        "shipped hook JSON carries the collect/dashboard fossil chain:\n  "
         + "\n  ".join(offenders)
     )
 

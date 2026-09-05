@@ -482,7 +482,7 @@ def _log_event(command: str, original: str, compressed: str,
         # C-2: command_pattern is persisted to trends.db's compression_events
         # table. Redact BEFORE truncating so an inline secret (Bearer token,
         # mysql -pPASSWORD, PGPASSWORD=... psql) never reaches disk in
-        # cleartext. The dedup store path was redacted by PR #164 but this
+        # cleartext. The dedup store path was redacted previously but this
         # adjacent path in the same main() flow was missed.
         from credential_patterns import redact_credentials as _redact
         session_id = os.environ.get("CLAUDE_SESSION_ID", "")

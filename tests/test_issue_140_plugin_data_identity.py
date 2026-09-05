@@ -1,4 +1,4 @@
-"""Issue #140: CLAUDE_PLUGIN_DATA identity leak + 2 robustness fixes."""
+"""CLAUDE_PLUGIN_DATA identity leak + 2 robustness fixes."""
 
 from __future__ import annotations
 

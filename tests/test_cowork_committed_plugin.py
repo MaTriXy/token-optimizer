@@ -93,7 +93,7 @@ def test_committed_hooks_drop_keepwarm_and_carry_runonce_on_userpromptsubmit():
     all_cmds = [c for evt in hooks for c in _commands(hooks, evt)]
     assert [c for c in all_cmds if "keepwarm" in c] == [], "keepwarm must be dropped"
 
-    # Issue #139: the run-once features (ensure-health, quality-cache --force,
+    # The run-once features (ensure-health, quality-cache --force,
     # compact-restore --new-session-only) and the original UserPromptSubmit
     # subcommands are consolidated into ONE dispatcher entry,
     # hooks/userpromptsubmit_runner.py, which imports measure.py once and runs

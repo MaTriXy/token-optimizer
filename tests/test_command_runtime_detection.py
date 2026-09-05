@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Regression test for issue #57 — OpenCode slash-command runtime detection.
+"""Regression test for OpenCode slash-command runtime detection.
 
 The slash-command / skill markdown files each carry a bash preamble that
-resolves the runtime and locates measure.py before running it. Before the #57
-fix, that preamble only knew claude/codex and searched only ~/.codex and
+resolves the runtime and locates measure.py before running it. Before the fix,
+that preamble only knew claude/codex and searched only ~/.codex and
 ~/.claude, so under OpenCode (which has full detection in runtime_env.py but is
 invisible to this standalone bash snippet) it mis-resolved to codex/claude and
 reached into ~/.claude — exactly the bug Guy reported and re-reported.
@@ -43,7 +43,7 @@ def test_has_opencode_branch(rel):
     text = _read(rel)
     assert 'RUNTIME="opencode"' in text, (
         f"{rel}: detection preamble has no OpenCode branch — under OpenCode it "
-        "will mis-resolve to codex/claude and reach into ~/.claude (issue #57)."
+        "will mis-resolve to codex/claude and reach into ~/.claude."
     )
 
 
@@ -68,7 +68,7 @@ def test_search_loop_has_opencode_path(rel):
     """Resolving RUNTIME=opencode is useless if the measure.py/fleet.py search glob
     never looks under the OpenCode plugin cache — the script resolves opencode and
     then fails 'not found'. Every preamble's search loop must include a
-    ~/.config/opencode/plugins/cache path (issue #57)."""
+    ~/.config/opencode/plugins/cache path."""
     text = _read(rel)
     assert ".config/opencode/plugins/cache" in text, (
         f"{rel}: RUNTIME resolves opencode but the script-search loop has no "

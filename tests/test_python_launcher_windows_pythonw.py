@@ -1,4 +1,4 @@
-"""Acceptance tests for Lane B / #104: Windows pythonw.exe preference in
+"""Acceptance tests for Lane B / Windows pythonw.exe preference in
 ``hooks/python-launcher.sh``.
 
 Covers the FABLE red-team amendments:
@@ -202,7 +202,7 @@ def test_python3_exe_swaps_to_pythonw(tmp_path):
 
 
 def test_py_launcher_swaps_to_pyw(tmp_path):
-    """#107: py.exe swaps to its GUI-subsystem twin pyw.exe (`pyw -3` execs
+    """py.exe swaps to its GUI-subsystem twin pyw.exe (`pyw -3` execs
     pythonw.exe), so py-launcher-only installs no longer flash a console."""
     pyl = _fake_interp(tmp_path, "py.exe", "PY_SELECTED")
     pyw = _fake_interp(tmp_path, "pyw.exe", "PYW_SELECTED")
@@ -485,7 +485,7 @@ def test_cache_record_naming_pythonw_exe_is_rejected(tmp_path):
 
 
 def test_documents_py_launcher_pyw_swap():
-    """#107 flipped the old "py-launcher-only installs still flash" carve-out:
+    """The old "py-launcher-only installs still flash" carve-out was flipped:
     py.exe now swaps to pyw.exe. The source must document the swap and must
     no longer claim the flash is unfixed."""
     source = LAUNCHER.read_text(encoding="utf-8")
@@ -536,7 +536,7 @@ def test_kill_after_present_in_mirror():
     # Exactly three occurrences (one per probe site): the _maybe_swap_to_pythonw
     # liveness probe, the GUI-twin proof-of-life probe, and the console
     # --version fallback probe (both now in _probe_windowsapps_candidate).
-    # Updated from 2 when the flash-free twin probe was added (#107).
+    # Updated from 2 when the flash-free twin probe was added.
     assert source.count(b"--kill-after=1s 2s") == 3, (
         "expected exactly three --kill-after=1s probe sites in the mirror; "
         f"got {source.count(b'--kill-after=1s 2s')}"

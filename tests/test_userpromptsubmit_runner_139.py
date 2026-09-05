@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Regression tests for the consolidated UserPromptSubmit dispatcher (issue #139).
+"""Regression tests for the consolidated UserPromptSubmit dispatcher.
 
 The six former UserPromptSubmit hooks.json entries are collapsed into ONE that
 runs ``hooks/userpromptsubmit_runner.py``, which imports ``measure.py`` once and
 runs all six subcommands in-process with per-subcommand failure isolation.
 
-These four tests pin the three issue #139 deliverables:
+These four tests pin the three deliverables:
   (a) the ``TOKEN_OPTIMIZER_HOOKS_USERPROMPTSUBMIT=0`` pre-import opt-out in
       run.py (Req 3) -- no child process is spawned.
   (b) the single dispatcher runs all six subcommands against one measure.py
@@ -140,7 +140,7 @@ def _stub_budget(monkeypatch, runner):
     monkeypatch.setattr(runner, "_check_consent", lambda: True)
     monkeypatch.setattr(runner.measure, "_install_hook_budget", lambda seconds=8: object())
     monkeypatch.setattr(runner.measure, "_clear_hook_budget", lambda deadline: None)
-    # Issue #139 FIX 1: stub the shared deadline so tests don't arm a real
+    # Stub the shared deadline so tests don't arm a real
     # 18s HookDeadline watchdog (which would os._exit the test process on
     # timeout).  With no deadline, _runner_budget returns the default 8s.
     monkeypatch.setattr(runner, "_install_runner_deadline", lambda total_seconds=18: None)
@@ -536,7 +536,7 @@ def _install_consent_recorder(monkeypatch, runner, write_flags_on_health):
     # Stub the wall-clock budget inline (no consent pin).
     monkeypatch.setattr(runner.measure, "_install_hook_budget", lambda seconds=8: object())
     monkeypatch.setattr(runner.measure, "_clear_hook_budget", lambda deadline: None)
-    # Issue #139 FIX 1: stub the shared deadline too.
+    # Stub the shared deadline too.
     monkeypatch.setattr(runner, "_install_runner_deadline", lambda total_seconds=18: None)
     monkeypatch.setattr(runner, "_clear_runner_deadline", lambda: None)
     return calls

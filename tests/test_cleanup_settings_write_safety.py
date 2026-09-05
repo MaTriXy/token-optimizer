@@ -7,7 +7,7 @@ P1a -- LEASE MISS REPORTED AS SUCCESS. ``_write_settings_atomic`` returns
 early and silently when the advisory settings lease is denied. ``cleanup``
 ignored the return value and printed "Removed: statusLine" + "Cleanup
 complete" for a write that never landed, leaving the user with exactly the
-dangling statusLine #106 exists to fix. Any settings write in the prior few
+dangling statusLine the self-disabling guard exists to fix. Any settings write in the prior few
 seconds (SessionStart ensure-health, quality-bar heal) triggers it.
 
 P1b -- FAILED RE-READ CLOBBERS THE FILE. ``_read_settings_json`` returns

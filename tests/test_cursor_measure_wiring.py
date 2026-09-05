@@ -48,7 +48,7 @@ def _restore_sys_modules():
     sibling) so it can pin module-level paths to tmp_path. Without this
     fixture the fresh instances stay in sys.modules and later test FILES that
     imported the originals at collection time patch one instance while the
-    code under test runs the other (#107 closeout regression, same shape as
+    code under test runs the other (closeout regression, same shape as
     test_windows_spawn_no_window.py).
     """
     saved = sys.modules.copy()

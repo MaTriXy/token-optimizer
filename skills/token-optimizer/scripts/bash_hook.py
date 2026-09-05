@@ -66,7 +66,7 @@ def main():
     if tool_name != "Bash":
         return
 
-    # Issue #141: in worktree-isolated sessions (cwd under .claude/worktrees/),
+    # In worktree-isolated sessions (cwd under .claude/worktrees/),
     # Claude Code's isolation guard statically parses every Bash command and
     # REFUSES anything it can't classify as "simple" — the bash_compress
     # for-loop wrapper is refused as "too complex", so every whitelisted

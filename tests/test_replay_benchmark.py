@@ -156,7 +156,7 @@ def test_scans_historical_first_prompts(replay, tmp_path):
 # --- T6: a "stale" spec produces a genuinely stale file (staleness exercised) ---
 
 def test_stale_spec_is_actually_stale_on_disk(replay, m, tmp_path):
-    """The #129 stale-pool incident must exercise staleness for real: the
+    """The stale-pool incident must exercise staleness for real: the
     relevance scorer's recency bonus reads the checkpoint FILE mtime, so a spec
     labelled stale must age the file on disk, not only a dict field. A genuinely
     stale checkpoint must therefore lose the recency bonus a fresh one gets."""

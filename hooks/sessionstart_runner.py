@@ -425,8 +425,8 @@ def _quality_cache_self_heal() -> None:
     For plugin installs (the hooks.json context this runner runs in) the
     ``_is_plugin`` check is True and the block is a no-op, exactly as in the
     dispatch. Replicated verbatim so non-plugin manual installs keep the same
-    self-heal behavior. Uses measure._quality_cache_hook_present (GitHub #155)
-    so an install whose canonical hook is the #139 consolidated dispatcher is
+    self-heal behavior. Uses measure._quality_cache_hook_present
+    so an install whose canonical hook is the consolidated dispatcher is
     not "healed" by appending a duplicate legacy hook. Fail-open: never raises.
     """
     try:

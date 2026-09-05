@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-disabling guard in statusline.js (issue #106).
+"""Self-disabling guard in statusline.js.
 
 Claude Code has no plugin uninstall/teardown hook, so a ``/plugin uninstall``
 or a manual ``rm -rf`` of the plugin tree can leave the ``statusLine`` command

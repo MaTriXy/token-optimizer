@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub #103 — per-project scoping for prompt-continuity injection.
+"""Per-project scoping for prompt-continuity injection.
 
 A two-project session leaks project A's Key Decisions / Modified Files into a
 project B hint because the checkpoint's session-wide fields are dumped verbatim
@@ -386,7 +386,7 @@ def test_continuity_prompt_hint_single_project_no_disclosure(measure, monkeypatc
 def test_continuity_prompt_hint_no_filter_when_cwd_absent(measure, monkeypatch):
     """Legacy hint caller with cwd=None gets the UNFILTERED hint: A-only
     decisions and file paths survive and NO disclosure line is emitted
-    (GitHub #103 #6). The hint surface previously computed keep_tokens
+    (legacy behavior). The hint surface previously computed keep_tokens
     unconditionally, so cwd=None callers were token-filtered on prompt text
     alone and got a fabricated "scoped to current project" disclosure."""
     mod, cp_dir = measure

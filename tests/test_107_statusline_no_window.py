@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Every child_process call in statusline.js must set ``windowsHide: true`` (#107).
+"""Every child_process call in statusline.js must set ``windowsHide: true``.
 
 ``statusline.js`` is the Claude Code ``statusLine`` command. The host re-runs it
 on EVERY status-line refresh -- every prompt, every tool result, several times a
 minute. On Windows, a console child spawned without ``windowsHide`` pops a real
 ``conhost`` window for its lifetime, so an unhidden spawn here is not a one-time
-flash, it is a strobe. That makes this file the loudest possible place for #107
+flash, it is a strobe. That makes this file the loudest possible place for the no-flash fix
 to regress.
 
 Node's defaults are the trap: ``windowsHide`` defaults to ``false`` for
@@ -307,7 +307,7 @@ def test_every_child_process_call_sets_windows_hide():
         "child_process call(s) in statusline.js without `windowsHide: true`:\n  "
         + "\n  ".join(offenders)
         + "\n\nstatusline.js runs on EVERY status-line refresh, so an unhidden "
-        "console child strobes a cmd window at Windows Desktop-app users (#107). "
+        "console child strobes a cmd window at Windows Desktop-app users. "
         "Add `windowsHide: true` to the options object (merge it, do not replace "
         "cwd/env/timeout/encoding/stdio). If the options come from a shared const "
         "or a spread, inline `windowsHide: true` at the call site so this check "

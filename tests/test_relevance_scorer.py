@@ -158,7 +158,7 @@ def test_polluted_active_task_sanitized(m, tmp_path):
         f"markup noise must not score high after sanitization; got {noise}")
 
 
-# --- T4: bare "continue" + stale unrelated pool stays below threshold (#129) ---
+# --- T4: bare "continue" + stale unrelated pool stays below threshold ---
 
 def test_bare_continue_stale_unrelated_pool_below_threshold(m, tmp_path):
     stale_age = 60 * 60 * 12  # 12h, well past the recency prior window
@@ -168,7 +168,7 @@ def test_bare_continue_stale_unrelated_pool_below_threshold(m, tmp_path):
                    age_seconds=stale_age)
     score = m.checkpoint_relevance_score("continue", cp, pool=[cp])
     assert score < m.CHECKPOINT_RELEVANCE_THRESHOLD, (
-        f"bare continue + stale unrelated pool must stay below threshold (#129); got {score}")
+        f"bare continue + stale unrelated pool must stay below threshold; got {score}")
 
 
 # --- T5: non-UTF-8 checkpoint content scores 0.0 without aborting ---
@@ -197,7 +197,7 @@ def test_non_utf8_checkpoint_scores_zero_without_raising(m, tmp_path):
         f"checkpoint with no sidecar + non-UTF-8 body must score 0.0; got {scores[1]}")
 
 
-# --- T6: CJK opening prompt tokenizes without crashing and scores sensibly (#127) ---
+# --- T6: CJK opening prompt tokenizes without crashing and scores sensibly ---
 
 def test_cjk_opening_prompt_tokenizes_and_scores(m, tmp_path):
     cp = _write_cp(tmp_path, "aaaa1111-20260811-120000-checkpoint.md",

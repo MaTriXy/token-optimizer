@@ -1,4 +1,4 @@
-"""Regression coverage for Windows hook command generation (#118).
+"""Regression coverage for Windows hook command generation.
 
 Claude Code runs ``command`` hooks through Git Bash on native Windows, so
 generated hook commands must be POSIX-shell safe: ``>/dev/null 2>&1`` (never
@@ -167,11 +167,11 @@ def test_posix_hook_command_keeps_bash_resolver(monkeypatch):
     assert command.endswith(module._BASH_RESOLVER_SUFFIX)
 
 
-# ---------- #118: Claude Code hooks run under Git Bash on Windows ----------
+# ---------- Claude Code hooks run under Git Bash on Windows ----------
 
 
 def test_claude_windows_hook_command_stays_bash_safe():
-    """#118: the Windows resolution must keep the Git-Bash launcher form.
+    """The Windows resolution must keep the Git-Bash launcher form.
 
     The pre-fix code rewrote it to native cmd.exe syntax (list2cmdline +
     a cmd null redirect), which under Git Bash created a literal NUL file
@@ -231,7 +231,7 @@ def _hook_runtime_bash():
 
 
 def test_claude_windows_hook_command_executes_under_bash_without_nul_file(tmp_path):
-    """Killer regression for #118: run the resolved command under the bash
+    """Killer regression: run the resolved command under the bash
     Claude Code actually uses for hooks (Git Bash on Windows) in a scratch dir.
     Pre-fix this left a literal file named NUL behind."""
     bash = _hook_runtime_bash()
@@ -257,7 +257,7 @@ def test_claude_windows_hook_command_executes_under_bash_without_nul_file(tmp_pa
     # Detect a literal file named NUL via the directory LISTING, not
     # Path.exists(): on Windows `NUL` is a reserved device name, so
     # `(tmp_path / "NUL").exists()` is ALWAYS True (it resolves to the null
-    # device, not a file) and cannot tell whether the #118 bug fired. A real
+    # device, not a file) and cannot tell whether the bug fired. A real
     # literal NUL file (created by the pre-fix `>NUL` via MSYS's NT-path bypass)
     # appears as a directory entry; the device never does.
     entries = os.listdir(tmp_path)
@@ -311,7 +311,7 @@ def test_measure_py_has_no_cmd_null_redirect_anywhere():
 
     assert _CMD_NUL_RE.search(src) is None, (
         "cmd.exe null redirect found in measure.py; Claude Code runs hooks "
-        "under Git Bash where it creates a literal NUL file (#118)"
+        "under Git Bash where it creates a literal NUL file"
     )
 
 

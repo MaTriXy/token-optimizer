@@ -1,4 +1,4 @@
-"""Issue #114 Layer 2: rename-aware settings.json fossil reconcile.
+"""Layer 2: rename-aware settings.json fossil reconcile.
 
 A collect && dashboard SessionEnd hook fossilized in ~/.claude/settings.json
 is never rewritten by exact-identity dedup (measure.py:collect !=

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Doc-assertion test for docs/uninstall.md (issue #106).
+"""Doc-assertion test for docs/uninstall.md.
 
 Locks the documented uninstall contract to the implemented behavior so a
 future refactor can't silently drift the docs from the code. Asserts:

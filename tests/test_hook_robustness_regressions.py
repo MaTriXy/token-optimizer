@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Regression tests for PR #166 (hook I/O and runtime resource hardening).
+"""Regression tests for hook I/O and runtime resource hardening.
 
-Each test reproduces a bug that was demonstrated live on main before #166
-landed (evidence in the PR description and sessions/2026-09-01-parallel-sprint/
+Each test reproduces a bug that was demonstrated live on main before the
+hardening landed (evidence in the PR description and sessions/2026-09-01-parallel-sprint/
 reports/A-PR-166-verdict.md):
 
   1. read_stdin_hook_input blocked past its own _STDIN_TIMEOUT on a partial

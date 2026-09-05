@@ -1,4 +1,4 @@
-"""Issue #111: Token Optimizer must NEVER recommend cutting its own skills.
+"""Token Optimizer must NEVER recommend cutting its own skills.
 
 The first thing the tool did for a user was suggest trimming the token-optimizer
 bundle (token-coach, fleet-auditor) to "save ~200 tokens" — self-cannibalizing.

@@ -1,6 +1,6 @@
 """The reported context-fill % must disclose the window it was divided by.
 
-Origin: issue #95. A user on a 1M-context session saw the hook escalate to
+Origin: a misdetected context window. A user on a 1M-context session saw the hook escalate to
 "Context at 89% capacity" while /context reported 19%. The numerator was right;
 the denominator was 200k. Nothing in the message said which window was used or
 where that window came from, so a 5x-wrong reading was indistinguishable from a
@@ -101,7 +101,7 @@ def test_detect_reports_both_size_and_source():
 
 
 def test_disable_1m_env_is_named_as_the_source(monkeypatch):
-    """The suspected root cause of #95 must identify itself in the output.
+    """The suspected root cause must identify itself in the output.
 
     A user with this flag set (including via settings.json's env block, which
     _resolve_feature_env also reads) gets a 200k denominator on every Claude

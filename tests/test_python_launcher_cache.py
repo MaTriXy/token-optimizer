@@ -82,9 +82,9 @@ def test_launcher_mirror_is_byte_identical():
 
 
 def test_cache_key_carries_probe_epoch(tmp_path):
-    """#143 poisoned-cache heal: the cache filename carries a probe-logic epoch, so
+    """poisoned-cache heal: the cache filename carries a probe-logic epoch, so
     a change to interpreter-liveness probing renames the key and every stale record
-    is ignored once on upgrade. Without it, a user already bitten by #143 keeps a
+    is ignored once on upgrade. Without it, a user already bitten by the dead stub keeps a
     record naming the dead WindowsApps stub -- and the fixed probe runs only on a
     cache MISS, so on every cache HIT the dead stub is re-exec'd forever."""
     cache_file = _cache_file_for(tmp_path, "/usr/bin:/bin", "Linux")

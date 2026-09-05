@@ -1,6 +1,6 @@
-"""Issue #116: cache_instability surface extension (MCP + process-library).
+"""cache_instability surface extension (MCP + process-library).
 
-The detector historically only inspected CLAUDE.md. #116 adds two more
+The detector historically only inspected CLAUDE.md. This extension adds two more
 cache-prefix-resident surfaces that churn just as often:
   Signal 4: MCP server add/remove in .mcp.json / .claude.json (the server SET
             is the config-detectable proxy for tool-schema churn in the cached

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub #129 — cold-resume-lean must not inject an UNRELATED session's
+"""cold-resume-lean must not inject an UNRELATED session's
 checkpoint with an unconditional "tell the user you reopened it" instruction.
 
 Three fixes, one test file:

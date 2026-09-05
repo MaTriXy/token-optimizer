@@ -1,7 +1,7 @@
-"""FIX-3 regression tests for the #107 flagged-item sweep.
+"""Regression tests for the flagged-item sweep.
 
 Covers:
-* The WindowsApps interpreter probe (#107) must not spawn the
+* The WindowsApps interpreter probe must not spawn the
   console-subsystem python.exe on the healthy path. A live GUI twin
   (pythonw.exe/pyw.exe) proves the Store install real via POSITIVE PROOF OF
   LIFE (it must WRITE a marker file; its bare exit code is never trusted).

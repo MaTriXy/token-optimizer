@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for the WSL-root /mnt/ opt-in in runtime_env (issue #78).
+"""Regression tests for the WSL-root /mnt/ opt-in in runtime_env.
 
 Asaf's live bug: under WSL-root, ``$HOME=/root``, so a legit
 ``COPILOT_HOME=/mnt/c/Users/<you>/.copilot`` (and the CODEX_HOME /

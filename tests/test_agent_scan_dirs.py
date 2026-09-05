@@ -1,4 +1,4 @@
-"""_agent_scan_dirs must be reachable from production. Issue #161 agents half.
+"""_agent_scan_dirs must be reachable from production. Agents were half-wired.
 
 _agent_scan_dirs existed but was never called from measure_components(), so
 project-scoped and global agents were never counted. This test verifies the

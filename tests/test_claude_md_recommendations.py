@@ -1,6 +1,6 @@
 """Tests for the CLAUDE.md slim recommendation guards and savings math.
 
-Pins the behavior introduced in the citation-fix PR (issue #99):
+Pins the behavior introduced in the citation-fix PR:
 - The "Slim CLAUDE.md" quick-win only fires when the file is actually over
   200 lines (Anthropic's documented guidance), not just when it's token-dense.
 - The "tokens recoverable" / "savings" figure is computed against the 200-line

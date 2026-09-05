@@ -61,7 +61,7 @@ _NT_FLAGS = {
     "CREATE_NO_WINDOW": _CREATE_NO_WINDOW,
 }
 
-# #107: CREATE_NO_WINDOW is OR'd in by detach_spawn_kwargs() as belt-and-suspenders
+# CREATE_NO_WINDOW is OR'd in by detach_spawn_kwargs() as belt-and-suspenders
 # (Windows ignores it while DETACHED_PROCESS is set, but the invariant "every spawn
 # carries the no-flash flag" must hold uniformly across every spawn site).
 _DETACH_FLAGS = (_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
@@ -139,7 +139,7 @@ def _set_posix(monkeypatch, mod):
 # (measure, bridges). Without restoration, a re-imported instance stays in
 # sys.modules while later test FILES still hold the original bound at
 # collection time -- test_runtime_env_wsl_mnt then patches the original while
-# measure delegates to the unpatched replacement (#107 closeout regression).
+# measure delegates to the unpatched replacement (closeout regression).
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _restore_sys_modules():
@@ -267,7 +267,7 @@ def test_spawn_detached_nt_retries_without_breakaway_on_oserror(monkeypatch):
     # The retry clears ONLY the breakaway bit -- detach and no-window survive.
     assert attempts[1] == (_DETACH_FLAGS & ~_CREATE_BREAKAWAY_FROM_JOB)
     assert not (attempts[1] & _CREATE_BREAKAWAY_FROM_JOB)
-    assert attempts[1] & _CREATE_NO_WINDOW, "#107 flag must survive the fallback"
+    assert attempts[1] & _CREATE_NO_WINDOW, "flag must survive the fallback"
     assert spawn_utils.last_spawn_used_fallback is True
 
 
@@ -397,12 +397,12 @@ def test_daemon_regen_nt_uses_create_no_window(monkeypatch, tmp_path):
         "MEASURE_PY_RESOLVE_TTL": 300,
         "DASHBOARD_FRESH_SECONDS": 120,
         "_last_regen": 0.0,
-        # issue #160: _maybe_refresh_dashboard now guards _last_regen with
+        # _maybe_refresh_dashboard now guards _last_regen with
         # _STATE_LOCK; give the extracted method a real lock so it runs.
         "_STATE_LOCK": threading.Lock(),
         "_resolve_measure_py": lambda: str(measure_py),
         "_log_regen": lambda msg: None,
-        # issue #160 follow-up: _maybe_refresh_dashboard now also claims the shared
+        # follow-up: _maybe_refresh_dashboard now also claims the shared
         # _regen_inflight guard and hands it to a reaper thread; give the extracted
         # method those globals so it runs. The reaper is stubbed here (this test
         # only checks the Popen creationflags, not the guard's lifetime).
@@ -475,12 +475,12 @@ def test_daemon_regen_posix_uses_start_new_session(monkeypatch, tmp_path):
         "MEASURE_PY_RESOLVE_TTL": 300,
         "DASHBOARD_FRESH_SECONDS": 120,
         "_last_regen": 0.0,
-        # issue #160: _maybe_refresh_dashboard now guards _last_regen with
+        # _maybe_refresh_dashboard now guards _last_regen with
         # _STATE_LOCK; give the extracted method a real lock so it runs.
         "_STATE_LOCK": threading.Lock(),
         "_resolve_measure_py": lambda: str(measure_py),
         "_log_regen": lambda msg: None,
-        # issue #160 follow-up: _maybe_refresh_dashboard now also claims the shared
+        # follow-up: _maybe_refresh_dashboard now also claims the shared
         # _regen_inflight guard and hands it to a reaper thread; give the extracted
         # method those globals so it runs. The reaper is stubbed here (this test
         # only checks the Popen creationflags, not the guard's lifetime).
@@ -1066,7 +1066,7 @@ def test_utf8_io_reexec_posix_no_creationflags(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# utf8_io.py: #105 -- explicit std-handle passing + pre-spawn flush on nt.
+# utf8_io.py: explicit std-handle passing + pre-spawn flush on nt.
 # CREATE_NO_WINDOW left all three of stdin/stdout/stderr None, so CPython did
 # not set STARTF_USESTDHANDLES and the child's stdio bound to a NEW hidden
 # console: every byte written was discarded and stdin read empty (the "silent
@@ -1149,7 +1149,7 @@ def _utf8_io_nt_reexec_env(monkeypatch, streams=None):
 
 
 def test_utf8_io_reexec_nt_passes_std_handles(monkeypatch):
-    """#105: on nt the re-exec Popen must receive stdin/stdout/stderr bound to
+    """on nt the re-exec Popen must receive stdin/stdout/stderr bound to
     the parent's real sys.* handles (so the child's stdio attaches to the
     parent's pipe, not a hidden console), AND keep CREATE_NO_WINDOW."""
     stdin_s = _FilenoStream(0, "stdin")
@@ -1167,9 +1167,9 @@ def test_utf8_io_reexec_nt_passes_std_handles(monkeypatch):
 
 
 def test_utf8_io_reexec_nt_keeps_create_no_window_when_stdout_not_tty(monkeypatch):
-    """#105: CREATE_NO_WINDOW must be retained even when stdout is a pipe (not
+    """CREATE_NO_WINDOW must be retained even when stdout is a pipe (not
     a tty). The flash-sensitive case is exactly the host-spawned hook whose
-    stdout is a pipe; dropping the flag there would reinstate the #104 console
+    stdout is a pipe; dropping the flag there would reinstate the console
     flash while fixing nothing (handles are now passed explicitly). A future
     'drop it when not a tty' refactor must fail this test."""
     stdout_s = _FilenoStream(1, "stdout")  # a pipe has a fileno but is not a tty
@@ -1191,7 +1191,7 @@ def test_utf8_io_reexec_nt_safe_when_stdout_lacks_fileno(monkeypatch):
 
 
 def test_utf8_io_reexec_nt_safe_when_stdout_none(monkeypatch):
-    """#105: sys.stdout can be None under pythonw (#104 launcher swap). Popen
+    """sys.stdout can be None under pythonw (launcher swap). Popen
     must still be called and stdout omitted, not crash the CLI."""
     u, cap, _ = _utf8_io_nt_reexec_env(monkeypatch, streams={"stdout": None})
     u.reexec_in_utf8_mode()  # must not raise
@@ -1244,7 +1244,7 @@ def test_utf8_io_reexec_nt_flushes_stdout_stderr_before_popen(monkeypatch):
 
 
 def test_utf8_io_reexec_pipe_round_trip(tmp_path):
-    """#105 end-to-end: `measure.py version` under a non-UTF-8 locale (which
+    """end-to-end: `measure.py version` under a non-UTF-8 locale (which
     triggers reexec_in_utf8_mode) with stdout as a pipe must produce the same
     non-empty output as a UTF-8-locale run. On POSIX this exercises the execv
     round-trip; the Windows Popen discard is covered by the unit tests above.
@@ -1277,7 +1277,7 @@ def test_utf8_io_reexec_pipe_round_trip(tmp_path):
         "UTF-8 run failed: " + r_utf.stderr.decode("utf-8", "replace")
     )
     assert r_nonutf.stdout, (
-        "non-UTF-8 re-exec run produced empty stdout (the #105 discard signature)"
+        "non-UTF-8 re-exec run produced empty stdout (the discard signature)"
     )
     assert r_nonutf.stdout == r_utf.stdout, (
         "re-exec round-trip must not alter the command's stdout"

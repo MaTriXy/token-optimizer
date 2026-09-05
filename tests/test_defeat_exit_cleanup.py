@@ -536,7 +536,7 @@ def test_defeat_bug_c_serialization_32_threads_one_winner(tmp_path):
     reason="adversarial 32-thread stress of the archive-lease reclaim-expired path "
     "(same family as test_defeat_bug_c_cross_generation, already win32-skipped): "
     "under contention the portable reclaim does not reliably elect a single winner "
-    "on Windows CI. This is the tool-archive RECLAIM path; #114's settings lease is "
+    "on Windows CI. This is the tool-archive RECLAIM path; the settings lease is "
     "a fresh exclusive-create acquire (no getpid/reclaim generation), which IS "
     "Windows-safe. Windows archive-lease reclaim is a separate known gap.",
 )

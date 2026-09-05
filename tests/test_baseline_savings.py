@@ -148,7 +148,7 @@ def test_baseline_frozen_across_session_count(measure):
 
 
 def test_before_tokens_is_per_session_not_monthly_total(measure):
-    """Bug #1: before_tokens must equal the typical SESSION footprint, not the period total."""
+    """Bug: before_tokens must equal the typical SESSION footprint, not the period total."""
     mod, tmp = measure
     r = _run(mod, tmp, n_sessions=100, per_session_input=4_000_000, opus_share=0.56)
     ts = FROZEN_BASELINE["typical_session"]

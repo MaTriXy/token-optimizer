@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub #127 — session continuity is blind to non-English prompts.
+"""Session continuity is blind to non-English prompts.
 
 The topic tokenizer extracted words with ``[a-zA-Z0-9_./:-]+``, which matches
 nothing above U+007F. Korean/Chinese/Japanese prompts tokenized to ``[]`` and

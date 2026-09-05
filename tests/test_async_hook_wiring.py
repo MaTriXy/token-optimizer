@@ -8,7 +8,7 @@ only safe to mark async if its entire job is a side effect nobody reads
 back, AND (for Stop/StopFailure specifically) losing the write to a process
 exiting right after the turn ends would be harmless.
 
-Original classification and test scaffold contributed by danikdanik (PR #86).
+Original classification and test scaffold contributed by danikdanik.
 This is the REDUCED-SCOPE landing: only the four hook groups whose output-free
 + race-free + exit-safe status was independently verified against source are
 async here. Seven of danikdanik's original eleven flips were reverted to sync
@@ -58,7 +58,7 @@ EXPECTED_ASYNC = {
     #
     # It is sync (not async): SessionStart injects additionalContext via stdout,
     # which an async hook would discard entirely -- compact-restore's recovery
-    # context and the ensure-health notices both ride that stream, and #101's
+    # context and the ensure-health notices both ride that stream, and the
     # read_cache --clear-compacted must run deterministically before the next
     # PreToolUse/Read judges redundancy.
     #
@@ -84,7 +84,7 @@ EXPECTED_ASYNC = {
     # is never consumed and the work outlives the process.
     ("SessionEnd", None, "stop_runner.py"): True,
     ("StopFailure", None, "compact-capture --trigger stop-failure"): False,
-    # Issue #139: the six UserPromptSubmit subcommands are consolidated into a
+    # The six UserPromptSubmit subcommands are consolidated into a
     # single dispatcher (hooks/userpromptsubmit_runner.py) that imports measure.py
     # once and runs all six in-process. It is sync (not async): UserPromptSubmit
     # injects additionalContext via stdout, which an async hook would discard.

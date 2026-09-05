@@ -22,7 +22,7 @@ Cluster B -- the heal must not make #107 worse:
     /End + sleep(2) + spam every SessionStart;
   * ``_fail`` respects soft_fail: hook paths print to stderr, never stdout.
 
-#59 / gate unification:
+Sticky-opt-out / gate unification:
   * a user-DISABLED task (Settings-level ``<Enabled>false</Enabled>``) is
     treated exactly like a tombstone;
   * every heal/revive path routes through ``_daemon_resurrection_blocked()``,
@@ -447,11 +447,11 @@ def test_successful_heal_is_not_delayed_by_the_throttle(m, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# #59: user-disabled task + the unified gate
+# user-disabled task + the unified gate
 # ---------------------------------------------------------------------------
 def test_heal_leaves_a_user_disabled_task_alone(m, monkeypatch):
     """T2-H1: disabling the task (Task Scheduler UI / schtasks /Change
-    /DISABLE) is the natural Windows off-switch and was durable pre-#107. The
+    /DISABLE) is the natural Windows off-switch and was durable pre-fix. The
     heal must treat Settings-level <Enabled>false</Enabled> exactly like a
     tombstone: no /End, no re-registration, no /Run."""
     rec, installs, _ = _heal_env(
@@ -515,7 +515,7 @@ def test_restart_path_task_heal_respects_shared_gate(m, monkeypatch):
 
 
 def test_auto_update_restart_is_gated():
-    """The ensure-health auto-update block used to bypass every #59
+    """The ensure-health auto-update block used to bypass every
     gate -- a version bump could /Run a daemon the user turned off. The
     restart must now sit behind the shared gate."""
     src = _measure_source()
@@ -689,7 +689,7 @@ def test_shim_generator_escapes_percent(m):
 def test_shim_pythonw_rung_guards_windows_store_alias(m):
     """A WindowsApps App Execution Alias exits 0 SILENTLY under Task
     Scheduler, so an unguarded bare-PATH pythonw.exe first rung would end the
-    ladder with no daemon -- on hosts where the pre-#107 py-first ladder
+    ladder with no daemon -- on hosts where the pre-fix py-first ladder
     worked. The rung must resolve the PATH hit (pure cmd, no where.exe) and
     skip WindowsApps."""
     shim = m._generate_windows_launcher_cmd(r"C:\s\d.py", r"C:\l")

@@ -2,8 +2,8 @@
 
 A per-command wrapper (e.g. Boost) is exec'd per command with no cross-turn
 state, so it cannot see an agent re-running the same command with identical
-output — the exact failure mode Boost's own blog describes and their issue #35
-shows causing an infinite loop. Token Optimizer is session-stateful, so the
+output — the exact failure mode Boost's own blog describes and shows
+causing an infinite loop. Token Optimizer is session-stateful, so the
 PostToolUse Bash path records every run and nudges on a >= 3 identical-output
 streak. Contracts guarded here:
 

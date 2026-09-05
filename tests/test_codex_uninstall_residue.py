@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for Codex uninstall residue cleanup (issue #78, B2).
+"""Regression tests for Codex uninstall residue cleanup.
 
 Before the fix, ``codex-install --uninstall`` only stripped Token Optimizer
 groups from ``hooks.json``. It left the ``compact_prompt`` /

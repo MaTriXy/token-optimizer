@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for the COPILOT_HOME env collision fix (issue #78, round 2).
+"""Regression tests for the COPILOT_HOME env collision fix.
 
 Root cause: ``COPILOT_HOME`` is GitHub Copilot CLI's OWN configuration
 variable — setting it (e.g. to a WSL ``/mnt`` path for Token Optimizer's

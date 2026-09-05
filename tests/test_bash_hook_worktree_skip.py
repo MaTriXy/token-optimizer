@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Issue #141: bash_hook.py must not rewrite Bash commands in worktree-isolated sessions.
+"""bash_hook.py must not rewrite Bash commands in worktree-isolated sessions.
 
 Claude Code's worktree isolation guard statically parses every Bash command and
 REFUSES anything it can't classify as "simple" — the bash_compress for-loop
@@ -25,7 +25,7 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 BASH_HOOK = REPO / "skills" / "token-optimizer" / "scripts" / "bash_hook.py"
 
-# Commands that hit the compression whitelist in real sessions (issue #141
+# Commands that hit the compression whitelist in real sessions (the whitelist
 # names ls / find / grep / git status; git status is the canonical example).
 _SAMPLE_COMMAND = "git status"
 _SAMPLE_TOOL_INPUT = {"command": _SAMPLE_COMMAND}

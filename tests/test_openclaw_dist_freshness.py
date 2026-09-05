@@ -4,14 +4,15 @@
 The OpenClaw extension entry (``dist/index.js``) ``require``s the committed
 ``dist/continuity.js``. ``bun test`` imports ``./continuity.js`` which bun
 resolves to the fixed ``.ts`` SOURCE, so the TS suite is green while the
-shipped artifact is stale. That is exactly how #103 shipped as a no-op for
+shipped artifact is stale. That is exactly how the cross-project file drop
+shipped as a no-op for
 OpenClaw: the ``crossProjectFileDrop`` logic lived in ``src/continuity.ts``
 but never made it into ``dist/continuity.js``.
 
 This test fails the build when the shipped dist drifts from src. It does not
 need tsc/bun (CI's pytest leg has neither), so it gates every push. Two bars:
 
-  1. Symbol presence — the #103 markers must appear in ``dist/continuity.js``:
+  1. Symbol presence — the cross-project file-drop markers must appear in ``dist/continuity.js``:
        * ``crossProjectFileDrop`` (the file-filter function)
        * the disclosure string "scoped to current project"
      A stale dist (the C1 regression) is missing both.
@@ -34,19 +35,19 @@ DIST = OPENCLAW / "dist"
 
 
 def test_dist_continuity_carries_103_markers() -> None:
-    """The shipped dist/continuity.js must contain the #103 logic, not just src."""
+    """The shipped dist/continuity.js must contain the cross-project file-drop logic, not just src."""
     dist_continuity = DIST / "continuity.js"
     assert dist_continuity.is_file(), (
         f"missing shipped artifact: {dist_continuity} (run `bun run build` in openclaw/)"
     )
     text = dist_continuity.read_text(encoding="utf-8")
     assert "crossProjectFileDrop" in text, (
-        "dist/continuity.js is stale: crossProjectFileDrop (#103 file filter) "
+        "dist/continuity.js is stale: crossProjectFileDrop (the file filter) "
         "is in src/continuity.ts but missing from the shipped dist. "
         "Run `bun run build` in openclaw/ and commit the regenerated dist."
     )
     assert "scoped to current project" in text, (
-        "dist/continuity.js is stale: the #103 disclosure string is in "
+        "dist/continuity.js is stale: the disclosure string is in "
         "src/continuity.ts but missing from the shipped dist. "
         "Run `bun run build` in openclaw/ and commit the regenerated dist."
     )
