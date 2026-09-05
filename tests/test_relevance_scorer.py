@@ -107,7 +107,7 @@ def test_generic_word_only_overlap_stays_low(m, tmp_path):
     # Directory names are deliberately NON-topical (alpha/beta/gamma) so the
     # prompt word "project" genuinely misses every doc. The scorer now splits
     # path DIRECTORY segments into topic words (a real checkpoint's identity
-    # lives in its dirs, e.g. clients/northwind/...), so a dir literally named
+    # lives in its dirs, e.g. clients/meridian/...), so a dir literally named
     # "project-*" would inject "project" into the docs and defeat the very point
     # of this test -- that a generic word carries no signal.
     cp_a = _write_cp(tmp_path, "aaaa1111-20260811-120000-checkpoint.md",
@@ -285,23 +285,23 @@ def test_threshold_constant_exposed(m):
 # Coverage tests (C1/H1/H2/H3/M2/knobs/L1) + multi-client
 # ======================================================================
 
-def _northwind_cp(tmp_path, name="aaaa1111-20260812-120000-checkpoint.md"):
-    """A northwind client checkpoint whose identity lives ONLY in path dirs, with a
+def _meridian_cp(tmp_path, name="aaaa1111-20260812-120000-checkpoint.md"):
+    """A meridian client checkpoint whose identity lives ONLY in path dirs, with a
     real clients/<x>/Retainer-Deliverables/... skeleton and a /compact active_task
-    (mirrors the real northwind checkpoint whose active_task is literally '/compact')."""
+    (mirrors the real meridian checkpoint whose active_task is literally '/compact')."""
     return _write_cp(
         tmp_path, name, active_task="/compact",
         modified_files=[
-            "clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/scripts/monitor.py",
-            "clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/reports/2026-08-11__BRIEF.html",
-            "clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/references/competitor.md"],
+            "clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/scripts/monitor.py",
+            "clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/reports/2026-08-11__BRIEF.html",
+            "clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/competitor.md"],
         recent_reads=[
-            "clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/config/monitor.json"])
+            "clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/config/monitor.json"])
 
 
 def _acme_cp(tmp_path, name="bbbb2222-20260812-120100-checkpoint.md"):
     """A SECOND client sharing the IDENTICAL folder skeleton; only the distinctive
-    identity words differ (acme/pricing/tracker vs northwind/competitor/monitor)."""
+    identity words differ (acme/pricing/tracker vs meridian/competitor/monitor)."""
     return _write_cp(
         tmp_path, name, active_task="/compact",
         modified_files=[
@@ -317,39 +317,39 @@ def _acme_cp(tmp_path, name="bbbb2222-20260812-120100-checkpoint.md"):
 # shared-scaffolding prompt returns neither (H3 lexical stoplist). ---
 
 def test_two_client_pool_no_cross_leak(m, tmp_path):
-    northwind = _northwind_cp(tmp_path)
+    meridian = _meridian_cp(tmp_path)
     acme = _acme_cp(tmp_path)
-    pool = [northwind, acme]
+    pool = [meridian, acme]
     TH = m.CHECKPOINT_RELEVANCE_THRESHOLD
-    gp = "continue working on the northwind competitor monitor"
+    gp = "continue working on the meridian competitor monitor"
     ap = "continue working on the acme pricing tracker"
     # own-named prompt -> own checkpoint, above threshold
-    assert m.checkpoint_relevance_score(gp, northwind, pool=pool) >= TH
+    assert m.checkpoint_relevance_score(gp, meridian, pool=pool) >= TH
     assert m.checkpoint_relevance_score(ap, acme, pool=pool) >= TH
     # cross-client -> below threshold (must NOT leak)
     assert m.checkpoint_relevance_score(gp, acme, pool=pool) < TH, (
-        "northwind prompt must NOT match the acme checkpoint")
-    assert m.checkpoint_relevance_score(ap, northwind, pool=pool) < TH, (
-        "acme prompt must NOT match the northwind checkpoint")
+        "meridian prompt must NOT match the acme checkpoint")
+    assert m.checkpoint_relevance_score(ap, meridian, pool=pool) < TH, (
+        "acme prompt must NOT match the meridian checkpoint")
     # a prompt made only of shared filesystem-scaffolding words matches NEITHER
     scaffold = "continue the retainer deliverables clients reports"
-    assert m.checkpoint_relevance_score(scaffold, northwind, pool=pool) < TH
+    assert m.checkpoint_relevance_score(scaffold, meridian, pool=pool) < TH
     assert m.checkpoint_relevance_score(scaffold, acme, pool=pool) < TH
 
 
 # --- R2-B: H3 container-word kills on a single-client pool (uniform IDF) ---
 
 def test_h3_scaffolding_prompts_stay_below_threshold(m, tmp_path):
-    northwind = _northwind_cp(tmp_path)
+    meridian = _meridian_cp(tmp_path)
     TH = m.CHECKPOINT_RELEVANCE_THRESHOLD
     for scaffold in ("continue the retainer deliverables", "continue the clients work",
                      "continue the reports", "continue the references",
                      "continue the scripts", "continue the config"):
-        s = m.checkpoint_relevance_score(scaffold, northwind, pool=[northwind])
+        s = m.checkpoint_relevance_score(scaffold, meridian, pool=[meridian])
         assert s < TH, f"scaffolding prompt {scaffold!r} must stay below threshold; got {s}"
-    # the genuine northwind resume on the SAME checkpoint still clears
+    # the genuine meridian resume on the SAME checkpoint still clears
     assert m.checkpoint_relevance_score(
-        "continue working on the northwind competitor monitor", northwind, pool=[northwind]) >= TH
+        "continue working on the meridian competitor monitor", meridian, pool=[meridian]) >= TH
 
 
 # --- R2-C: prose-only-identity checkpoint (identity lives in active_task/decisions,
@@ -372,24 +372,24 @@ def test_prose_only_identity_checkpoint_scores(m, tmp_path):
 # cue must register as intent. Latin-only unrelated prompt stays low. ---
 
 def test_cjk_latin_resume_clears_and_latin_guard_holds(m, tmp_path):
-    northwind = _northwind_cp(tmp_path)
+    meridian = _meridian_cp(tmp_path)
     acme = _acme_cp(tmp_path)
-    pool = [northwind, acme]
+    pool = [meridian, acme]
     TH = m.CHECKPOINT_RELEVANCE_THRESHOLD
     cjk = m.checkpoint_relevance_score(
-        "northwind competitor monitor 결제 모듈 작업을 이어서", northwind, pool=pool)
+        "meridian competitor monitor 결제 모듈 작업을 이어서", meridian, pool=pool)
     assert cjk >= TH, f"CJK+Latin resume must clear the threshold; got {cjk}"
     # CJK resume cue alone is recognized as resume intent
     assert m._resume_intent("결제 모듈 작업을 이어서")
-    assert m._resume_intent("继续 northwind competitor monitor")
+    assert m._resume_intent("继续 meridian competitor monitor")
     # a Latin-only unrelated prompt that only grazes a shared word ("competitor")
     # stays below threshold in a realistic 2-client pool (the acme guard, M1). Age
     # the pool out of the recency window first so this asserts the CONTENT/precision
     # guard, not the orthogonal +0.05 recency prior (which correctly biases toward a
     # just-created checkpoint). On the real 50-checkpoint pool this graze is 0.219.
-    _age_out(northwind, acme)
+    _age_out(meridian, acme)
     latin = m.checkpoint_relevance_score(
-        "continue the competitor analysis for acme corp", northwind, pool=pool)
+        "continue the competitor analysis for acme corp", meridian, pool=pool)
     assert latin < TH, f"Latin acme-style prompt must stay below threshold; got {latin}"
 
 
@@ -397,11 +397,11 @@ def test_cjk_latin_resume_clears_and_latin_guard_holds(m, tmp_path):
 # which C1 drops from path words, so no match. ---
 
 def test_junk_date_prompt_no_match(m, tmp_path):
-    northwind = _northwind_cp(tmp_path)
+    meridian = _meridian_cp(tmp_path)
     # the year must NOT be a doc token (C1 drops pure-numeric path segments)
-    assert "2026" not in m._checkpoint_sidecar_doc_tokens(northwind)
+    assert "2026" not in m._checkpoint_sidecar_doc_tokens(meridian)
     score = m.checkpoint_relevance_score(
-        "continue working on the report from 2026-08-11", northwind, pool=[northwind])
+        "continue working on the report from 2026-08-11", meridian, pool=[meridian])
     assert score < m.CHECKPOINT_RELEVANCE_THRESHOLD, (
         f"a junk-date-only prompt must not match; got {score}")
 
@@ -410,29 +410,29 @@ def test_junk_date_prompt_no_match(m, tmp_path):
 # scores >= the spoken form (H2: pasting can only help precision). ---
 
 def test_pasted_path_matches_right_not_wrong(m, tmp_path):
-    northwind = _northwind_cp(tmp_path)
+    meridian = _meridian_cp(tmp_path)
     acme = _acme_cp(tmp_path)
-    pool = [northwind, acme]
+    pool = [meridian, acme]
     TH = m.CHECKPOINT_RELEVANCE_THRESHOLD
-    pasted = ("continue /Users/dev/work/clients/northwind/Retainer-Deliverables/"
-              "northwind-competitor-monitor/reports/2026-08-11__BRIEF.html")
-    spoken = "continue working on the northwind competitor monitor"
-    ps = m.checkpoint_relevance_score(pasted, northwind, pool=pool)
-    ss = m.checkpoint_relevance_score(spoken, northwind, pool=pool)
+    pasted = ("continue /Users/dev/work/clients/meridian/Retainer-Deliverables/"
+              "meridian-competitor-monitor/reports/2026-08-11__BRIEF.html")
+    spoken = "continue working on the meridian competitor monitor"
+    ps = m.checkpoint_relevance_score(pasted, meridian, pool=pool)
+    ss = m.checkpoint_relevance_score(spoken, meridian, pool=pool)
     # NOTE: we deliberately do NOT require pasted >= spoken. Making a pasted path
     # out-score the spoken form was the goal that CAUSED the H2 regression
     # (dropping non-matching path words made precision 1.0 by construction, so a
     # FOREIGN pasted path grazing one shared word false-matched the wrong client).
-    # The correct invariant is weaker: a pasted REAL northwind path still clears the
+    # The correct invariant is weaker: a pasted REAL meridian path still clears the
     # bar (its generic segments like users/work dilute precision, which
     # is fine), and it never crosses to the wrong client.
-    assert ps >= TH, f"pasted real northwind path must clear the threshold; got {ps}"
+    assert ps >= TH, f"pasted real meridian path must clear the threshold; got {ps}"
     assert m.checkpoint_relevance_score(pasted, acme, pool=pool) < TH, (
-        "pasted northwind path must not match the acme checkpoint")
+        "pasted meridian path must not match the acme checkpoint")
     # And a FOREIGN pasted path sharing only a scaffolding/sub-project word must not
     # out-score the spoken form (the H2 fix: unmatched distinctive words dilute).
     foreign = ("continue /Users/alex/other/acme-competitor-analysis/plan-notes.md")
-    assert m.checkpoint_relevance_score(foreign, northwind, pool=pool) <= ss + 1e-9, (
+    assert m.checkpoint_relevance_score(foreign, meridian, pool=pool) <= ss + 1e-9, (
         "a foreign pasted path must not out-score the genuine spoken resume")
     # "continue <path>" is recognized as resume intent
     assert m._resume_intent(pasted)
@@ -446,11 +446,11 @@ def test_stoplist_named_project_still_resumes(m, tmp_path):
         tmp_path, "bbbb2222-20260812-120000-checkpoint.md",
         active_task="/compact",
         modified_files=[
-            "/Users/dev/work/clients/northwind/Retainer-Deliverables/"
-            "northwind-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html"],
+            "/Users/dev/work/clients/meridian/Retainer-Deliverables/"
+            "meridian-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html"],
         recent_reads=[
-            "/Users/dev/work/clients/northwind/Retainer-Deliverables/"
-            "northwind-company-brain/SKILL.md"])
+            "/Users/dev/work/clients/meridian/Retainer-Deliverables/"
+            "meridian-company-brain/SKILL.md"])
     # unrelated distractor so the pool has >1 doc
     other = _write_cp(tmp_path, "cccc3333-20260812-120000-checkpoint.md",
                       active_task="refactor the payment ledger",
@@ -465,20 +465,20 @@ def test_stoplist_named_project_still_resumes(m, tmp_path):
 # --- R2-G: H1 dead checkpoint. Body file deleted, sidecar lingers -> 0.0. ---
 
 def test_dead_checkpoint_orphan_sidecar_scores_zero(m, tmp_path):
-    northwind = _northwind_cp(tmp_path)
-    Path(northwind).unlink()  # delete the .md body; sidecar .json remains
-    assert not Path(northwind).is_file()
+    meridian = _meridian_cp(tmp_path)
+    Path(meridian).unlink()  # delete the .md body; sidecar .json remains
+    assert not Path(meridian).is_file()
     score = m.checkpoint_relevance_score(
-        "continue the northwind competitor monitor", northwind, pool=[northwind])
+        "continue the meridian competitor monitor", meridian, pool=[meridian])
     assert score == 0.0, f"orphan-sidecar / deleted-body checkpoint must score 0.0; got {score}"
 
 
 # --- R2-H: L1 recency must not leak onto an empty / separator-only prompt ---
 
 def test_empty_and_separator_prompts_score_zero(m, tmp_path):
-    northwind = _northwind_cp(tmp_path)  # fresh checkpoint (recency window would apply)
+    meridian = _meridian_cp(tmp_path)  # fresh checkpoint (recency window would apply)
     for empty in ("", "   ", "--- === ...", "\t\n"):
-        s = m.checkpoint_relevance_score(empty, northwind, pool=[northwind])
+        s = m.checkpoint_relevance_score(empty, meridian, pool=[meridian])
         assert s == 0.0, f"empty/separator prompt {empty!r} must score 0.0 (no recency leak); got {s}"
 
 
@@ -512,9 +512,9 @@ def test_path_tf_cap_100000_does_not_force_score_to_one(m, tmp_path, monkeypatch
     # With a huge PATH_TF_CAP the OLD code let one mega-repeated path word drive
     # recall (and F1) to ~1.0. The clamp bounds it; the score stays a sane content
     # score, not a forced 1.0.
-    northwind = _northwind_cp(tmp_path)
+    meridian = _meridian_cp(tmp_path)
     score = m.checkpoint_relevance_score(
-        "continue working on the northwind competitor monitor", northwind, pool=[northwind])
+        "continue working on the meridian competitor monitor", meridian, pool=[meridian])
     assert score < 0.99, f"score must not be forced to 1.0 by the cap; got {score}"
 
 
@@ -522,12 +522,12 @@ def test_path_tf_cap_100000_does_not_force_score_to_one(m, tmp_path, monkeypatch
 # or leak a repr. ---
 
 def test_bytes_text_and_bad_pool_are_guarded(m, tmp_path):
-    northwind = _northwind_cp(tmp_path)
+    meridian = _meridian_cp(tmp_path)
     # bytes prompt: must be decoded, not str()'d into a b'...' repr
     s1 = m.checkpoint_relevance_score(
-        b"continue working on the northwind competitor monitor", northwind, pool=[northwind])
+        b"continue working on the meridian competitor monitor", meridian, pool=[meridian])
     assert s1 >= m.CHECKPOINT_RELEVANCE_THRESHOLD, s1
     # a string pool (wrong type) must not iterate its characters as paths / raise
     s2 = m.checkpoint_relevance_score(
-        "continue working on the northwind competitor monitor", northwind, pool="not-a-list")
+        "continue working on the meridian competitor monitor", meridian, pool="not-a-list")
     assert 0.0 <= s2 <= 1.0

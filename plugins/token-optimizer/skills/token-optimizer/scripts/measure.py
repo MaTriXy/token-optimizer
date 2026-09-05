@@ -33650,7 +33650,7 @@ _RELEVANCE_IDF_CAP = _clamp(_float_env("TOKEN_OPTIMIZER_RELEVANCE_IDF_CAP", 3.0)
 
 # Path-identity weighting (root-cause fix): a checkpoint's project identity lives
 # in its file PATHS, not its prose. A word that recurs across many of a
-# checkpoint's modified_files / recent_reads paths (northwind x10, attention x10,
+# checkpoint's modified_files / recent_reads paths (meridian x10, attention x10,
 # optimizer x10) is a strong identity signal; the SAME word appearing once in an
 # active_task/decision sentence is incidental. Because the doc token set is
 # frequency-blind, an unrelated review/handoff checkpoint that merely QUOTES a
@@ -33681,7 +33681,7 @@ _CHECKPOINT_SCAFFOLD_STOPWORDS = frozenset({
     "reports", "report", "references", "reference", "scripts", "script",
     # NOTE: only UNIVERSAL filesystem/dev-scaffolding words belong here -- never a
     # word that can be part of a real project slug. "company"/"brain" were removed
-    # (2026-08-12): they name a real sub-project (northwind-company-brain), and listing
+    # (2026-08-12): they name a real sub-project (meridian-company-brain), and listing
     # them made "continue working on the company brain" score 0.0 on a genuine
     # resume (a curated-against-one-tree false negative).
     "config", "configs", "src", "lib", "libs",
@@ -33729,11 +33729,11 @@ def _sanitize_sidecar_text(value, limit=400):
 
 # File-path words carry a checkpoint's project identity. Real checkpoints store
 # identity in the DIRECTORY segments of their file paths, e.g.
-# .../clients/northwind/.../northwind-competitor-monitor/reports/2026-08-11__BRIEF.html
-# -- the distinctive words (northwind, competitor, monitor) live in the dirs, not the
+# .../clients/meridian/.../meridian-competitor-monitor/reports/2026-08-11__BRIEF.html
+# -- the distinctive words (meridian, competitor, monitor) live in the dirs, not the
 # basename. Split the WHOLE path (dirs AND basename) on / \ - _ . : and whitespace
-# so that path -> {clients, northwind, competitor, monitor, reports, ...} and a
-# natural spoken prompt ("the northwind competitor monitor") can overlap it. Pool IDF
+# so that path -> {clients, meridian, competitor, monitor, reports, ...} and a
+# natural spoken prompt ("the meridian competitor monitor") can overlap it. Pool IDF
 # then down-weights the generic containers (users, clients, projects, reports,
 # retainer, deliverables) that appear in most checkpoints, so no hand-kept
 # stoplist is needed. Kept separate from _TOPIC_TOKEN_RE (which deliberately KEEPS
@@ -33808,7 +33808,7 @@ def _checkpoint_sidecar_doc_tokens(checkpoint_path):
     doc = "\n".join(p for p in parts if p)
     tokens = _topic_tokens(doc) if doc.strip() else set()
     # Union separator-split WORDS from the full modified_files / recent_reads
-    # paths (dirs carry the project identity: northwind, attention, optimizer, ...).
+    # paths (dirs carry the project identity: meridian, attention, optimizer, ...).
     for mf in (sc.get("modified_files") or []):
         p = mf.get("path") if isinstance(mf, dict) else mf
         if p:
@@ -33861,7 +33861,7 @@ def checkpoint_relevance_score(text, checkpoint_path, pool=None, cwd=None):
     try:
         base_tokens = _topic_tokens(str(text or ""), _RESUME_TOPIC_STOPWORDS)
         # Query-side path handling (mirror of the doc side): a prompt that names a
-        # project with separators ("northwind-competitor-monitor", "measure.py") or
+        # project with separators ("meridian-competitor-monitor", "measure.py") or
         # PASTES a full path tokenizes as ONE blob under _TOPIC_TOKEN_RE. Split it
         # into sub-words and keep every DISTINCTIVE one (non-stopword, non-digit,
         # non-scaffold) whether or not it hits the doc -- see the loop below for why
@@ -33951,9 +33951,9 @@ def checkpoint_relevance_score(text, checkpoint_path, pool=None, cwd=None):
         # named is covered. RECALL is the DOC's view, weighted by path-identity
         # frequency (``_path_weight``): a matched word that recurs across the
         # checkpoint's file paths counts for more of the doc's identity than the
-        # same word buried once in prose. This is what lets the real northwind
-        # checkpoint (northwind x10 in paths) out-rank a review checkpoint that only
-        # quotes "northwind competitor monitor" in a decision sentence.
+        # same word buried once in prose. This is what lets the real meridian
+        # checkpoint (meridian x10 in paths) out-rank a review checkpoint that only
+        # quotes "meridian competitor monitor" in a decision sentence.
         try:
             path_tf = _checkpoint_path_tf(checkpoint_path)
         except Exception:
@@ -34000,7 +34000,7 @@ def checkpoint_relevance_score(text, checkpoint_path, pool=None, cwd=None):
                 # A genuine resume names the project -> most tokens match ->
                 # near-full bonus. A prompt that names a DIFFERENT thing and only
                 # grazes a shared container word ("competitor analysis for acme
-                # corp" overlapping northwind's competitor-monitor on just
+                # corp" overlapping meridian's competitor-monitor on just
                 # "competitor") has high unmatched high-IDF mass -> low precision
                 # -> little bonus, so it cannot ride the flat cue over the bar and
                 # false-match the wrong client. Unmatched distinctive tokens are
@@ -34054,7 +34054,7 @@ def codex_prompt_hints(prompt_text="", session_id=None, cwd=None, max_age_minute
 # scoped to the same project. Kept tight to avoid firing on incidental "continue".
 _RESUME_INTENT_RE = re.compile(
     # H2: "continue <path>" -- a bare "continue" followed by a pasted absolute or
-    # relative path ("continue /Users/.../northwind-competitor-monitor",
+    # relative path ("continue /Users/.../meridian-competitor-monitor",
     # "continue \\srv\\share\\...") is a resume cue: the path IS the topic. Matched
     # without a trailing \b so it fires on the leading slash/backslash/tilde/dot.
     r"(?:continue\s+[\\/~.])|"

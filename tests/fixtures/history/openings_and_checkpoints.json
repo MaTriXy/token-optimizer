@@ -1,10 +1,10 @@
 {
-  "_comment": "Checkpoint fixtures for resume/fresh locking, rebuilt 2026-08-11 from ~/.claude/token-optimizer/checkpoints/*.md (50 files). REPLACES the earlier synthetic set whose checkpoints carried clean project-named active_task fields -- that fantasy is exactly what hid the path-identity bug (analysis-notes.md): real checkpoints store project identity in the DIRECTORY segments of modified_files/recent_reads paths (clients/acme/.../acme-monitor, PROJECTS/focus-tracker, PROJECTS/token-optimizer + the token-optimizer plugin tree), while active_task is messy voice-transcript prose that does NOT name the project. The scorer must recover identity from paths, not active_task. active_task/decisions here are lightly paraphrased from the original files (PII/secrets stripped, kept distinct per checkpoint so the replay winner-mapping is deterministic); the file PATHS preserve the same directory-segment structure. Incidents are labeled by their scenario name.",
+  "_comment": "Checkpoint fixtures for resume/fresh locking, rebuilt 2026-08-11 from ~/.claude/token-optimizer/checkpoints/*.md (50 files). REPLACES the earlier synthetic set whose checkpoints carried clean project-named active_task fields -- that fantasy is exactly what hid the path-identity bug (analysis-notes.md): real checkpoints store project identity in the DIRECTORY segments of modified_files/recent_reads paths (clients/meridian/.../meridian-competitor-monitor, PROJECTS/focus-tracker, PROJECTS/token-optimizer + the token-optimizer plugin tree), while active_task is messy voice-transcript prose that does NOT name the project. The scorer must recover identity from paths, not active_task. active_task/decisions here are lightly paraphrased from the original files (PII/secrets stripped, kept distinct per checkpoint so the replay winner-mapping is deterministic); the file PATHS preserve the same directory-segment structure. Incidents are labeled by their scenario name.",
   "resume_openings": [
     {
-      "id": "resume-northwind-monitor",
-      "prompt": "continue working on the northwind competitor monitor",
-      "expected_checkpoint_id": "cp-northwind"
+      "id": "resume-meridian-monitor",
+      "prompt": "continue working on the meridian competitor monitor",
+      "expected_checkpoint_id": "cp-meridian"
     },
     {
       "id": "resume-token-optimizer",
@@ -17,9 +17,9 @@
       "expected_checkpoint_id": "cp-focus-tracker"
     },
     {
-      "id": "resume-northwind-market-sweep",
-      "prompt": "let's resume the northwind competitor monitor, grab the latest market sweep",
-      "expected_checkpoint_id": "cp-northwind"
+      "id": "resume-meridian-market-sweep",
+      "prompt": "let's resume the meridian competitor monitor, grab the latest market sweep",
+      "expected_checkpoint_id": "cp-meridian"
     },
     {
       "id": "resume-attention-benchmarks",
@@ -60,7 +60,7 @@
   ],
   "checkpoints": [
     {
-      "id": "cp-northwind",
+      "id": "cp-meridian",
       "filename": "aa11bb22-20260811-221941-milestone-edit-batch.md",
       "active_task": "let's finalize the connectors and make the scale environments adapted, i'll do the rest of the stuff",
       "decisions": [
@@ -68,15 +68,15 @@
         "draft a self-contained scan prompt so everything is connected"
       ],
       "modified_files": [
-        "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/references/07-market-sweep.md",
-        "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html",
-        "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/scripts/build_cloud_prompt.py",
-        "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/references/09-environments.md"
+        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/07-market-sweep.md",
+        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html",
+        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/scripts/build_cloud_prompt.py",
+        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/09-environments.md"
       ],
       "recent_reads": [
-        "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/SKILL.md",
-        "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/references/06-scheduling.md",
-        "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/config/competitors.json"
+        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/SKILL.md",
+        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/06-scheduling.md",
+        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/config/competitors.json"
       ],
       "trigger": "milestone-edit-batch",
       "age_seconds": 600
@@ -268,12 +268,12 @@
     {
       "id": "incident-cross-client-false-positive",
       "issue": null,
-      "description": "Cross-client false positive: a resume-phrased prompt naming a DIFFERENT client ('competitor analysis for acme corp') grazes northwind's competitor-monitor checkpoint on the shared word 'competitor' only. Unmatched high-IDF tokens (acme, corp, analysis) are negative evidence -- the resume-intent bonus is scaled by precision (with a floor), so an incidental one-word overlap cannot ride the flat cue over threshold. Guards the multi-client regime where two clients share the clients/<x>/Retainer-Deliverables/ path shape.",
+      "description": "Cross-client false positive: a resume-phrased prompt naming a DIFFERENT client ('competitor analysis for acme corp') grazes meridian's competitor-monitor checkpoint on the shared word 'competitor' only. Unmatched high-IDF tokens (acme, corp, analysis) are negative evidence -- the resume-intent bonus is scaled by precision (with a floor), so an incidental one-word overlap cannot ride the flat cue over threshold. Guards the multi-client regime where two clients share the clients/<x>/Retainer-Deliverables/ path shape.",
       "prompt": "continue working on the competitor analysis for acme corp",
       "expected": "no_match",
       "checkpoints": [
         {
-          "id": "cp-northwind-acme-guard",
+          "id": "cp-meridian-acme-guard",
           "filename": "ff99ee88-20260811-221941-milestone-edit-batch.md",
           "active_task": "let's finalize the connectors and make the scale environments adapted, i'll do the rest of the stuff",
           "decisions": [
@@ -281,15 +281,15 @@
             "draft a self-contained scan prompt so everything is connected"
           ],
           "modified_files": [
-            "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/references/07-market-sweep.md",
-            "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html",
-            "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/scripts/build_cloud_prompt.py",
-            "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/references/09-environments.md"
+            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/07-market-sweep.md",
+            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html",
+            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/scripts/build_cloud_prompt.py",
+            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/09-environments.md"
           ],
           "recent_reads": [
-            "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/SKILL.md",
-            "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/references/06-scheduling.md",
-            "/Users/dev/work/agency/clients/northwind/Retainer-Deliverables/northwind-competitor-monitor/config/competitors.json"
+            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/SKILL.md",
+            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/06-scheduling.md",
+            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/config/competitors.json"
           ],
           "trigger": "milestone-edit-batch",
           "age_seconds": 600
