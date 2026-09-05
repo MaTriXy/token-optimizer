@@ -1020,3 +1020,25 @@ def test_heredoc_delimiter_anchored_to_line(guard):
     leak the tail into the normalized command."""
     norm = guard._normalize_command("cat <<EOF\nbody\nEOFEXTRA\nEOF")
     assert "EOFEXTRA" not in norm
+
+
+def test_heredoc_scan_no_redos_on_many_unclosed_openers(guard):
+    """A command with ~5000 unclosed ``<<EOF`` openers must normalize in well
+    under 100 ms. The old backtracking regex (lazy ``.*?`` + backreference
+    ``\\1``) went quadratic on this shape; the two-pass scan is linear."""
+    import time as _time
+    # 5000 unclosed openers, each on its own line. None has a closing EOF
+    # line, so every opener is unclosed and the scan must skip them all
+    # without backtracking.
+    command = "\n".join(f"cat <<EOF > f{i}.c" for i in range(5000))
+    t0 = _time.perf_counter()
+    norm = guard._normalize_command(command)
+    elapsed_ms = (_time.perf_counter() - t0) * 1000
+    # The opener lines are preserved (no body to strip); the result is the
+    # command with trailing whitespace removed.
+    assert "cat <<EOF > f0.c" in norm
+    assert "cat <<EOF > f4999.c" in norm
+    assert elapsed_ms < 100, (
+        f"_normalize_command took {elapsed_ms:.1f}ms on 5000 unclosed "
+        f"openers; expected < 100ms (regression of the backtracking regex)"
+    )

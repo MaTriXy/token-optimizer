@@ -43,6 +43,7 @@ streaks never leak across sessions.
 
 from __future__ import annotations
 
+import bisect
 import os
 import re
 import shlex
@@ -94,19 +95,88 @@ _INLINE_SCRIPT_NUDGE_TEMPLATE = (
     "file instead, so it is not re-sent every turn.]"
 )
 
-# Matches a heredoc: <<[-] 'DELIM' or <<[-] "DELIM" or <<[-] DELIM, followed
-# by the rest of the opener line, the body, and the closing delimiter on its
-# own line. We strip the body (everything between the opener line and the
-# closing delimiter) so `cat <<EOF > file.c` edits with changing bodies all
-# hash as one command. The rest of the opener line (e.g. `> file.c`) is kept.
-# Group 1 = delimiter, group 2 = body (for _heredoc_body).
-_HEREDOC_RE = re.compile(
-    # The closing delimiter must be the whole line (followed by a newline or
-    # end of string), so a longer token like `EOFEXTRA` does not close an
-    # `EOF` heredoc early and leak the tail into the normalized command.
-    r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n(.*?)\n\1(?:\n|$)",
-    re.DOTALL,
-)
+# Matches a heredoc opener: <<[-] 'DELIM' or <<[-] "DELIM" or <<[-] DELIM.
+# Only the opener is matched here; the closing delimiter is found by a
+# forward scan (see _find_all_heredocs). This avoids the catastrophic
+# backtracking of the old single regex `<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n
+# (.*?)\n\1(?:\n|$)` whose lazy `.*?` + backreference `\1` went quadratic
+# on inputs with many unclosed openers (the hot path: _normalize_command
+# runs via check() on every Bash PostToolUse).
+_HEREDOC_OPENER_RE = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?")
+
+# A closing delimiter line: a newline followed by a bare word (the
+# delimiter) that is itself the whole line (followed by another newline or
+# end of string). The lookahead ensures a longer token like ``EOFEXTRA``
+# does not close an ``EOF`` heredoc early. Used to pre-index every
+# candidate closing line in a single forward pass so the per-opener lookup
+# is O(log n) instead of O(n).
+_CLOSING_LINE_RE = re.compile(r"\n(\w+)(?=\n|$)")
+
+
+def _find_all_heredocs(command: str):
+    """Find all non-overlapping heredocs using a non-backtracking two-pass scan.
+
+    Replaces the old backtracking regex that went quadratic on many unclosed
+    ``<<EOF`` openers. Pass 1 finds every opener and every candidate closing
+    line in two single forward scans. Pass 2 walks the openers in order and,
+    for each, binary-searches the pre-indexed closing lines for the first one
+    whose delimiter matches and whose position is past the opener's body
+    start. Non-overlapping: once a heredoc is closed, openers inside its body
+    are skipped, matching the old ``re.sub`` semantics.
+
+    Returns a list of ``(match_start, match_end, opener_line, body)`` tuples
+    where ``match_start``/``match_end`` delimit the span from the ``<<`` of
+    the opener through the trailing newline of the closing delimiter line
+    (or end of string), ``opener_line`` is the first line of that span, and
+    ``body`` is the text between the opener line and the closing line.
+    """
+    openers = list(_HEREDOC_OPENER_RE.finditer(command))
+    if not openers:
+        return []
+
+    # Index every candidate closing line by delimiter word. Each entry is
+    # (close_pos, match_end) where close_pos is the position of the ``\n``
+    # that precedes the delimiter line and match_end is the position after
+    # the trailing ``\n`` (or end of string). finditer returns matches in
+    # ascending position order, so each list is sorted by close_pos.
+    closing_by_delim: dict[str, list[tuple[int, int]]] = {}
+    for m in _CLOSING_LINE_RE.finditer(command):
+        delim = m.group(1)
+        close_pos = m.start()  # the \n before the delimiter word
+        after = m.end()        # position just past the delimiter word
+        if after < len(command) and command[after] == "\n":
+            match_end = after + 1  # include the trailing \n
+        else:
+            match_end = after      # end of string, no trailing \n
+        closing_by_delim.setdefault(delim, []).append((close_pos, match_end))
+
+    results = []
+    consumed = 0  # position past the end of the last accepted heredoc
+    for m in openers:
+        if m.start() < consumed:
+            continue  # opener is inside a previously closed heredoc body
+        delim = m.group(1)
+        line_end = command.find("\n", m.end())
+        if line_end == -1:
+            continue  # opener is on the last line; no body possible
+        body_start = line_end + 1
+        candidates = closing_by_delim.get(delim)
+        if not candidates:
+            continue  # delimiter never appears as a closing line: unclosed
+        # Binary-search for the first closing line at or past the position
+        # of the opener line's newline (body_start - 1 == line_end). A
+        # closing line immediately after the opener line has its preceding
+        # ``\n`` at exactly line_end, so the lower bound is line_end.
+        idx = bisect.bisect_left(candidates, (line_end,))
+        if idx >= len(candidates):
+            continue  # no closing line after this opener
+        close_pos, match_end = candidates[idx]
+        match_start = m.start()
+        opener_line = command[match_start:line_end]
+        body = command[body_start:close_pos]
+        results.append((match_start, match_end, opener_line, body))
+        consumed = match_end
+    return results
 
 
 def _normalize_command(command: str) -> str:
@@ -115,13 +185,20 @@ def _normalize_command(command: str) -> str:
     ``cat <<EOF > file.c\\n<internals>\\nEOF`` and ``cat <<EOF > file.c\\n
     <different internals>\\nEOF`` produce the same hash, so an agent
     re-editing the same file via heredocs counts as one command for streak
-    purposes. Commands without heredocs are unaffected (the regex does not
-    match). Trailing whitespace is stripped.
+    purposes. Commands without heredocs are unaffected. Trailing whitespace
+    is stripped.
     """
-    stripped = _HEREDOC_RE.sub(
-        lambda m: m.group(0).split("\n")[0], command
-    )
-    return stripped.strip()
+    heredocs = _find_all_heredocs(command)
+    if not heredocs:
+        return command.strip()
+    parts: list[str] = []
+    last = 0
+    for start, end, opener_line, _body in heredocs:
+        parts.append(command[last:start])
+        parts.append(opener_line)
+        last = end
+    parts.append(command[last:])
+    return "".join(parts).strip()
 
 
 def _heredoc_body(command: str) -> str | None:
@@ -130,8 +207,8 @@ def _heredoc_body(command: str) -> str | None:
     Used by the inline-script repeat nudge to check whether the body is
     large enough to be worth nudging about (>= INLINE_SCRIPT_MIN_CHARS).
     """
-    m = _HEREDOC_RE.search(command)
-    return m.group(2) if m else None
+    heredocs = _find_all_heredocs(command)
+    return heredocs[0][3] if heredocs else None
 
 
 def _int_or_none(val) -> int | None:
@@ -346,6 +423,17 @@ def check(
         has_inline_script = body is not None and len(body) >= INLINE_SCRIPT_MIN_CHARS
         store = SessionStore(session_id)
         try:
+            # Acquire a write lock BEFORE the read so the get-compute-upsert
+            # sequence is atomic: two concurrent hook processes cannot both
+            # read the same streak and both write streak+1 (losing one
+            # increment). BEGIN IMMEDIATE blocks other writers for the
+            # duration; a lock failure is caught by the outer fail-open and
+            # the streak proceeds without atomicity (a dropped increment,
+            # not a crash).
+            try:
+                store._connect().execute("BEGIN IMMEDIATE")
+            except Exception:
+                pass  # fail-open: proceed without the lock
             prior = store.get_command_streak(cmd_h)
             fresh = not prior or now - float(prior.get("last_ts") or 0) > STALE_SECONDS
             # An edit between two runs makes byte-identical output
