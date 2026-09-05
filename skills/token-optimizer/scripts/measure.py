@@ -116,7 +116,7 @@ from utf8_io import enforce_utf8_io, reexec_in_utf8_mode
 from runtime_env import _safe_home, claude_home, detect_runtime, is_cowork, runtime_home, runtime_name_for_humans
 from spawn_utils import spawn_detached
 
-# issue #107: every console-attached child we spawn on Windows flashes a cmd
+# Every console-attached child we spawn on Windows flashes a cmd
 # window when the host is the GitHub Desktop app (no inherited console). The
 # getattr degrades to 0 on POSIX and on Windows builds without the constant, so
 # `creationflags=_NO_WINDOW` is a literal no-op everywhere but Windows. Detached
@@ -129,7 +129,7 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 def _detached_python_exe():
     """Interpreter to use for FIRE-AND-FORGET python children.
 
-    issue #107, belt-and-suspenders on top of the detach flags: on Windows,
+    Belt-and-suspenders on top of the detach flags: on Windows,
     prefer the GUI-subsystem ``pythonw.exe`` twin next to ``sys.executable`` so
     the child cannot allocate a console even if a future edit drops
     ``DETACHED_PROCESS``/``CREATE_NO_WINDOW``, or a host launches us in a way we
@@ -163,7 +163,7 @@ CLAUDE_DIR = claude_home()
 # Commands that scan or MUTATE the Claude Code setup (~/.claude). When this skill
 # is invoked from inside OpenCode (which loads ~/.claude/skills by default),
 # running these against ~/.claude is wrong — see the OpenCode guardrail in
-# __main__ and _opencode_audit_notice() below (issue #57).
+# __main__ and _opencode_audit_notice() below.
 #
 # Two groups, both blocked under OpenCode:
 #   - scan/report:   report, quick, doctor, skill, mcp, plugin-cleanup
@@ -184,7 +184,7 @@ _CLAUDE_TARGET_CMDS = frozenset(
         # port/label identity from the runtime ternaries, which default to
         # Claude for unknown runtimes — wrong identity under a foreign host.
         "dashboard",
-        # read-only scan (block under foreign runtime; issue #57 HANDOFF-1).
+        # read-only scan (block under foreign runtime).
         # These derive their data from _find_all_jsonl_files() / measure_components()
         # which read CLAUDE_DIR/projects (~/.claude) directly with NO OpenCode
         # branch, so under a foreign runtime they would scan the wrong tree.
@@ -204,7 +204,7 @@ _CLAUDE_TARGET_CMDS = frozenset(
 _OPENCODE_CLAUDE_TARGET_CMDS = _CLAUDE_TARGET_CMDS
 
 # Runtimes that must never scan or mutate the Claude Code setup (~/.claude).
-# OpenCode (issue #57), GitHub Copilot, and Hermes can all end up invoking
+# OpenCode, GitHub Copilot, and Hermes can all end up invoking
 # this skill (OpenCode loads ~/.claude/skills by default; Copilot via direct
 # invocation from a Copilot session; Hermes via its plugin which loads the
 # shared skill tree). The Claude-targeting commands above are blocked for all
@@ -408,7 +408,7 @@ def _antigravity_audit_notice() -> None:
     print("To force this skill onto a specific runtime, set TOKEN_OPTIMIZER_RUNTIME.")
 
 # Sentinel file written inside an archived symlinked skill, recording the
-# original link target so restore can recreate the symlink (issue #48). A dir
+# original link target so restore can recreate the symlink. A dir
 # holds EITHER SKILL.md (real skill) XOR this marker (symlinked skill).
 SYMLINK_TARGET_MARKER = ".symlink-target"
 
@@ -1520,12 +1520,12 @@ def find_projects_dir():
 
 def get_session_baselines(limit=10):
     """Extract first-message token counts from recent JSONL session logs."""
-    # Hermes (issue #57): sessions live in ~/.hermes/state.db, not
+    # Hermes: sessions live in ~/.hermes/state.db, not
     # ~/.claude/projects/*.jsonl. Return [] so the dashboard's baselines
     # row renders empty without scanning CLAUDE_DIR.
     if _use_hermes_session_adapter():
         return []
-    # Antigravity (issue #57): sessions live in the read-only conversation
+    # Antigravity: sessions live in the read-only conversation
     # store under ~/.gemini, not ~/.claude/projects/*.jsonl.
     if _use_antigravity_session_adapter():
         return []
@@ -2497,7 +2497,7 @@ def measure_components():
         if rules_dir.exists() and rules_dir.is_dir():
             # rglob (not iterdir) so nested rule dirs like .claude/rules/staging/
             # are counted — Claude Code loads them into context, so iterdir
-            # undercounted the rules component (issue #89).
+            # undercounted the rules component.
             for f in sorted(rules_dir.rglob("*")):
                 if f.is_file() and f.suffix == ".md":
                     rules_count += 1
@@ -2550,7 +2550,7 @@ def measure_components():
 
     # settings.json env vars (token-relevant). Resolve across project local/shared
     # and global local/shared settings, not just global ~/.claude/settings.json, so
-    # a flag a user marked at the project level is not missed (issue #77 class).
+    # a flag a user marked at the project level is not missed.
     found_vars = {}
     for var in TOKEN_RELEVANT_ENV_VARS:
         val = _settings_env_value(var)
@@ -2569,7 +2569,7 @@ def measure_components():
         "project_exists": project_settings_local.exists(),
         "exists": settings_local.exists() or project_settings_local.exists(),
         # Resolve across all settings files (project overrides global) so a
-        # project-level includeGitInstructions / model is honoured (issue #77 class).
+        # project-level includeGitInstructions / model is honoured.
         "includeGitInstructions": _resolve_settings_value("includeGitInstructions", True),
         "effortLevel": _resolve_settings_value("effortLevel", None),
         "defaultModel": _resolve_settings_value("model", None),
@@ -2834,7 +2834,7 @@ def _measure_hermes_components():
     ``~/.hermes/plugins/token-optimizer/``. The dashboard (the one
     _CLAUDE_TARGET_CMDS subcommand Hermes exempts — see
     _FOREIGN_RUNTIME_EXEMPTIONS) calls this so it never scans ``~/.claude``
-    (issue #57 cross-platform universality). Returns a minimal but valid
+    (cross-platform universality). Returns a minimal but valid
     component dict so ``calculate_totals`` / ``detect_calibration_gap`` /
     the dashboard template render without CLAUDE_DIR access.
     """
@@ -2849,7 +2849,7 @@ def _measure_hermes_components():
     if plugin_dir.is_dir():
         for f in sorted(plugin_dir.rglob("*.py")):
             try:
-                # Defense-in-depth (issue #57): skip symlinked entries so a
+                # Defense-in-depth: skip symlinked entries so a
                 # planted symlink under ~/.hermes/plugins/token-optimizer/
                 # can't leak a path outside the plugin dir into the dashboard.
                 if f.is_symlink():
@@ -2891,7 +2891,7 @@ def _measure_antigravity_components():
     Optimizer ships as a plugin under ``~/.gemini/config/plugins/token-optimizer/``.
     The dashboard (the _CLAUDE_TARGET_CMDS subcommand Antigravity exempts — see
     _FOREIGN_RUNTIME_EXEMPTIONS) calls this so it never scans ``~/.claude``
-    (issue #57 cross-platform universality). Returns a minimal but valid
+    (cross-platform universality). Returns a minimal but valid
     component dict so the dashboard template renders without CLAUDE_DIR access.
     """
     components: dict = {}
@@ -2904,7 +2904,7 @@ def _measure_antigravity_components():
     if plugin_dir.is_dir():
         for f in sorted(plugin_dir.rglob("*.py")):
             try:
-                # Defense-in-depth (issue #57): skip symlinked entries so a
+                # Defense-in-depth: skip symlinked entries so a
                 # planted symlink can't leak a path outside the plugin dir into
                 # the dashboard.
                 if f.is_symlink():
@@ -3110,7 +3110,7 @@ def detect_context_window():
       7. Claude fallback: 1M (Opus 4.6+/4.7 and Sonnet 4.6 are 1M GA since March 2026)
     """
     global _context_window_cache
-    # Resolve context flags from process env AND settings.json (issue #77 class):
+    # Resolve context flags from process env AND settings.json:
     # a user who set these in settings.json env would otherwise get a mis-detected
     # window, corrupting fill-% and every downstream recommendation.
     _disable_1m = _resolve_feature_env("CLAUDE_CODE_DISABLE_1M_CONTEXT") or ""
@@ -3154,7 +3154,7 @@ def detect_context_window():
         model = os.environ.get("CODEX_MODEL") or os.environ.get("OPENAI_MODEL") or _codex_config_model()
         model_note = f" for {model}" if model else ""
         return remember((CODEX_DEFAULT_EFFECTIVE_CONTEXT_WINDOW, f"Codex conservative effective window{model_note} (override: TOKEN_OPTIMIZER_CONTEXT_SIZE)"))
-    # Hermes (issue #57): Hermes does not expose a model field in
+    # Hermes: Hermes does not expose a model field in
     # ~/.claude/config.json or settings.json. Use env override or a
     # conservative default WITHOUT reading CLAUDE_DIR files.
     if detect_runtime() == "hermes":
@@ -5102,7 +5102,7 @@ def _codex_state_summary():
     # Codex-state metric to its goal subtree. Without this, subagent_costs and
     # goal_budgets aggregate EVERY spawn edge/goal in the DB (including closed
     # historical ones from unrelated prior work), inflating totals and letting
-    # `quality current` pick a stale session (issue #108). Fail-open: a None
+    # `quality current` pick a stale session. Fail-open: a None
     # resolution falls back to the legacy whole-DB aggregation.
     try:
         current_tid = codex_state.current_thread_id()
@@ -6004,7 +6004,7 @@ def _skill_mgmt_lock():
 
     The dashboard daemon and a CLI `measure.py skill archive|restore` run in
     separate processes with no in-process serialization, so this cross-process
-    lease closes the archive/restore TOCTOU windows (issue #48 hardening).
+    lease closes the archive/restore TOCTOU windows.
     Contenders skip the mutation after 75ms rather than blocking a hook.
     """
     lock_path = CLAUDE_DIR / "_backups" / ".skill-mgmt.lock"
@@ -6181,7 +6181,7 @@ def _collect_management_data(components=None, trends=None):
             "v5_features": _get_v5_feature_status(),
         }
 
-    # Hermes (issue #57): Hermes has no Claude-style skills/MCP/settings.json
+    # Hermes: Hermes has no Claude-style skills/MCP/settings.json
     # management surface. Return a minimal hermes-mode dict so the Manage tab
     # renders without scanning CLAUDE_DIR/_backups, settings.json, or
     # claude_desktop_config.json.
@@ -6239,7 +6239,7 @@ def _collect_management_data(components=None, trends=None):
                     if not item.is_dir():
                         continue
                     # A real archived skill carries SKILL.md; a symlinked skill is
-                    # archived as a dir holding only the marker (issue #48). SKILL.md
+                    # archived as a dir holding only the marker. SKILL.md
                     # takes precedence so a real skill is never mislabeled as a link.
                     # Surface both so symlinked skills stay restorable from the UI.
                     has_skill_md = (item / "SKILL.md").exists()
@@ -6331,7 +6331,6 @@ def plugin_cleanup(dry_run=False, quiet=False):
        not referenced by installPath. Does NOT delete them because installPath is not
        always the authoritative source (Claude Code's loader may resolve via marketplace
        source, especially for directory-sourced plugins). Users should review manually.
-       See Claude Code issue #27721.
     2. Local/plugin overlap: archives local skills in ~/.claude/skills/ that duplicate
        plugin-installed skills (only bare SKILL.md; keeps skills with custom reference files).
     """
@@ -6339,7 +6338,7 @@ def plugin_cleanup(dry_run=False, quiet=False):
 
     actions_taken = []
 
-    # Defense-in-depth (issue #57): under a foreign runtime (OpenCode, Copilot),
+    # Defense-in-depth: under a foreign runtime (OpenCode, Copilot),
     # do not touch ~/.claude.
     if _is_foreign_runtime():
         if not quiet:
@@ -6505,7 +6504,7 @@ def _manage_skill(action, name):
 
     Skills in ~/.claude/skills are often symlinks pointing into a shared skills
     repo. Archiving a symlinked skill records the link target and removes only
-    the link, never the real source (issue #48).
+    the link, never the real source.
 
     Held under a cross-process lock so a dashboard-daemon call and a CLI call
     can't interleave their archive/restore mutations.
@@ -6519,7 +6518,7 @@ def _manage_skill(action, name):
 def _manage_skill_locked(action, name):
     import shutil
 
-    # Defense-in-depth (issue #57): never mutate ~/.claude/skills when running
+    # Defense-in-depth: never mutate ~/.claude/skills when running
     # under a foreign runtime (OpenCode, Copilot), even if reached outside the
     # CLI dispatch guard (e.g. the dashboard /api/v5/toggle path).
     if _is_foreign_runtime():
@@ -6534,7 +6533,7 @@ def _manage_skill_locked(action, name):
     # Containment check on the UN-resolved path. The name is already validated as
     # a single path component, so the join cannot escape skills_dir. Do NOT use
     # .resolve() here: legitimate skills are often symlinks pointing outside
-    # ~/.claude/skills, and resolving the target would misflag them (issue #48).
+    # ~/.claude/skills, and resolving the target would misflag them.
     candidate = skills_dir / name
     if candidate.parent != skills_dir:
         print(f"  [!] Path traversal detected: {name}")
@@ -6625,7 +6624,7 @@ def _manage_skill_locked(action, name):
 
 def _manage_mcp(action, name):
     """Disable or enable an MCP server by moving between mcpServers and _disabledMcpServers."""
-    # Defense-in-depth (issue #57): never mutate ~/.claude/settings.json under
+    # Defense-in-depth: never mutate ~/.claude/settings.json under
     # a foreign runtime (OpenCode, Copilot), even when reached outside the CLI
     # dispatch guard (e.g. the dashboard /api/mcp/{enable,disable} HTTP path),
     # mirroring _manage_skill_locked.
@@ -7416,7 +7415,7 @@ def _defer_session_end_flush(args):
 
 
 def _dispatch_session_end_flush(args):
-    """Route the `session-end-flush` CLI entry (#114).
+    """Route the `session-end-flush` CLI entry.
 
     Defer by DEFAULT so a legacy bare `session-end-flush` hook fossilized in
     settings.json (pre-5.11.77 script installs, no --defer) stops running the
@@ -7845,7 +7844,7 @@ def _generate_codex_auto_recommendations(components, trends=None, days=30):
 # Token Optimizer's OWN skills. The tool must NEVER recommend archiving, trimming,
 # or cutting the very features that do the measuring — suggesting a user delete
 # token-coach/fleet-auditor to "save ~200 tokens" is self-cannibalizing and reads
-# as the plugin undermining itself (issue #111). These are always excluded from
+# as the plugin undermining itself. These are always excluded from
 # unused-skill / archive recommendations regardless of invocation history: an
 # audit tool you never explicitly "invoke" is not the same as an unused skill.
 _OWN_TOOL_SKILLS = frozenset({
@@ -8017,7 +8016,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
     # shapes Claude / other-foreign-runtime advice.
     _runtime = detect_runtime()
     if trends:
-        # Never recommend cutting our own measurement skills (issue #111).
+        # Never recommend cutting our own measurement skills.
         never_used = [
             s for s in trends.get("skills", {}).get("never_used", [])
             if not _is_own_tool_skill(s)
@@ -9320,7 +9319,7 @@ def _find_all_jsonl_files(days=30):
     if _use_codex_session_adapter():
         return codex_session.find_all_jsonl_files(days)
 
-    # Hermes (issue #57 cross-platform universality): Hermes sessions live in
+    # Hermes (cross-platform universality): Hermes sessions live in
     # ~/.hermes/state.db and are ingested into trends.db via hermes-rollup /
     # _collect_hermes_sessions — they are NOT stored as ~/.claude/projects
     # JSONL. Returning [] here keeps the JSONL fallback path of
@@ -9334,7 +9333,7 @@ def _find_all_jsonl_files(days=30):
     if _use_antigravity_session_adapter():
         return []
 
-    # Cursor (issue #57 cross-platform universality, same as Hermes): sessions
+    # Cursor (cross-platform universality, same as Hermes): sessions
     # live in the hook tally and are ingested via cursor-rollup, not
     # ~/.claude/projects JSONL. Returning [] keeps the JSONL fallback path of
     # the cursor-exempted dashboard command from scanning ~/.claude.
@@ -14103,7 +14102,7 @@ def _keepwarm_write_scheduler_marker(bootstrap_rc="__unset__"):
     """Write the 0600 install marker (installed_at + plist path + bootstrap_rc).
 
     ensure-health's repair keys on this marker AND consent so a user-deleted
-    plist is only regenerated for a machine we actually installed on (#59). Atomic
+    plist is only regenerated for a machine we actually installed on. Atomic
     0600 write via mkstemp + os.replace. `bootstrap_rc` records the launchctl
     bootstrap outcome: an int rc, or None when bootstrap could not run;
     omitted (sentinel) for callers that don't know it.
@@ -19115,7 +19114,7 @@ def _collect_hermes_sessions(days=90, quiet=False, rebuild=False):
 
 
 def _resolve_copilot_home_wsl_aware(mnt_root=None):
-    """Resolve the Copilot home with a WSL-root /mnt/ exception (issue #78).
+    """Resolve the Copilot home with a WSL-root /mnt/ exception.
 
     Thin wrapper around ``runtime_env.copilot_home`` so the WSL ``/mnt/``
     opt-in has a SINGLE source of truth (``runtime_env._safe_home_from_env``
@@ -19131,7 +19130,7 @@ def _resolve_copilot_home_wsl_aware(mnt_root=None):
          guard, or the WSL-root /mnt/ opt-in. The only var users should set.
       2. COPILOT_HOME (Copilot's own var) — back-compat location hint; a /mnt/
          value earns a guardrail warning because native-Windows Copilot reads
-         the same var and a /mnt value breaks its own logging (issue #78).
+         the same var and a /mnt value breaks its own logging.
       3. WSL-root auto-detect — probe /mnt/c/Users/*/.copilot for the sole
          Windows profile, so no env var is needed.
       4. Otherwise → $HOME/.copilot.
@@ -21935,7 +21934,7 @@ def _collect_health_data():
     """
     system = platform.system()
     runtime = detect_runtime()
-    # Hermes (issue #57): Hermes sessions are not `claude` processes.
+    # Hermes: Hermes sessions are not `claude` processes.
     # Probing `claude --version` and `ps | grep claude` under hermes is
     # semantically wrong and would report stale/empty data. Return a
     # hermes-mode minimal dict so the dashboard's health row renders
@@ -22483,8 +22482,8 @@ def _sessionend_cmd_is_collect_fossil(cmd) -> bool:
 def _is_hook_current(settings=None):
     """True when the installed SessionEnd hook is the session-end-flush shape.
 
-    The collect-then-dashboard fossil (#114) is never current: it runs the
-    heavy flush inline and unbounded. The pre-#118 win32 cmd-null-redirect
+    The collect-then-dashboard fossil is never current: it runs the
+    heavy flush inline and unbounded. The pre-v5.11 win32 cmd-null-redirect
     form is also never current. setup_hook's upgrade branch rewrites anything
     that returns False.
     """
@@ -22596,8 +22595,8 @@ def _report_settings_write_refusal(why):
     print(
         "  [Token Optimizer] REFUSED settings.json write: " + why + ".\n"
         "  Nothing was written; your settings.json is untouched. This guard "
-        "exists because a write like this silently erased user settings "
-        "(#106). If the removal was intended, the caller must declare it "
+        "exists because a write like this silently erased user settings. "
+        "If the removal was intended, the caller must declare it "
         "via allow_removing_keys.",
         file=sys.stderr,
     )
@@ -22706,7 +22705,7 @@ def _write_settings_atomic(settings_data, allow_removing_keys=None):
     during the write propagates naturally after cleanup.
 
     Returns True iff the write actually landed, False when the advisory lease
-    was denied and nothing was written (#106). Callers that report
+    was denied and nothing was written. Callers that report
     success to the user MUST check this -- a lease miss is logged to
     ``DAEMON_LOG_DIR/settings-lease-denials.log`` and sets ``last_refusal``
     so callers can distinguish lease denial from guard refusal (write-return
@@ -23282,7 +23281,7 @@ def setup_hook(dry_run=False, uninstall=False):
     hooks = settings["hooks"]
 
     if upgrading:
-        # Replace the collect/dashboard fossil (#114) with session-end-flush.
+        # Replace the collect/dashboard fossil with session-end-flush.
         session_end = hooks.get("SessionEnd", [])
         if isinstance(session_end, list):
             for entry in session_end:
@@ -23399,7 +23398,7 @@ LAUNCH_AGENTS_DIR = _safe_home() / "Library" / "LaunchAgents"
 PLIST_PATH = LAUNCH_AGENTS_DIR / f"{DAEMON_LABEL}.plist"
 DAEMON_LOG_DIR = SNAPSHOT_DIR / "logs"
 DAEMON_TOKEN_PATH = SNAPSHOT_DIR / "daemon-token"  # 0600, per-install CSRF secret
-# v5.11.1 (#59): persisted bind-host for the daemon. setup-daemon writes the
+# v5.11.1: persisted bind-host for the daemon. setup-daemon writes the
 # effective TOKEN_OPTIMIZER_DASHBOARD_HOST here so the launchd/systemd/Task
 # Scheduler daemon -- which runs with an empty environment and therefore never
 # sees the env var -- can read it at runtime. The generated script also reads
@@ -23407,7 +23406,7 @@ DAEMON_TOKEN_PATH = SNAPSHOT_DIR / "daemon-token"  # 0600, per-install CSRF secr
 # version bumps without baking the value into the script (which would regress
 # to 127.0.0.1 on the next regen).
 DAEMON_HOST_PATH = SNAPSHOT_DIR / "dashboard-host"
-# Hosts the daemon is allowed to BIND. v5.11.1 (#59): "::1" is intentionally
+# Hosts the daemon is allowed to BIND. v5.11.1: "::1" is intentionally
 # excluded -- the daemon uses socketserver.TCPServer which is AF_INET, so a
 # "::1" bind raises OSError -> sys.exit(0) -> silent daemon death (confirmed
 # live). This is the bind allowlist only; the generated script's
@@ -23426,7 +23425,7 @@ DAEMON_THRASH_BREADCRUMB = SNAPSHOT_DIR / ".daemon-thrash"  # tombstone
 # uninstall tombstone distinctive content so the daemon can honor it forever.
 _UNINSTALL_TOMBSTONE_MARKER = "uninstalled"
 
-# issue #107: STICKY install-failed marker. Lives in the same state dir as the
+# STICKY install-failed marker. Lives in the same state dir as the
 # .daemon-thrash tombstone and follows the same convention (a dot-prefixed
 # breadcrumb whose PRESENCE is authoritative, independent of config.json, which
 # a corrupt read could silently flip back to permissive).
@@ -23439,7 +23438,7 @@ _UNINSTALL_TOMBSTONE_MARKER = "uninstalled"
 # essentially every prompt, forever. The throttles bound the RATE, not the
 # lifetime -- they never stop.
 #
-# Lifetime (#107): armed ONLY by DEFINITIVE, permanent
+# Lifetime: armed ONLY by DEFINITIVE, permanent
 # failure classes -- an MS-Store Python alias (structurally impossible install),
 # schtasks missing from the machine, or task creation denied by policy
 # ("Access is denied"). TRANSIENT classes (a subprocess timeout, a one-off
@@ -23460,7 +23459,7 @@ DAEMON_IDENTITY_MAGIC = (
     else "token-optimizer-dashboard-v1"
 )
 
-# v5.11.68 (#106): every runtime suffix that can register a daemon
+# v5.11.68: every runtime suffix that can register a daemon
 # scheduler artifact. Daemon uninstall sweeps ALL of these by name so a
 # scheduler registration whose plugin-data dir already vanished (e.g. a
 # sibling identity removed by the platform's own GC) still gets unregistered,
@@ -23491,7 +23490,7 @@ _ALL_WINDOWS_TASK_NAMES = (
 
 
 def _scheduler_names_to_sweep(this_install_only: bool, all_names, active_name):
-    """Scheduler identifiers to unregister (#106).
+    """Scheduler identifiers to unregister.
 
     ``this_install_only`` scoped the per-identity FILE sweep but not the
     scheduler loops, so a "just this install" uninstall still booted out every
@@ -23506,7 +23505,7 @@ def _sweep_identity_daemon_files(snap_dir: Path, keys) -> tuple[list[str], list[
     """Delete the daemon artifacts named by ``keys`` from one identity.
 
     Returns ``(removed, failed)`` as path strings. Failures are reported
-    rather than swallowed (#106) so the caller can refuse to claim
+    rather than swallowed so the caller can refuse to claim
     a clean sweep while a 0600 daemon-token is still on disk.
     """
     files = _daemon_per_identity_files(snap_dir)
@@ -23522,7 +23521,7 @@ def _sweep_identity_daemon_files(snap_dir: Path, keys) -> tuple[list[str], list[
 
 
 def _print_identity_sweep_report(removed, per_identity_removed, failed, this_install_only):
-    """Shared uninstall reporting for all three platforms (#106).
+    """Shared uninstall reporting for all three platforms.
 
     Honesty rules preserved and extended: never print a
     "Deleted" line for a survivor, keep "Nothing to remove" when nothing
@@ -23573,7 +23572,7 @@ def _daemon_per_identity_files(snapshot_dir: Path) -> dict:
 
 
 def _daemon_identity_snapshot_dirs(this_install_only: bool) -> list[Path]:
-    """Snapshot dirs to sweep during daemon uninstall (issue #106).
+    """Snapshot dirs to sweep during daemon uninstall.
 
     Root cause: daemon paths derive from one module-level ``SNAPSHOT_DIR``
     (the resolved identity), but multiple installs create multiple
@@ -23764,7 +23763,7 @@ def _read_dashboard_host_file():
 
 
 def _persist_dashboard_host(persist=True):
-    """v5.11.1 (#59): persist the daemon bind-host so the service-managed daemon
+    """v5.11.1: persist the daemon bind-host so the service-managed daemon
     (launchd/systemd/Task Scheduler) -- which starts with an empty environment --
     binds the host the user asked for instead of always 127.0.0.1.
 
@@ -23794,7 +23793,7 @@ def _persist_dashboard_host(persist=True):
             if persist:
                 try:
                     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-                    # v5.11.1 (#59): O_CREAT|O_TRUNC with 0o600 + fdopen, matching
+                    # v5.11.1: O_CREAT|O_TRUNC with 0o600 + fdopen, matching
                     # the daemon-token write -- avoids a umask-widened world-readable
                     # file and the symlink-replacement write that plain write_text
                     # (which follows symlinks) would allow.
@@ -23885,7 +23884,7 @@ def _generate_daemon_script():
 Auto-generated by measure.py v{TOKEN_OPTIMIZER_VERSION}. Serves the dashboard HTML on localhost:{DAEMON_PORT}.
 The SessionEnd hook regenerates the HTML file; this daemon just serves what's on disk.
 """
-# issue #160: real module constant (the line above used to live INSIDE the
+# Real module constant (the line above used to live INSIDE the
 # docstring, so /api/health's reference to TOKEN_OPTIMIZER_DAEMON_VERSION raised
 # NameError and the health route crashed on every call). Exposed as a cheap
 # constant the non-blocking health route can answer from without doing work.
@@ -23900,7 +23899,7 @@ import sys
 import threading
 import time
 
-# issue #160: the daemon now runs on a ThreadingTCPServer so a synchronous
+# The daemon now runs on a ThreadingTCPServer so a synchronous
 # api/regenerate (10-17s) no longer blocks liveness probes (/api/health,
 # /__to_ping) and other requests. Every module global mutated per-request is
 # guarded by _STATE_LOCK so concurrent handler threads cannot race on:
@@ -23915,7 +23914,7 @@ import time
 # file, so they need no lock.
 _STATE_LOCK = threading.Lock()
 
-# issue #160 follow-up (unbounded-thread regression): ThreadingTCPServer spawns
+# Unbounded-thread regression: ThreadingTCPServer spawns
 # one worker thread per accepted connection with NO cap, and daemon_threads=True
 # only affects EXIT, not the live count. A slowloris (many connections that never
 # send a request line) or a flood of valid-token requests would otherwise spawn
@@ -23933,7 +23932,7 @@ DAEMON_MAX_WORKERS = 12
 DAEMON_REQUEST_TIMEOUT = 10.0
 _WORKER_SEM = threading.BoundedSemaphore(DAEMON_MAX_WORKERS)
 
-# issue #107: the daemon shells out to `python measure.py ...` for the v5-toggle,
+# The daemon shells out to `python measure.py ...` for the v5-toggle,
 # skill/MCP-manage, and manual-regenerate endpoints. python.exe is a console
 # subsystem binary, so without CREATE_NO_WINDOW each of those spawns flashes a
 # cmd window on Windows. getattr -> 0 on POSIX makes it a no-op there.
@@ -23941,7 +23940,7 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 LOG_DIR = {log_dir_literal}
 
-# issue #107: the Scheduled Task now launches this script with pythonw.exe
+# The Scheduled Task now launches this script with pythonw.exe
 # (GUI subsystem) instead of the .cmd launcher, because Task Scheduler paints a
 # console window for any console-subsystem action and no creationflags of ours
 # can stop it. pythonw gives the process NO std handles at all, so the
@@ -23989,7 +23988,7 @@ MEASURE_PY_MARKETPLACE = {measure_marketplace_literal}
 _MEASURE_PY_CACHE = ("", 0.0)
 _regen_inflight = False
 REGEN_STEP_TIMEOUT = 45
-# issue #160 follow-up (regen race): the background stale-while-revalidate refresh
+# Regen race: the background stale-while-revalidate refresh
 # is a fire-and-forget Popen, so nothing reaps its child inline. A daemon reaper
 # thread waits for the child and clears _regen_inflight when it exits, bounded by
 # this timeout so a hung child can never wedge the guard True forever (the manual
@@ -24060,7 +24059,7 @@ def _log_reject_regen(path):
     global _REJECT_LOG_LAST_TS
     now = time.time()
     clean = _sanitize_log_path(path)
-    # issue #160: _REJECT_LOG_LAST_TS is a shared module global; under the
+    # _REJECT_LOG_LAST_TS is a shared module global; under the
     # threading server two POSTs can reject concurrently. Hold _STATE_LOCK only
     # for the dict mutation, not for the file write below.
     with _STATE_LOCK:
@@ -24090,7 +24089,7 @@ def _resolve_measure_py():
     Cached for MEASURE_PY_RESOLVE_TTL so a busy daemon does not re-walk per request.
     """
     global _MEASURE_PY_CACHE
-    # issue #160: cache read under _STATE_LOCK so a concurrent freshness regen
+    # Cache read under _STATE_LOCK so a concurrent freshness regen
     # and a manual regen don't both walk the container and clobber the cache.
     with _STATE_LOCK:
         cached, when = _MEASURE_PY_CACHE
@@ -24252,7 +24251,7 @@ def _is_localhost_origin(origin):
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
-    # issue #160 follow-up (slowloris): StreamRequestHandler.setup() applies this
+    # Slowloris defense: StreamRequestHandler.setup() applies this
     # as self.connection.settimeout(...), so a peer that connects but never finishes
     # sending a request line is dropped after DAEMON_REQUEST_TIMEOUT (raising
     # socket.timeout, which BaseHTTPRequestHandler.handle_one_request catches and
@@ -24331,7 +24330,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._json_response(200, {{"ok": True, "server": "token-optimizer-daemon", "version": TOKEN_OPTIMIZER_DAEMON_VERSION}})
             return
         if clean == "api/token":
-            # v5.11.1 (#59): the token endpoint is loopback-locked in BOTH modes.
+            # v5.11.1: the token endpoint is loopback-locked in BOTH modes.
             # In network mode we serve the dashboard HTML to LAN visitors (view-
             # only) but only hand out the CSRF token to clients connecting FROM
             # the machine itself (client_address loopback), so a LAN visitor can
@@ -24370,11 +24369,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except OSError:
             return
         now = time.time()
-        # issue #160: _last_regen is a shared throttle stamp; under the threading
+        # _last_regen is a shared throttle stamp; under the threading
         # server two GETs can race the stale check. Hold _STATE_LOCK only for the
         # read+write of the stamp, not for the subprocess.Popen below.
         #
-        # issue #160 follow-up (regen race): the manual POST /api/regenerate path
+        # Regen race: the manual POST /api/regenerate path
         # guards overlap with _regen_inflight; this background path used to touch
         # only _last_regen, so under the threading server a background refresh and a
         # manual regen (or two backgrounds) could run concurrently. Claim the SAME
@@ -24567,7 +24566,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 _log_regen("MANUAL regen failed: measure.py not found at " + target)
                 self._json_response(500, {{"ok": False, "msg": "measure.py not found; reinstall or run setup-daemon"}})
                 return
-            # issue #160: the server is now a ThreadingTCPServer, so a regen no
+            # The server is now a ThreadingTCPServer, so a regen no
             # longer blocks other requests. The _regen_inflight guard still
             # refuses OVERLAPPING regens (a second click while the first runs).
             # The lock is held ONLY for the check+set and the final clear -- never
@@ -24736,7 +24735,7 @@ if not _thrash_check_and_update():
 # Bind address. Default: localhost only. TOKEN_OPTIMIZER_DASHBOARD_HOST=0.0.0.0 enables
 # network access (Tailscale Funnel, LAN). When network-bound, Host header checks are
 # relaxed since remote clients send non-localhost Host headers. Token auth still applies.
-# Resolution (#59): env var -> persisted host file (HOST_PATH, written by
+# Resolution: env var -> persisted host file (HOST_PATH, written by
 # setup-daemon) -> 127.0.0.1. The service manager starts us with an empty
 # environment, so the env var is usually absent here; the host file carries the
 # user's choice across to the daemon and survives version-bump auto-regen.
@@ -24751,7 +24750,7 @@ if not _host_raw:
         # Normal: setup-daemon never persisted a host. Default to loopback.
         _host_raw = ""
     except OSError as _e:
-        # v5.11.1 (#59): a non-missing read failure (e.g. PermissionError) is
+        # v5.11.1: a non-missing read failure (e.g. PermissionError) is
         # worth a one-line note in the service-manager logs before we silently
         # fall back to loopback -- otherwise a misconfigured host file looks
         # like the daemon ignored the setting for no reason.
@@ -24765,7 +24764,7 @@ if NETWORK_MODE:
     print(f"[Token Optimizer] Network mode: binding {{HOST}}:{{PORT}}", file=sys.stderr)
     print("  Dashboard and toggle API accessible from LAN. Token auth required for mutations.", file=sys.stderr)
 try:
-    # issue #160: ThreadingTCPServer so a synchronous api/regenerate (10-17s)
+    # ThreadingTCPServer so a synchronous api/regenerate (10-17s)
     # does NOT block liveness probes (/api/health, /__to_ping) or other
     # requests. daemon_threads=True so worker threads die with the daemon and
     # never block process exit; allow_reuse_address=True so a fast restart
@@ -24778,7 +24777,7 @@ try:
         allow_reuse_address = True
 
         def process_request(self, request, client_address):
-            # issue #160 follow-up (unbounded threads): bound concurrent workers.
+            # Bound concurrent workers.
             # Acquire NON-BLOCKING in the accept loop so it never stalls (health
             # probes keep being accepted even at saturation). On saturation, answer
             # a bare 503 and close instead of spawning another unbounded worker
@@ -25341,7 +25340,7 @@ def setup_all_hooks(dry_run=False, verbose=False):
                     existing_cmd = existing_hook.get("command", "")
                     has_path = ".py" in existing_cmd or ".py" in resolved_cmd
                     # On Windows, an existing command can point at the current
-                    # root yet still be the legacy native cmd.exe form (#118).
+                    # root yet still be the legacy native cmd.exe form.
                     # Replace it with the Git-Bash launcher during ensure-health.
                     windows_command_stale = _windows_hook_command_is_stale(
                         existing_cmd, resolved_cmd
@@ -25684,7 +25683,7 @@ def _reclaim_daemon_ports(this_install_only: bool):
 
 
 def _daemon_access_lines(effective_host):
-    """v5.11.1 (#59): return the access-scope lines for install/dry-run output.
+    """v5.11.1: return the access-scope lines for install/dry-run output.
 
     Localhost binds print the usual "only your machine" line. A 0.0.0.0 bind is
     network mode -- the dashboard is reachable on the LAN, but token auth still
@@ -25881,7 +25880,7 @@ def _write_uninstall_tombstone(snapshot_dir=None):
 
 
 # ---------------------------------------------------------------------------
-# issue #107: sticky install-failed marker (no-revive after a failed install)
+# Sticky install-failed marker (no-revive after a failed install)
 # ---------------------------------------------------------------------------
 
 def _daemon_install_failed_marker_state():
@@ -26035,7 +26034,7 @@ def _uninstall_launchd_daemon(this_install_only=False, dry_run=False):
     followed by a "Deleted: script.py" line when the plist is gone but
     the script file remains from a half-uninstall.
 
-    v5.11.68 (#106): identity-sweeping by default. The LaunchAgent plist
+    v5.11.68: identity-sweeping by default. The LaunchAgent plist
     is per-RUNTIME (shared across ``token-optimizer-*`` identities of the same
     runtime), so it is removed once. The per-identity files
     (``dashboard-server.py``, ``daemon-token``, ``dashboard-host``,
@@ -26177,7 +26176,7 @@ def _resolve_windows_pythonw():
 def _windows_gui_python():
     """pythonw.exe (GUI subsystem) next to ``sys.executable``, or None.
 
-    issue #107: the ONE interpreter that never allocates a console. Every
+    The ONE interpreter that never allocates a console. Every
     console-subsystem child (python.exe, py.exe, cmd.exe) gets a window from
     Windows itself unless the PARENT passes CREATE_NO_WINDOW -- and when the
     parent is Task Scheduler, we do not get to pass anything. Launching
@@ -26206,7 +26205,7 @@ def _windows_gui_python():
 def _windows_task_exec_action(daemon_script_path, launcher_path):
     """Return ``(command, arguments)`` for the Scheduled Task's ``<Exec>``.
 
-    issue #107 (the idle-pop): the task action used to be the generated
+    The idle-pop: the task action used to be the generated
     ``dashboard-launcher.cmd``. Task Scheduler runs a .cmd through cmd.exe, a
     CONSOLE-subsystem process, so EVERY fire of the task painted a console
     window on the user's desktop -- at logon, at boot, and on each
@@ -26267,7 +26266,7 @@ def _generate_windows_launcher_cmd(daemon_script_path, log_dir):
     DAEMON_LOG_DIR so port conflicts and import errors no longer
     silently vanish.
 
-    issue #107 -- READ THIS BEFORE REORDERING ANYTHING:
+    READ THIS BEFORE REORDERING ANYTHING:
 
     * This shim is now the FALLBACK path only. The Scheduled Task action
       normally points straight at pythonw.exe (see
@@ -26392,7 +26391,7 @@ def _generate_schtasks_xml(task_name, user_id, command, arguments=""):
       - DisallowStartIfOnBatteries=false so laptop users get their
         bookmarkable URL on battery power too.
 
-    issue #107: ``command``/``arguments`` come from
+    ``command``/``arguments`` come from
     ``_windows_task_exec_action`` and are normally pythonw.exe + the daemon
     script, NOT the .cmd launcher. See that helper for why <Hidden> was never
     enough. ``<Arguments>`` is emitted only when non-empty so the .cmd fallback
@@ -26581,7 +26580,7 @@ def _install_task_scheduler_daemon(dry_run=False, soft_fail=False, effective_hos
                 str(daemon_script), str(DAEMON_LOG_DIR)).encode("utf-8"),
         )
 
-        # issue #107: prefer a GUI-subsystem pythonw.exe action over the .cmd
+        # Prefer a GUI-subsystem pythonw.exe action over the .cmd
         # launcher so Task Scheduler cannot paint a console window on every
         # fire (logon, boot, and every `schtasks /Run` from the revive path).
         _task_command, _task_arguments = _windows_task_exec_action(
@@ -26669,7 +26668,7 @@ def _uninstall_task_scheduler_daemon(this_install_only=False, dry_run=False):
     Cleans orphan XML files from any prior naming convention via glob so
     version drift doesn't leave artifacts behind.
 
-    v5.11.68 (#106): identity-sweeping by default. The scheduled task is
+    v5.11.68: identity-sweeping by default. The scheduled task is
     per-RUNTIME (shared across ``token-optimizer-*`` identities of the same
     runtime), so it is removed once, and we query+delete EVERY runtime's task
     name so a task whose data dir already vanished still gets unregistered.
@@ -26847,7 +26846,7 @@ def _systemd_user_unit_path():
 
 
 def _systemd_user_unit_path_for(unit_name: str) -> Path:
-    """Resolve the unit path for an arbitrary unit name (issue #106).
+    """Resolve the unit path for an arbitrary unit name.
 
     Same base resolution as ``_systemd_user_unit_path`` but for any runtime
     variant's unit name, so the sweeping uninstall can remove a sibling
@@ -27067,7 +27066,7 @@ def _install_systemd_user_daemon(dry_run=False, soft_fail=False, effective_host=
 def _uninstall_systemd_user_daemon(this_install_only=False, dry_run=False):
     """Linux: stop and remove the systemd --user dashboard unit.
 
-    v5.11.68 (#106): identity-sweeping by default. The systemd unit is
+    v5.11.68: identity-sweeping by default. The systemd unit is
     per-RUNTIME (shared across ``token-optimizer-*`` identities of the same
     runtime), so it is removed once, and we disable+remove EVERY runtime's
     unit so a unit whose data dir already vanished still gets unregistered.
@@ -27204,7 +27203,7 @@ def setup_daemon(dry_run=False, uninstall=False, this_install_only=False, latch_
     (DAEMON_PORT = 24842) so the bookmarkable URL is identical
     everywhere.
 
-    v5.11.68 (#106): ``--uninstall`` is identity-sweeping by default
+    v5.11.68: ``--uninstall`` is identity-sweeping by default
     (removes the daemon script + 0600 CSRF token from EVERY
     ``token-optimizer-*`` identity, and unregisters every runtime's scheduler
     artifact). Pass ``this_install_only=True`` (``--this-install-only``) to
@@ -27240,7 +27239,7 @@ def setup_daemon(dry_run=False, uninstall=False, this_install_only=False, latch_
                   "the daemon will be reinstalled at next SessionStart. Run "
                   "`setup-daemon --uninstall` without --dry-run to opt out for good.)")
         return
-    # v5.11.1 (#59): resolve the bind-host once, before branching, so every OS
+    # v5.11.1: resolve the bind-host once, before branching, so every OS
     # installer (and dry-run messaging) shares the same effective host. The
     # daemon runs under launchd/systemd/Task Scheduler with an empty env, so it
     # reads the persisted value instead of the env var. Dry-run resolves the
@@ -27262,7 +27261,7 @@ def setup_daemon(dry_run=False, uninstall=False, this_install_only=False, latch_
         print(f"[Error] Dashboard daemon not supported on {system}.")
         print(f"  Open the dashboard file directly: {DASHBOARD_PATH.as_uri()}")
         sys.exit(1)
-    # issue #107: THE ONLY place the sticky install-failed marker is cleared.
+    # THE ONLY place the sticky install-failed marker is cleared.
     # An explicit `setup-daemon` that actually succeeded is the user telling us
     # the structural problem is fixed. Not on dry-run (side-effect-free), and
     # not on a failed install -- the installers return False under soft_fail and
@@ -27272,7 +27271,7 @@ def setup_daemon(dry_run=False, uninstall=False, this_install_only=False, latch_
 
 
 # ---------------------------------------------------------------------------
-# Uninstall cleanup orchestrator (issue #106 + cleanup command)
+# Uninstall cleanup orchestrator (cleanup command)
 # ---------------------------------------------------------------------------
 
 # Paths that are intentionally PRESERVED across an uninstall. These hold
@@ -27281,7 +27280,7 @@ def setup_daemon(dry_run=False, uninstall=False, this_install_only=False, latch_
 # paths DISCLOSURE: the user sees exactly what stays before agreeing to
 # remove anything.
 def _retained_paths() -> list[tuple[str, Path]]:
-    """User-data paths preserved by design across an uninstall (issue #106).
+    """User-data paths preserved by design across an uninstall.
 
     Session snapshots, compaction checkpoints, trend aggregates, and the
     quality-bar cache are NOT removed by the cleanup command. They are
@@ -27318,7 +27317,7 @@ def _backup_settings_file(dest_dir: Path) -> Path | None:
 
 
 def _is_our_hook_entry(entry) -> bool:
-    """True when a settings.json hook entry is one WE installed (#106).
+    """True when a settings.json hook entry is one WE installed.
 
     Ownership markers, all anchored on our own script names rather than a bare
     "token-optimizer" substring (a user hook may legitimately mention us in a
@@ -27444,7 +27443,7 @@ def _remove_our_settings_entries(settings: dict) -> list[str]:
 
 
 def cleanup(dry_run=False, this_install_only=False):
-    """One-command uninstall cleanup for Token Optimizer (issue #106).
+    """One-command uninstall cleanup for Token Optimizer.
 
     Orchestrates the three uninstall surfaces:
     1. Daemon: stop + remove the dashboard daemon across all
@@ -27684,7 +27683,7 @@ def _ensure_dashboard_daemon(force=False):
         return "noop-foreign"
     if _read_config_flag("daemon_disabled", False):
         return "noop-disabled"
-    # issue #107: a prior install/self-heal failed for a DEFINITIVE reason.
+    # A prior install/self-heal failed for a DEFINITIVE reason.
     # Refuse. BEFORE the `force` check on purpose -- `daemon-revive`
     # (force=True) is the per-turn retry path this marker exists to stop, and
     # on Windows each retry costs the user a cmd-window flash.
@@ -27884,7 +27883,7 @@ def _daemon_midsession_pulse():
             pass
         if _read_config_flag("daemon_disabled", False):
             return "noop-disabled"
-        # issue #107: sticky install-failed marker. Checked here, alongside the
+        # Sticky install-failed marker. Checked here, alongside the
         # tombstone and BEFORE the probe throttle, so a permanently-broken
         # install stops costing a revive spawn (and on Windows a cmd-window
         # flash) every ~5min for the rest of time. Cleared only by an explicit
@@ -28011,7 +28010,7 @@ def _windows_task_action_info(task_name=None):
     ``command`` is the task's ``<Command>``. A None command means "no task" and
     every caller MUST treat it as "do nothing" -- never as "install one".
     Healing an absent task would resurrect a daemon the user declined or
-    uninstalled (#59).
+    uninstalled.
 
     ``enabled`` is the SETTINGS-level ``<Enabled>`` from the same XML (the
     trigger-level ``<Enabled>`` elements live outside ``<Settings>`` and are
@@ -28127,7 +28126,7 @@ def _daemon_resurrection_blocked():
 
 
 def _heal_windows_task_action(stop_first=False, throttle=False):
-    """issue #107 one-shot migration: lift an already-registered Scheduled Task
+    """One-shot migration: lift an already-registered Scheduled Task
     off a console action (the .cmd launcher, or a bare py.exe/python.exe) onto
     the GUI-subsystem pythonw.exe action.
 
@@ -28140,7 +28139,7 @@ def _heal_windows_task_action(stop_first=False, throttle=False):
       * Windows only, and only when a usable pythonw twin actually exists --
         there is nothing better to migrate TO otherwise.
       * Only when the task EXISTS and its action is positively identified as a
-        console flasher. An absent task is left absent (#59).
+        console flasher. An absent task is left absent.
       * Re-registers through ``_install_task_scheduler_daemon``, the same code
         path a fresh install uses, so heal and install can never drift.
       * Preserves the user's persisted bind host (``persist=False`` reads the
@@ -28169,7 +28168,7 @@ def _heal_windows_task_action(stop_first=False, throttle=False):
     try:
         if os.name != "nt":
             return False
-        # UNIFIED GATE (#107): the #59 refusal gates live HERE,
+        # UNIFIED GATE: the refusal gates live HERE,
         # inside the primitive, so BOTH call sites (ensure-health heal and
         # _restart_dashboard_daemon's /End->/Run window) and any future one
         # are gated by construction.
@@ -28179,7 +28178,7 @@ def _heal_windows_task_action(stop_first=False, throttle=False):
         if command is None:
             return False  # no task -> nothing to heal, and nothing to create
         if task_enabled is False:
-            # #59: the user DISABLED our task -- the natural Windows
+            # The user DISABLED our task -- the natural Windows
             # "off without uninstalling". Same posture as the tombstone:
             # leave it alone; never re-register it <Enabled>true</Enabled>.
             return False
@@ -28345,7 +28344,7 @@ def _heal_windows_launcher_shim():
 
 
 def _heal_windows_console_flash():
-    """issue #107 runtime self-heal: repair already-installed Windows artifacts
+    """Runtime self-heal: repair already-installed Windows artifacts
     that flash a console window.
 
     A generator fix only helps the NEXT install. The reporter already has the
@@ -28376,7 +28375,7 @@ def _heal_windows_console_flash():
     line appears exactly once. The task heal is additionally THROTTLED
     (``throttle=True``): a persistently-failing re-registration attempts at
     most once per ensure-throttle window instead of bouncing the live daemon
-    on every SessionStart (#107).
+    on every SessionStart.
 
     Returns True when anything was actually repaired. Never raises.
     """
@@ -28444,7 +28443,7 @@ def _restart_dashboard_daemon(system):
                 capture_output=True, timeout=5, creationflags=_NO_WINDOW,
             )
             time.sleep(2)
-            # issue #107: an install registered by an older build still has the
+            # An install registered by an older build still has the
             # .cmd launcher as its task ACTION, and End/Run just re-runs whatever
             # is registered -- so the console flash would survive every update
             # for the entire installed base. Migrate the action here, between
@@ -29231,7 +29230,7 @@ def compute_quality_score(quality_data, session_id=None):
     ctx_window, ctx_window_source = detect_context_window()
     model_context_window = quality_data.get("model_context_window") or ctx_window
     # Provenance follows whichever window we actually divide by. Without it a
-    # wrong denominator is indistinguishable from a right one (issue #95): the
+    # wrong denominator is indistinguishable from a right one: the
     # numerator looks correct, so the percentage looks plausible.
     model_context_window_source = (
         "session data" if quality_data.get("model_context_window") else ctx_window_source
@@ -29276,7 +29275,7 @@ def compute_quality_score(quality_data, session_id=None):
                 raw_ratio = float(context_tokens) / float(model_context_window)
                 # min(1.0, ...) turns "250k tokens in a 200k window" into a
                 # confident-looking 100%. That clamp is what let a misdetected
-                # denominator pass as a real reading (#95). Record the
+                # denominator pass as a real reading. Record the
                 # contradiction first; the clamp still runs so downstream
                 # curve math keeps its 0-1 contract.
                 window_contradicted = raw_ratio > 1.0
@@ -29594,7 +29593,7 @@ def _find_current_session_jsonl():
     recently modified JSONL is almost always the currently active session.
     """
     if _use_codex_session_adapter():
-        # Deterministic resolution (issue #108): prefer the state-DB-resolved
+        # Deterministic resolution: prefer the state-DB-resolved
         # active thread id over the mtime guess. `find_current_session_jsonl`
         # picks the globally most-recently-modified JSONL, which can select an
         # older session when several are open. Keying off the resolved current
@@ -32246,7 +32245,7 @@ def _security_report(as_json=False):
     print(f"7. DASHBOARD SECURITY")
     print(f"   Daemon running: {'yes (PID ' + str(daemon_pid) + ')' if daemon_running else 'no'}")
     print(f"   Token file: {'exists' if DAEMON_TOKEN_PATH.exists() else 'absent'} | {_file_info(DAEMON_TOKEN_PATH).get('permissions', 'N/A')}")
-    # v5.11.1 (#59): reflect the persisted bind-host like the JSON path does,
+    # v5.11.1: reflect the persisted bind-host like the JSON path does,
     # instead of hardcoding loopback (which lied when network mode was on).
     _sec_bind = _read_dashboard_host_file() or "127.0.0.1"
     _sec_scope = "LAN (network mode)" if _sec_bind == "0.0.0.0" else "loopback only"
@@ -33001,7 +33000,7 @@ def _emit_additional_context(text, event="SessionStart"):
     ``additionalContext`` into the model's context. Two callers need the wrapped
     form rather than raw text:
 
-      * Codex SessionStart (issue #81): Codex REQUIRES empty-or-valid-JSON stdout,
+      * Codex SessionStart: Codex REQUIRES empty-or-valid-JSON stdout,
         so a raw ``[Token Optimizer] …`` block is rejected.
       * Cowork UserPromptSubmit (fix): raw-text stdout injection is tolerated on
         native desktop Claude Code but is NOT documented for the Cowork cloud
@@ -33034,7 +33033,7 @@ def _emit_additional_context(text, event="SessionStart"):
 
 
 def _emit_codex_session_start(text):
-    """Codex SessionStart wrapper (issue #81). Thin alias over the shared emitter
+    """Codex SessionStart wrapper. Thin alias over the shared emitter
     ``_emit_additional_context`` so the Codex and Cowork paths cannot diverge."""
     _emit_additional_context(text, event="SessionStart")
 
@@ -33630,7 +33629,7 @@ _RELEVANCE_CWD_BONUS = 0.10
 # lifts genuine resume prompts over the threshold while fresh prompts that
 # happen to mention a topic (no resume cue) stay below. A bare "continue" with
 # no topical tokens has content_score = 0.0, so it gets NO bonus and stays
-# below the bar (#129).
+# below the bar.
 _RELEVANCE_RESUME_INTENT_BONUS = 0.15
 # The resume-intent bonus is scaled by precision so a prompt that names a
 # DIFFERENT project and only grazes a shared container word cannot ride the flat
@@ -33857,8 +33856,8 @@ def checkpoint_relevance_score(text, checkpoint_path, pool=None, cwd=None):
         doc_tokens = set()
     # Strip resume-cue glue ("continue"/"resume"/"session"/"work"/...) from the
     # prompt so a bare "continue" has NO topical tokens and scores on recency +
-    # work-path only (U2.4 / #129). Reuses the shared non-English tokenizer so
-    # CJK prompts tokenize correctly (#127).
+    # work-path only (U2.4). Reuses the shared non-English tokenizer so
+    # CJK prompts tokenize correctly.
     try:
         base_tokens = _topic_tokens(str(text or ""), _RESUME_TOPIC_STOPWORDS)
         # Query-side path handling (mirror of the doc side): a prompt that names a
@@ -33992,7 +33991,7 @@ def checkpoint_relevance_score(text, checkpoint_path, pool=None, cwd=None):
     # verbose, so pure precision under-scores them; the bonus lifts genuine
     # resume prompts over the threshold while fresh prompts that happen to
     # mention a topic (no resume cue) stay below. A bare "continue" with no
-    # topical tokens has content_score = 0.0, so it gets NO bonus (#129).
+    # topical tokens has content_score = 0.0, so it gets NO bonus.
     if content_score > 0.0:
         try:
             if _resume_intent(str(text or "")):
@@ -34140,7 +34139,7 @@ _RESUME_TOPIC_STOPWORDS = frozenset({
 })
 
 
-# --- Non-English topic tokenizer (#127) — single source of truth on the Python side ---
+# --- Non-English topic tokenizer — single source of truth on the Python side ---
 # Two branches: an ASCII/accented-Latin run, OR a whole non-ASCII run (CJK etc.) as one
 # token, so a token never mixes ASCII and non-ASCII ("measure.py를" -> "measure.py" + "를").
 # The Latin-1/Extended-A ranges deliberately skip U+00D7 (×) and U+00F7 (÷): they sit inside
@@ -34255,7 +34254,7 @@ def _checkpoint_in_project(sidecar, cwd):
 
 
 # Tokenizer for the per-item keep/drop rule. DELIBERATELY ASCII-only, and DELIBERATELY
-# NOT the (wider) resume-topic tokenizer _TOPIC_TOKEN_RE. Do not "unify" them (#127):
+# NOT the (wider) resume-topic tokenizer _TOPIC_TOKEN_RE. Do not "unify" them:
 # widening this to match non-ASCII would make a non-Latin item produce 3+ tokens that then
 # fail the ASCII-only keep-set overlap test, dropping needed lines from the selected session.
 # The keep set is built from the prompt + cwd + in-project paths, which are ASCII in practice,
@@ -34447,7 +34446,7 @@ def _continuity_resume_block(text, checkpoints, sid_safe, cwd):
 
     # (1) Explicit session id in the prompt -> scope strictly to it. Honor it
     # exactly and never fall back to a different session; if no on-disk checkpoint
-    # matches, return "" rather than silently substituting an unrelated one (#129).
+    # matches, return "" rather than silently substituting an unrelated one.
     named_id = _extract_session_id_from_prompt(text)
     if named_id:
         # A KEYWORDED id ("...session <id>") is a deliberate request -> confident footer.
@@ -34485,7 +34484,7 @@ def _continuity_resume_block(text, checkpoints, sid_safe, cwd):
                     _log_resume_lean_savings(cp_sid, block)
                     return block
         # No checkpoint matches the named id. If the id was the WHOLE ask (no separate
-        # resume verb) never substitute a different session -- return "" (#129). But when
+        # resume verb) never substitute a different session -- return "". But when
         # the prompt independently asks to resume ("continue the auth refactor ... the
         # failing test references session a1b2c3d4"), the id is incidental, so fall
         # through to the topic/recency selection below instead of suppressing a good match.
@@ -34526,7 +34525,7 @@ def _continuity_resume_block(text, checkpoints, sid_safe, cwd):
     if not sid:
         return ""
     # Topic/recency match is a best guess -> CONDITIONAL footer so the assistant
-    # verifies against the user's actual request before claiming a reopen (#129).
+    # verifies against the user's actual request before claiming a reopen.
     block = build_lean_resume_context(sid, prompt_text=text, cwd=cwd, footer_mode="conditional")
     if block:
         # Count the cold-resume cost this lean reconstruction avoided (idempotent
@@ -35172,7 +35171,7 @@ def build_lean_resume_context(session_id, max_chars=3500, prompt_text=None, cwd=
                 pass
 
     if footer_mode == "conditional":
-        # Auto-injected best-guess match (#129): the plugin GUESSED which prior
+        # Auto-injected best-guess match: the plugin GUESSED which prior
         # session the user meant, so the assistant must verify before claiming a
         # reopen. Mirrors the lightweight-hint / compact_restore wording.
         footer = [
@@ -35773,7 +35772,7 @@ def keyword_relevance_score(text, checkpoint_path):
     """
     text_lower = text.lower()
 
-    # Content words via the shared non-English tokenizer (#127): two-branch class +
+    # Content words via the shared non-English tokenizer: two-branch class +
     # script-aware floor (CJK kept at len>=2, ASCII/Latin at len>3). See _topic_tokens.
     def content_words(s):
         return _topic_tokens(s)
@@ -35810,7 +35809,7 @@ def keyword_relevance_score(text, checkpoint_path):
         return 0.0
 
     try:
-        # errors="replace" (#127): a non-UTF-8 checkpoint scores 0.0 for itself instead of
+        # errors="replace": a non-UTF-8 checkpoint scores 0.0 for itself instead of
         # raising UnicodeDecodeError and aborting scoring for the whole candidate loop.
         checkpoint_content = checkpoint_path.read_text(encoding="utf-8", errors="replace")
     except (PermissionError, OSError):
@@ -38222,7 +38221,7 @@ def _heal_keepwarm_plist_path():
     Acts only on plugin-cache installs whose OWN keep-warm plist exists and whose
     embedded measure.py path differs from the resolved clone path. Editing the path
     of a plist the user already has is a correctness fix, not a (re)install, so it
-    never resurrects a declined/uninstalled agent (#59). The plist only lives under
+    never resurrects a declined/uninstalled agent. The plist only lives under
     ~/Library/LaunchAgents on macOS, so on other platforms it simply won't exist
     and this no-ops. Best effort: any failure leaves the plist untouched, False.
     """
@@ -38808,7 +38807,7 @@ _TRUTHY_ENV_VALUES = ("1", "true", "yes", "on")
 # A user who "marks" a flag here expects Token Optimizer to honour it -- but the
 # process that regenerates the dashboard (often the long-lived daemon) does NOT
 # inherit Claude Code's per-session env injection, so os.environ alone misses it.
-# Reading these files directly closes that gap (issue #77).
+# Reading these files directly closes that gap.
 def _settings_env_paths():
     # Path.cwd() raises FileNotFoundError if the working directory was deleted out
     # from under a long-lived process (plausible for the daemon). Degrade to the
@@ -38828,7 +38827,7 @@ def _settings_env_paths():
 
 # Parsed settings files, memoized by mtime. The detection paths read the same
 # <=4 files dozens of times per dashboard run; without this each call re-opened
-# and re-parsed them (issue #77 perf). Keying on st_mtime_ns keeps it correct in
+# and re-parsed them. Keying on st_mtime_ns keeps it correct in
 # a long-lived daemon: an edited file is re-read, an unchanged one is not.
 _settings_file_cache = {}
 
@@ -38924,7 +38923,7 @@ def _is_v5_feature_enabled(feature_name):
 
     Value interpretation is delegated to plugin_env.interpret_flag_value so the
     dashboard reader, the read-hook (is_v5_flag_enabled), and the env path all
-    share ONE gate and can never disagree (issue #79). An unrecognized value at
+    share ONE gate and can never disagree. An unrecognized value at
     a source falls through to the next; the registry default is the final
     fallback. The structure_map tri-state still enables only on the exact "beta"
     token (carried as env_truthy_value in the registry)."""
@@ -39365,7 +39364,7 @@ def setup_quality_bar(dry_run=False, uninstall=False, status_only=False, force=F
     if quiet:
         # Automated self-heal context (hooks). All side-effects above are
         # already applied; stay silent so the foreign-status-line advisory and
-        # install chatter never bloat per-turn / per-session context (#53).
+        # install chatter never bloat per-turn / per-session context.
         return
 
     if installed:
@@ -43047,8 +43046,8 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
         # so this is already the monthly figure. A net-negative main pool (now marginally
         # costlier than the frozen baseline this period) is carried honestly into the combined
         # net below rather than clamped to 0. Clamping the main pool while the "now vs old way"
-        # arms stayed honest is exactly what made the headline and the arms disagree in sign
-        # (issue #87): the top line summed only non-negative pools and could assert a saving
+        # arms stayed honest is exactly what made the headline and the arms disagree in sign.
+        # The top line summed only non-negative pools and could assert a saving
         # while the arms showed a loss. The headline is now the honest net of the same arms.
         main_transformation = counterfactual_monthly - actual_monthly
         # The sidechain arms already aggregate the full `days` window, so they ARE
@@ -43333,7 +43332,7 @@ def _estimate_before_after_savings(days=30, estimated_pools=None):
         # can still price differently because the OLD way used the baseline session's native
         # cache-read fraction while NOW redistributes the same pool at the current hit rate.
         # Surfacing both fractions makes that cost delta explainable rather than looking
-        # impossible ("same tokens, same mix, different cost" -- issue #87 contradiction #1).
+        # impossible ("same tokens, same mix, different cost" -- contradiction #1).
         # DISPLAYED hit rate counts cache-WRITE as a miss: creating a cache entry bills
         # 1.25x the input rate, so a session that rewrites its context every turn is not
         # "99.95% cached" in any sense the user would recognise. The pool-only ratio
@@ -45057,7 +45056,7 @@ def run_ensure_health():
     bad env var removal) run first so they are guaranteed to complete
     even if a later task exhausts the wall-clock budget.
     """
-    # Foreign-runtime guardrail (issue #57), defense-in-depth: every Claude
+    # Foreign-runtime guardrail, defense-in-depth: every Claude
     # write below is gated on `not _is_codex`, so under OpenCode or Copilot
     # they would all fire against ~/.claude. The CLI dispatch already blocks
     # `ensure-health` for foreign runtimes; this early return also covers any
@@ -45533,7 +45532,7 @@ def run_ensure_health():
                 print("  [Token Optimizer] Healed keep-warm agent to stable path", file=sys.stderr)
         except Exception as _e:
             print(f"  [Token Optimizer] keep-warm path heal failed: {_e}", file=sys.stderr)
-        # issue #107, same class again: a Windows install made by an older build
+        # Same class again: a Windows install made by an older build
         # already has a console-flashing Scheduled Task action and .cmd shim on
         # disk. Fixing the generators only helps the next install, so repair the
         # installed artifacts in place. Strict no-op off Windows, and gated so it
@@ -45810,8 +45809,8 @@ def _format_window_note(cached):
     A fill percentage is only as trustworthy as the window it was divided by, and
     until now the window was never shown. Someone seeing "89% capacity" had no way
     to tell whether the denominator was 200k or 1M -- the numerator is correct in
-    both cases, so a 5x-wrong reading looks exactly as plausible as a right one
-    (issue #95). detect_context_window() already computes a provenance string;
+    both cases, so a 5x-wrong reading looks exactly as plausible as a right one.
+    detect_context_window() already computes a provenance string;
     every call site discarded it.
 
     Returns "" for a cache written before this field existed, so an older cache
@@ -46261,7 +46260,7 @@ if __name__ == "__main__":
             i += 1
     args = _filtered_args
 
-    # --- Foreign-runtime guardrail (issue #57, cross-platform universality) -
+    # --- Foreign-runtime guardrail (cross-platform universality) -
     # OpenCode loads ~/.claude/skills by default, Copilot and Hermes can be
     # invoked from their own sessions, so any of them can reach this skill even
     # though the user is NOT in Claude Code. The Claude audit/fix commands below
@@ -46349,7 +46348,7 @@ if __name__ == "__main__":
         sys.exit(0)
     elif args[0] == "copilot-install":
         # Intercept copilot-install to support a --home <path> flag that
-        # overrides the copilot home (issue #78). copilot_install.main() uses
+        # overrides the copilot home. copilot_install.main() uses
         # argparse with a fixed action+dry-run signature, so we parse --home
         # out here and call copilot_install.install(home=...) directly,
         # mirroring main()'s output format. Without this, a WSL-root user who
@@ -46396,10 +46395,10 @@ if __name__ == "__main__":
         # runtime_env.copilot_home → _safe_home_from_env (confined under $HOME
         # by the safe-home guard, plus the WSL-root /mnt/ opt-in). Used by
         # install.sh to show the TRUE hook destination in its success banner
-        # instead of a hardcoded ~/.copilot path (issue #78: WSL-root installs
+        # instead of a hardcoded ~/.copilot path (WSL-root installs
         # wrote to /root/.copilot which the Windows Copilot CLI never reads).
         #
-        # WSL-root /mnt/ opt-in (issue #78, closed): when running as root
+        # WSL-root /mnt/ opt-in: when running as root
         # under WSL, $HOME=/root, so the strict _is_safe_home_dir guard
         # REJECTS a COPILOT_HOME=/mnt/c/Users/<you>/.copilot path (it's not
         # under /root). runtime_env._safe_home_from_env now accepts such a
@@ -46872,7 +46871,7 @@ if __name__ == "__main__":
         # a process but locks out other processes, so three async hook
         # entries would have corrupted the DB). Keeps exit 0 regardless.
         #
-        # Defer by DEFAULT (#114). A legacy bare `session-end-flush` hook
+        # Defer by DEFAULT. A legacy bare `session-end-flush` hook
         # fossilized in settings.json (pre-5.11.77 script installs, no --defer
         # flag) otherwise runs this flush synchronously inline and wedges
         # Windows stop-hooks at 3/4 -- and neither self-heal path rewrites that
@@ -47647,7 +47646,7 @@ if __name__ == "__main__":
             # Codex requires SessionStart stdout to be empty or ONE valid JSON
             # object; a raw "[Token Optimizer] ..." line reads to it as the start
             # of a JSON array and fails the whole hook ("hook returned invalid
-            # session start JSON output", issue #81). Under the Codex marketplace
+            # session start JSON output"). Under the Codex marketplace
             # plugin the shared hooks.json calls this directly, NOT via
             # codex_hook_bridge -- and Codex sets neither CODEX_HOME nor
             # TOKEN_OPTIMIZER_RUNTIME in the hook subprocess (it only sets
