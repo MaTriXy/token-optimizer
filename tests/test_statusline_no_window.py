@@ -25,7 +25,7 @@ This is a SOURCE SCANNER, not a snapshot of today's single call site: it parses
 whichever ``child_process`` APIs the file actually binds and checks every call
 of them, so a future edit that adds an unhidden spawn fails here.
 
-Run: python3 -m pytest tests/test_107_statusline_no_window.py -q
+Run: python3 -m pytest tests/test_statusline_no_window.py -q
 """
 
 from __future__ import annotations

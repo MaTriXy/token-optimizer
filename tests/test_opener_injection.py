@@ -37,8 +37,8 @@ The fixes, and what this file pins:
   real argv entry, a GUI-subsystem exe, addressed absolutely under
   ``%SystemRoot%`` so it cannot be resolved out of the current directory.
 
-Companion pins live in ``tests/test_107_hooks_root_no_window.py``
-(fleet opener shape) and ``tests/test_107_runtimes_no_window.py`` (src/dist
+Companion pins live in ``tests/test_hooks_root_no_window.py``
+(fleet opener shape) and ``tests/test_runtimes_no_window.py`` (src/dist
 parity). This file is the one that states the SECURITY property directly, both
 by source scan and by behaviour.
 
@@ -47,7 +47,7 @@ still ships ``execFileSync("cmd", ["/c", "start", "", outputPath], hide)`` --
 the identical injectable shape in a third opener that this lane does not own.
 Add it to ``_JS_OPENERS`` when that file is fixed.
 
-Run: python3 -m pytest tests/test_107_opener_injection.py -v
+Run: python3 -m pytest tests/test_opener_injection.py -v
 """
 from __future__ import annotations
 

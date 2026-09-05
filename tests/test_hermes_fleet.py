@@ -6,7 +6,7 @@
 - unpriced models (MiniMax, Kimi, ...) surface as a warning + keep their
   DB-reported cost instead of collapsing to a fake $0.00.
 
-Run: python3 -m pytest tests/test_hermes_fleet_147_150.py -v
+Run: python3 -m pytest tests/test_hermes_fleet.py -v
 """
 from __future__ import annotations
 

@@ -30,7 +30,7 @@ caught on the macOS/Linux CI legs, not only on windows-latest. Runtime checks
 force ``_NO_WINDOW`` to the real Windows constant so the wiring is proven on
 every platform; the genuinely OS-level assertions are ``nt``-gated.
 
-Run: python3 -m pytest tests/test_107_bridges_no_window.py -v
+Run: python3 -m pytest tests/test_bridges_no_window.py -v
 """
 import ast
 import importlib

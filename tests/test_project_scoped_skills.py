@@ -14,7 +14,7 @@ our own inaccuracy was silently absorbing a KNOWN inaccuracy.
 NOT in scope here: the MEMORY.md half of the project-scoped skills fix, which was already fixed in
 v5.3.10 (HOME project -> cwd-matched project -> newest-first scan).
 
-Run: python3 -m pytest tests/test_project_scoped_skills_161.py -v
+Run: python3 -m pytest tests/test_project_scoped_skills.py -v
 """
 import os
 import sys

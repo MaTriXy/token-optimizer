@@ -17,7 +17,7 @@ These tests pin the fix: with the canonical #139 dispatcher already present,
 the quality-cache hook is recognized as installed and setup_quality_bar does
 NOT append a legacy hook.
 
-Run: python3 -m pytest tests/test_ensure_health_quality_cache_155.py -v
+Run: python3 -m pytest tests/test_ensure_health_quality_cache.py -v
 """
 
 import sys

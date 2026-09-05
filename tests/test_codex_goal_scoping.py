@@ -22,7 +22,7 @@ and assert the scoped behavior required by FIX-SPEC-108:
   session.
 * non-Codex runtime keeps the unchanged empty shape.
 
-Run: python3 -m pytest tests/test_108_codex_goal_scoping.py -v
+Run: python3 -m pytest tests/test_codex_goal_scoping.py -v
 """
 import json
 import os

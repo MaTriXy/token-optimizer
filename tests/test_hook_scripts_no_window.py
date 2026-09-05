@@ -23,7 +23,7 @@ Runtime behaviour on real Windows is covered by the ``os.name == "nt"`` tests
 at the bottom (skipped elsewhere), which spawn a real child and ask it via
 ``GetConsoleWindow()`` whether a console was allocated.
 
-Run: python3 -m pytest tests/test_107_hook_scripts_no_window.py -v
+Run: python3 -m pytest tests/test_hook_scripts_no_window.py -v
 """
 import ast
 import os

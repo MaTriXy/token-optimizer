@@ -34,7 +34,7 @@ Three regressions this file is built to catch:
      spawn API has no ``windowsHide`` equivalent, so it is rejected outright on
      this surface rather than waved through.
 
-Run: python3 -m pytest tests/test_107_runtimes_no_window.py -v
+Run: python3 -m pytest tests/test_runtimes_no_window.py -v
 """
 
 from __future__ import annotations

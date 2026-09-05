@@ -26,7 +26,7 @@ These tests pin the six deliverables of that consolidation:
   (f) the throttle-only invariant is intact: a cache MISS never parses a
       transcript, and a not-due tick does no filesystem work at all.
 
-Modelled on tests/test_userpromptsubmit_runner_139.py.
+Modelled on tests/test_userpromptsubmit_runner.py.
 
 Run: python3 -m pytest tests/test_posttooluse_runner.py -q
 """

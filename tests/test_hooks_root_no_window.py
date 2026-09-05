@@ -2,7 +2,7 @@
 a console window on Windows.
 
 Companion to ``tests/test_windows_spawn_no_window.py`` (measure.py, hooks/run.py,
-utf8_io.py, spawn_utils) and ``tests/test_107_bridges_no_window.py`` (the runtime
+utf8_io.py, spawn_utils) and ``tests/test_bridges_no_window.py`` (the runtime
 bridges). This file owns the surface neither of those covers:
 
 * ``skills/fleet-auditor/scripts/fleet.py`` -- the dashboard opener, the one
@@ -32,7 +32,7 @@ Source scans are AST-based and cross-platform, so a regression is caught on the
 macOS/Linux legs rather than only on windows-latest. Genuinely OS-level
 assertions are ``nt``-gated.
 
-Run: python3 -m pytest tests/test_107_hooks_root_no_window.py -v
+Run: python3 -m pytest tests/test_hooks_root_no_window.py -v
 """
 from __future__ import annotations
 
@@ -181,7 +181,7 @@ def test_no_shell_true(name):
     """``shell=True`` spawns cmd.exe on Windows -- always a console host.
 
     fleet.py used to do exactly this (``["start", path], shell=True``). Same
-    prohibition ``test_107_bridges_no_window.py`` enforces on the bridges.
+    prohibition ``test_bridges_no_window.py`` enforces on the bridges.
     """
     path = (SPAWNING_FILES | CLEAN_FILES)[name]
     tree = _parse(path)
@@ -205,7 +205,7 @@ def test_no_shell_true(name):
 # routing a filesystem path through cmd.exe's parser -- which is command
 # injection, not merely a flash. See
 # ``test_fleet_opener_windows_branch_uses_os_startfile_not_cmd``. This mirrors
-# ``tests/test_107_measure_no_window.py``, where os.startfile is out of scope for
+# ``tests/test_measure_no_window.py``, where os.startfile is out of scope for
 # the same reason: ShellExecuteW allocates no console and takes no command line.
 _OS_STARTFILE_EXEMPT = {("fleet.py", "_open_in_browser")}
 

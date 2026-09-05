@@ -32,7 +32,7 @@ hole:
    path, and must be cleared ONLY by an explicit successful ``setup-daemon`` --
    never by time, never by a fresh session.
 
-Run: python3 -m pytest tests/test_107_measure_no_window.py -q
+Run: python3 -m pytest tests/test_measure_no_window.py -q
 """
 
 from __future__ import annotations
@@ -483,7 +483,7 @@ def test_shim_tries_gui_interpreters_before_console_ones(shim_src):
     #107 updated the pythonw rung: it is now PATH-resolved into
     ``PYW_EXE`` and guarded against Microsoft Store aliases (see
     ``test_shim_pythonw_rung_guards_windows_store_alias`` in
-    test_107_heal_hardening.py), so ``_rung_order`` sees the remaining bare
+    test_heal_hardening.py), so ``_rung_order`` sees the remaining bare
     rungs. The guarded pythonw block must still come before every other rung.
     """
     order = _rung_order(shim_src)
@@ -646,7 +646,7 @@ def test_heal_repairs_a_bare_console_python_action(m, monkeypatch):
     """Not only .cmd: a task action pointing straight at console python.exe or
     py.exe flashes just the same. (Bare ``cmd.exe`` was REMOVED from
     this set -- our installers never bake it, so matching it meant rewriting a
-    user's own wrapper arrangement; see test_107_heal_hardening.py.)"""
+    user's own wrapper arrangement; see test_heal_hardening.py.)"""
     for exe in (r"C:\Python\python.exe", r"C:\Windows\py.exe", "python3.exe"):
         _, installs = _heal_env(m, monkeypatch, exe)
         assert m._heal_windows_console_flash() is True, exe
@@ -712,7 +712,7 @@ def test_heal_failure_never_runs_a_still_flasher_action(m, monkeypatch):
     cannot fix. The restore must refuse to fire a flasher (or dead) action;
     the LogonTrigger revives the daemon at next logon instead. The
     safe-restore direction (action already migrated when the installer raised)
-    is covered in test_107_heal_hardening.py."""
+    is covered in test_heal_hardening.py."""
     rec, _ = _heal_env(m, monkeypatch, r"C:\s\dashboard-launcher.cmd", install_ok=False)
     assert m._heal_windows_console_flash() is False
     assert not any("/Run" in v for v in rec.verbs), (
@@ -918,7 +918,7 @@ def test_installer_exception_does_not_arm_the_marker(m, monkeypatch):
     """An UNCLASSIFIED exception (OSError from a full disk, an AV lock, a
     gui-domain bootstrap over SSH) is not evidence of a structural failure.
     Definitive classes are armed inside the installer where they can actually
-    be identified (see test_107_heal_hardening.py)."""
+    be identified (see test_heal_hardening.py)."""
     monkeypatch.setattr(m, "_read_config_flag", lambda k, d=None: False)
     monkeypatch.setattr(m, "_write_config_flag", lambda k, v: None)
     monkeypatch.setattr(m, "_normalized_platform", lambda: "Windows")

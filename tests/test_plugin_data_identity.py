@@ -679,7 +679,7 @@ def test_bash_compress_post_prune_serves_full_result_not_lossy(monkeypatch, tmp_
     fallback logic) so a regression in the actual fixed lines is caught.
     subprocess.run is stubbed to avoid depending on any real OS command or
     platform (mirrors test_bash_compress_main_passes_creationflags in
-    test_107_hook_scripts_no_window.py) -- consent/env/prune are NOT stubbed:
+    test_hook_scripts_no_window.py) -- consent/env/prune are NOT stubbed:
     the prune is a real cleanup_old_archives() call that really deletes the
     just-written entry file from disk, only its TIMING (landing between the
     real archive_original() write and main()'s post-write existence re-check)

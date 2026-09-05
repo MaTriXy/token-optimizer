@@ -16,7 +16,7 @@ These four tests pin the three deliverables:
       three harness-gated subcommands on a latched session while the three
       always-on subcommands still run (Req 2 gating parity).
 
-Run: python3 -m pytest tests/test_userpromptsubmit_runner_139.py -q
+Run: python3 -m pytest tests/test_userpromptsubmit_runner.py -q
 """
 
 from __future__ import annotations

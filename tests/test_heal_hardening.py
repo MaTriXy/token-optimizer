@@ -42,7 +42,7 @@ T7 -- heal write-surface hardening:
   * the marker's state dir is created 0o700;
   * ``%`` is escaped in paths interpolated into the generated .cmd.
 
-Run: python3 -m pytest tests/test_107_heal_hardening.py -q
+Run: python3 -m pytest tests/test_heal_hardening.py -q
 """
 
 from __future__ import annotations
