@@ -334,7 +334,8 @@ def test_ensure_health_surfaces_the_wedge():
     as a ``{"systemMessage": ...}`` JSON object on stdout so the CC UI shows it
     to the user (rendered as "<hook> says: ...") WITHOUT sending it to the
     model. stderr would be invisible in the CC UI on exit 0 (only in the
-    Ctrl+O transcript), which is the exact silence #107 set out to kill."""
+    Ctrl+O transcript), which is the exact silence the persistent-disable
+    wedge fix set out to kill."""
     src = _measure_source()
     idx = src.index("def run_ensure_health")
     body = src[idx:]
