@@ -556,8 +556,11 @@ def test_stdout_is_emitted_in_dispatch_order(monkeypatch, tmp_path):
     Consolidated, the buffered emitter must reproduce that order for the
     compact-restore payloads that feed the envelope.
 
-    Only compact-restore output feeds the SessionStart envelope (ensure-health
-    and quality-cache stdout is diagnostic and routed to the log file). The
+    compact-restore output is restored-state additionalContext (legitimately
+    model-context) and feeds the envelope. ensure-health and quality-cache
+    ``{"systemMessage": ...}`` JSON lines are user-facing (tax-free) and also
+    feed the envelope, collapsing to ``payload["systemMessage"]`` with NO
+    additionalContext. Their plain-text diagnostics go to the log file. The
     stream is ONE JSON object (see tests/test_codex_sessionstart_json_contract.py:
     Codex rejects a SessionStart stdout that starts with ``[``/``{`` and is not
     a single valid document), so "order" is the order of the plain-text units
@@ -567,13 +570,16 @@ def test_stdout_is_emitted_in_dispatch_order(monkeypatch, tmp_path):
     _install_fake_deadline(monkeypatch, runner)
     _calls, _marker_dir = _install_call_recorder(monkeypatch, runner, tmp_path)
 
-    # Route diagnostics to a tmp log file so we can verify ensure-health and
-    # quality-cache output landed there, not in the envelope.
+    # Route diagnostics to a tmp log file so we can verify plain-text
+    # diagnostics landed there, not in the envelope.
     log_file = tmp_path / "diag.log"
     monkeypatch.setattr(runner, "_diagnostics_log_path", lambda: log_file)
 
+    # ensure-health emits a plain-text diagnostic (goes to the log).
     monkeypatch.setattr(runner.measure, "run_ensure_health",
                         lambda: print("MARK-ensure-health"))
+    # quality-cache emits a systemMessage (user-facing, tax-free, feeds the
+    # envelope as payload["systemMessage"]).
     monkeypatch.setattr(
         runner.measure, "quality_cache",
         lambda **kw: print(json.dumps({"systemMessage": "MARK-quality-cache"})),
@@ -597,16 +603,9 @@ def test_stdout_is_emitted_in_dispatch_order(monkeypatch, tmp_path):
         assert runner.main() == 0
     out = cap.getvalue()
 
-    # Only compact-restore marks are in the envelope.
+    # compact-restore marks are in the envelope additionalContext.
     for mark in ("MARK-compact", "MARK-new-session"):
         assert mark in out, f"{mark} missing from consolidated stdout"
-
-    # ensure-health and quality-cache marks are NOT in the envelope (diagnostic
-    # output routed to the log file, not the context stream).
-    for mark in ("MARK-ensure-health", "MARK-quality-cache"):
-        assert mark not in out, (
-            f"{mark} leaked into the envelope (diagnostic output must go to the log)"
-        )
 
     payload = json.loads(out)
     context = payload["hookSpecificOutput"]["additionalContext"]
@@ -618,13 +617,25 @@ def test_stdout_is_emitted_in_dispatch_order(monkeypatch, tmp_path):
         f"stdout order must match hooks.json dispatch order, got {positions}"
     )
 
-    # ensure-health and quality-cache output landed in the diagnostics log.
+    # The quality-cache systemMessage survives as the object's systemMessage
+    # (user-facing, tax-free), NOT folded into additionalContext.
+    assert payload["systemMessage"] == "MARK-quality-cache", (
+        "the systemMessage unit must survive consolidation intact"
+    )
+    assert "MARK-quality-cache" not in context, (
+        "the systemMessage must NOT appear in additionalContext (model context)"
+    )
+
+    # ensure-health plain-text diagnostic is NOT in the envelope (it went to
+    # the log); it must not leak into either additionalContext or systemMessage.
+    assert "MARK-ensure-health" not in out, (
+        "ensure-health plain-text diagnostic leaked into the envelope"
+    )
+
+    # ensure-health plain-text diagnostic landed in the diagnostics log.
     log_text = log_file.read_text(encoding="utf-8")
     assert "MARK-ensure-health" in log_text, (
-        "ensure-health stdout must reach the diagnostics log file"
-    )
-    assert "MARK-quality-cache" in log_text, (
-        "quality-cache stdout must reach the diagnostics log file"
+        "ensure-health plain-text diagnostic must reach the diagnostics log file"
     )
 
 

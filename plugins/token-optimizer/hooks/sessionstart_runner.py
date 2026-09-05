@@ -44,10 +44,12 @@ Key properties:
   - stdout from the two compact-restore subcommands is captured and emitted in
     dispatch order at the end of ``main()`` as ONE host-valid JSON envelope
     (raw text, systemMessage JSON, additionalContext JSON). ensure-health and
-    quality-cache stdout is diagnostic and routed to a log file, never to the
-    envelope. All subcommand stderr is also routed to the log file -- the host
-    captures both stdout and stderr into the model's session context, so
-    diagnostics must reach neither stream.
+    quality-cache ``{"systemMessage": ...}`` JSON lines are user-facing (shown
+    to the USER's terminal, NOT injected into the model's context) and also
+    feed the envelope; their plain-text diagnostics are routed to a log file.
+    All subcommand stderr is also routed to the log file -- the host captures
+    both stdout and stderr into the model's session context, so diagnostics
+    must reach neither stream.
   - One subcommand throwing/aborting never aborts the others (each is wrapped in
     ``_run_safely``); the hook always exits 0. Failure notices and tracebacks
     go to the diagnostics log file, not stderr.
@@ -163,6 +165,43 @@ def _write_diagnostics(text: str) -> None:
             pass
     except Exception:
         pass
+
+
+def _split_system_messages(captured_stdout: str):
+    """Split captured stdout into user-facing systemMessage lines and the rest.
+
+    A ``{"systemMessage": "..."}`` JSON line is shown to the USER's terminal by
+    Claude Code and is NOT injected into the model's context (tax-free), so it
+    must keep reaching the host on stdout. Every other line (plain-text
+    diagnostics, additionalContext) is model-context-bound and must go to the
+    diagnostics log instead.
+
+    Returns ``(keep_lines, log_text)``: ``keep_lines`` is the verbatim
+    systemMessage-bearing lines (joined with newlines), ``log_text`` is every
+    other non-empty line. A line that JSON-parses to a dict with a non-empty
+    string ``systemMessage`` value is kept; everything else is logged.
+    """
+    keep_lines: list[str] = []
+    log_lines: list[str] = []
+    for line in (captured_stdout or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        is_system_message = False
+        if stripped[0] in "{[":
+            try:
+                obj = json.loads(stripped)
+            except (ValueError, TypeError):
+                obj = None
+            if isinstance(obj, dict):
+                msg = obj.get("systemMessage")
+                if isinstance(msg, str) and msg.strip():
+                    is_system_message = True
+        if is_system_message:
+            keep_lines.append(line)
+        else:
+            log_lines.append(line)
+    return "\n".join(keep_lines), "\n".join(log_lines)
 
 
 def _read_hook_input() -> dict:
@@ -559,12 +598,14 @@ def main() -> int:
 
     # Raw compact-restore text destined for ONE shared additionalContext
     # envelope on the Codex/Cowork path (see the envelope note above).
-    # Only compact-restore produces context-bound output (restored-state
-    # additionalContext); ensure-health and quality-cache stdout is diagnostic
-    # and goes to the log file, not the envelope.
+    # compact-restore produces the restored-state additionalContext, which is
+    # legitimately model-context (the feature, not the tax). ensure-health and
+    # quality-cache systemMessage lines are user-facing (tax-free) and also
+    # feed the envelope; their plain-text diagnostics go to the log file.
     _wrapped: list[str] = []
 
-    def _capture(name: str, fn, *args, **kwargs) -> None:
+    def _capture(name: str, fn, *args, split_system_messages: bool = False,
+                 **kwargs) -> None:
         # Capture BOTH stdout and stderr from each subcommand. The host
         # captures both streams into the model's session context, so
         # diagnostics must go to the log file, never to either real stream.
@@ -574,14 +615,35 @@ def main() -> int:
             _run_safely(name, fn, *args, **kwargs)
         captured = buf.getvalue()
         err_captured = err_buf.getvalue()
-        if captured or err_captured:
-            _write_diagnostics(f"--- {name} ---\n{captured}{err_captured}")
+        if split_system_messages:
+            # ensure-health / quality-cache: systemMessage JSON lines are
+            # user-facing (tax-free) and feed the envelope; plain-text
+            # diagnostics go to the log. All stderr goes to the log.
+            keep, log_text = _split_system_messages(captured)
+            if keep:
+                _wrapped.append(keep)
+            log_parts = []
+            if log_text:
+                log_parts.append(log_text)
+            if err_captured:
+                log_parts.append(err_captured)
+            if log_parts:
+                _write_diagnostics(f"--- {name} ---\n" + "\n".join(log_parts))
+        else:
+            # compact-restore: its output is restored-state additionalContext
+            # (legitimately model-context) and is appended to the sink by the
+            # subcommand itself. clear-compacted emits nothing on stdout.
+            # All stderr goes to the log.
+            if captured or err_captured:
+                _write_diagnostics(
+                    f"--- {name} ---\n{captured}{err_captured}")
 
     if not consent:
         # Bootstrap only. ensure-health writes the consent flags; every other
         # subcommand stayed dark behind run.py's gate and stays dark here.
         _runner_budget(8, subcommand_count_hint=1)
-        _capture("ensure-health", _sub_ensure_health, hook_input)
+        _capture("ensure-health", _sub_ensure_health, hook_input,
+                 split_system_messages=True)
         _emit_session_start_stdout(_wrapped, hook_input)
         _clear_runner_deadline()
         return 0
@@ -593,8 +655,10 @@ def main() -> int:
     pending = 5 if is_compact else 3
     _runner_budget(8, subcommand_count_hint=pending)
 
-    _capture("ensure-health", _sub_ensure_health, hook_input)
-    _capture("quality-cache --force", _sub_quality_cache_force, hook_input)
+    _capture("ensure-health", _sub_ensure_health, hook_input,
+             split_system_messages=True)
+    _capture("quality-cache --force", _sub_quality_cache_force, hook_input,
+             split_system_messages=True)
     if is_compact:
         _capture("compact-restore --compact", _sub_compact_restore_compact,
                  hook_input, _wrapped)
@@ -602,11 +666,13 @@ def main() -> int:
     _capture("compact-restore --new-session-only", _sub_compact_restore_new_session,
              hook_input, _wrapped)
 
-    # Emit the compact-restore payloads as ONE host-valid JSON object. Only
-    # compact-restore produces context-bound output (restored-state
-    # additionalContext); ensure-health and quality-cache diagnostics go to the
-    # log file. See _emit_session_start_stdout for why a concatenated raw stream
-    # is not an option on Codex.
+    # Emit the compact-restore payloads and ensure-health/quality-cache
+    # systemMessage lines as ONE host-valid JSON object. systemMessage values
+    # collapse to payload["systemMessage"] (user-facing, no additionalContext,
+    # zero model-context tax); compact-restore text collapses to
+    # hookSpecificOutput.additionalContext (the restored-state feature).
+    # See _emit_session_start_stdout for why a concatenated raw stream is not
+    # an option on Codex.
     _emit_session_start_stdout(_wrapped, hook_input)
 
     _clear_runner_deadline()

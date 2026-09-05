@@ -300,6 +300,69 @@ def test_ensure_health_stdout_diagnostic_routed_to_log(monkeypatch, tmp_path):
     )
 
 
+def test_systemmessage_reaches_envelope_not_log(monkeypatch, tmp_path):
+    """ensure-health and quality-cache ``{"systemMessage": ...}`` JSON lines
+    are user-facing (shown to the USER's terminal, NOT injected into the
+    model's context) and must keep reaching the SessionStart stdout envelope.
+    They collapse to ``payload["systemMessage"]`` only -- no additionalContext,
+    so zero model-context tax. Plain-text diagnostics alongside them still go
+    to the log file."""
+    runner = _load_runner(monkeypatch, tmp_path)
+    log_file = tmp_path / "diag.log"
+    _install_runner_stubs(monkeypatch, runner, tmp_path, log_file)
+
+    def _fake_ensure_health():
+        # A user-facing systemMessage (dashboard URL) PLUS a plain-text
+        # diagnostic on the same stdout. The systemMessage must reach the
+        # envelope; the diagnostic must go to the log.
+        print(json.dumps({"systemMessage": "Dashboard daemon installed at http://localhost:7777"}))
+        print("  [Token Optimizer] Generating initial dashboard")
+
+    monkeypatch.setattr(runner.measure, "run_ensure_health", _fake_ensure_health)
+    monkeypatch.setattr(runner, "_read_hook_input",
+                        lambda: {"session_id": "sess-ctx-tax-sysmsg",
+                                 "source": "startup"})
+
+    rc, out, err = _run_runner_capturing(runner, {})
+    assert rc == 0
+
+    # stdout must be a JSON envelope carrying the systemMessage.
+    stripped = out.strip()
+    assert stripped, "stdout must carry the systemMessage envelope, not be empty"
+    obj = json.loads(stripped)
+    assert isinstance(obj, dict), f"stdout is not a JSON object: {stripped!r}"
+    assert obj.get("systemMessage") == "Dashboard daemon installed at http://localhost:7777", (
+        "the systemMessage must reach the envelope so the user sees it"
+    )
+    # The systemMessage must NOT appear in additionalContext (no tax).
+    hso = obj.get("hookSpecificOutput", {})
+    additional_context = hso.get("additionalContext", "") if isinstance(hso, dict) else ""
+    assert "Dashboard daemon installed" not in additional_context, (
+        "the systemMessage leaked into additionalContext (model context tax)"
+    )
+    # The plain-text diagnostic must NOT be in the envelope.
+    assert "Generating initial dashboard" not in json.dumps(obj), (
+        "plain-text diagnostic leaked into the envelope"
+    )
+
+    # stderr clean.
+    assert "Dashboard daemon installed" not in err, (
+        "systemMessage leaked into stderr"
+    )
+    assert "Generating initial dashboard" not in err, (
+        "plain-text diagnostic leaked into stderr"
+    )
+
+    # The plain-text diagnostic went to the log; the systemMessage did NOT.
+    log_text = log_file.read_text(encoding="utf-8")
+    assert "Generating initial dashboard" in log_text, (
+        "plain-text diagnostic must reach the log file"
+    )
+    assert "Dashboard daemon installed" not in log_text, (
+        "the systemMessage must NOT go to the log (it reached the user)"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Integration test: drive sessionstart_runner.main() on a simulated
 # systemd-less box with a missing dashboard, capturing real stdout/stderr.
