@@ -45354,7 +45354,8 @@ def run_ensure_health():
             #   - plain stdout  -> injected into model context every turn (tax)
             #   - stderr        -> invisible in the CC UI on exit 0 (only in
             #                      the Ctrl+O transcript), so the wedge goes
-            #                      silent -- the exact failure #107 fixed.
+            #                      silent -- the exact failure the
+            #                      persistent-disable wedge fix addresses.
             #   - systemMessage -> folded by the runner into the hook envelope,
             #                      rendered to the USER as "<hook> says: ...",
             #                      and NOT sent to the model (zero model tokens).
