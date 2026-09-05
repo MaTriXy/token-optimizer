@@ -113,7 +113,7 @@ def test_module_runner_arms_hard_deadline():
     assert "110" in src, "module_runner deadline must sit a few seconds under run.py's 120s wait"
 
 
-# NOTE: the python-launcher.sh probe-bounding layer (Kimi Fix 3 item 10) was
+# NOTE: the python-launcher.sh probe-bounding layer was
 # reverted — it regressed pythonw-swap on systems without timeout(1), and Git
 # Bash already ships timeout.exe so real Windows probes are bounded. The test
 # that pinned that reverted behavior was removed with it.

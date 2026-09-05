@@ -65,10 +65,10 @@ def test_rejects_malformed_and_unknown_versions(m):
     assert m._baseline_is_well_formed(no_shares) is False
 
 
-# ------------------------------------------------------- FIX 3: shrink guard
+# ------------------------------------------------------- shrink guard
 
 def test_shrink_guard_catches_the_real_july_regression(m):
-    """The exact numbers from Alex's two captures: $14.73 -> $9.87."""
+    """The exact numbers from two captures: $14.73 -> $9.87."""
     june = _baseline(20_616_554)
     july = _baseline(13_133_302, captured_at="2026-07-24T14:41:00",
                      opus=0.95, cache_write=408_302, fresh=7_186, output=40_943)
@@ -97,7 +97,7 @@ def test_shrink_guard_tolerates_small_honest_drift(m):
     assert m._baseline_shrink_is_material(inc, slightly_less) is False
 
 
-# ------------------------------------------------- FIX 2: migrate, never delete
+# ------------------------------------------------- migrate, never delete
 
 def test_v3_migrates_forward_instead_of_being_deleted(m):
     v3 = _baseline(20_616_554, version=3)
@@ -128,7 +128,7 @@ def test_version_mismatch_retains_the_old_file(m, tmp_path):
     )
 
 
-# ------------------------------------------------------- FIX 1: adoption rules
+# ------------------------------------------------------- adoption rules
 
 def test_adoption_prefers_oldest_then_larger_never_smaller(m, tmp_path, monkeypatch):
     monkeypatch.setenv("TOKEN_OPTIMIZER_BASELINE_ADOPT", "1")

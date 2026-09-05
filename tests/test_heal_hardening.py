@@ -2,10 +2,10 @@
 interpreter-resolution hardening.
 
 The first no-flash fix introduced a self-heal whose failure modes were worse than
-the bug (lanes T1/T2/T3/T5/T7). This file
+the bug. This file
 pins the hardened behavior:
 
-Cluster A -- the sticky ``.daemon-install-failed`` marker:
+The sticky ``.daemon-install-failed`` marker:
   * armed ONLY by definitive/permanent classes (MS-Store alias, schtasks
     missing, policy-denied task creation), classified INSIDE the installer;
   * never armed by transient classes (timeouts, one-off nonzero, spawn
@@ -13,7 +13,7 @@ Cluster A -- the sticky ``.daemon-install-failed`` marker:
   * cleared by any later VERIFIED success, not only manual setup-daemon;
   * visible: ensure-health prints the wedge + remedy, doctor has a check.
 
-Cluster B -- the heal must not make the no-flash concern worse:
+The heal must not make the no-flash concern worse:
   * a failed heal never compensate-/Runs an action still classified as a
     console flasher (that /Run IS an extra flash per session);
   * the restore runs from a ``finally`` (a RAISING installer must not strand
@@ -203,7 +203,7 @@ def _installer_env(m, monkeypatch, create_rc=0, create_stderr="",
 
 
 # ---------------------------------------------------------------------------
-# Cluster A -- definitive classes arm; transient classes never do
+# Definitive classes arm; transient classes never do
 # ---------------------------------------------------------------------------
 def test_ms_store_alias_arms_the_permanent_marker(m, monkeypatch):
     """A Store App Execution Alias is STRUCTURALLY impossible to register as a
@@ -234,7 +234,7 @@ def test_schtasks_missing_arms_the_permanent_marker(m, monkeypatch):
 
 def test_transient_create_failure_does_not_arm(m, monkeypatch):
     """A nonzero /Create that is NOT positively classified as permanent stays
-    retryable under the throttles (Cluster A: never arm on a one-off
+    retryable under the throttles (never arm on a one-off
     nonzero)."""
     _installer_env(m, monkeypatch, create_rc=1,
                    create_stderr="ERROR: The network path was not found.")
@@ -258,7 +258,7 @@ def test_port_bound_failure_does_not_arm_and_prints_to_stderr(
 
 
 def test_live_daemon_clears_stale_marker(m, monkeypatch):
-    """Cluster A clear-on-verified-success: a live, identity-checked daemon
+    """Clear-on-verified-success: a live, identity-checked daemon
     disproves the 'structurally broken' record (the install-lock race wedge:
     loser armed the marker, winner installed fine)."""
     _flags_env(m, monkeypatch)
@@ -326,7 +326,7 @@ def test_marker_reason_helper(m):
 
 
 # ---------------------------------------------------------------------------
-# Cluster A visibility (T3-H5): the wedge must never be silent
+# Visibility: the wedge must never be silent
 # ---------------------------------------------------------------------------
 def test_ensure_health_surfaces_the_wedge():
     """run_ensure_health must print a one-liner when the marker is suppressing
@@ -378,7 +378,7 @@ def test_doctor_has_a_daemon_check():
 
 
 # ---------------------------------------------------------------------------
-# Cluster B -- the heal must not make the no-flash concern worse
+# The heal must not make the no-flash concern worse
 # ---------------------------------------------------------------------------
 def test_heal_restore_runs_in_finally_even_when_installer_raises(
         m, monkeypatch):
@@ -405,7 +405,7 @@ def test_heal_never_restores_by_running_a_flasher_even_on_raise(
         m, monkeypatch):
     """The other half of the same finally: when the action is STILL the .cmd
     flasher after the raise, the restore must refuse -- /Run-ing it is one
-    extra console flash per session (Cluster B)."""
+    extra console flash per session."""
     rec, _, _ = _heal_env(m, monkeypatch, r"C:\s\dashboard-launcher.cmd")
 
     def _install(**k):
@@ -716,7 +716,7 @@ def test_marker_arming_sites_are_definitive_only():
     """AST guard: `_write_daemon_install_failed_marker` may be called from the
     marker helper itself, `_fail` inside the Windows installer (the one place
     failures can be CLASSIFIED), and nowhere else. Reintroducing an arming
-    call in ensure/pulse/restart re-creates the Cluster A wedge."""
+    call in ensure/pulse/restart re-creates the wedge."""
     src = _measure_source()
     tree = ast.parse(src)
     spans = [

@@ -935,7 +935,7 @@ class TestBailoutReinjection:
         for i in range(200):
             lines.append(f"#10 0.{i:03d} step {i} unique content line {i}")
         # A few progress-prefixed error lines (dropped by noise filter but
-        # collected in distinct_errors by the MUST-FIX 3 fix)
+        # collected in distinct_errors by the fix)
         for i in range(5):
             lines.append(f"#10 0.{i + 200:03d} ERROR: build step {i} failed")
         output = "\n".join(lines)

@@ -94,7 +94,7 @@ def test_harness_gate_semantics_are_unchanged(m):
 
 
 def test_no_orphan_bootstrap_marker_files_are_created(m):
-    """An earlier attempt wrote per-session marker files; that approach is gone.
+    """The previous design wrote per-session marker files; that approach is gone.
 
     It bought recovery at the cost of the hot-path invariant, and left a new
     class of file behind. Nothing should create `quality-bootstrap-*` any more.

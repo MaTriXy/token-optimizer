@@ -543,7 +543,7 @@ def _install_consent_recorder(monkeypatch, runner, write_flags_on_health):
 
 
 def test_consent_false_cowork_bootstraps_then_flips(monkeypatch, tmp_path):
-    """P0 regression (the Cowork-fatal path). With consent False (config.json
+    """Regression (the Cowork-fatal path). With consent False (config.json
     holds an explicit opt-out, enterprise_consent_shown: false) and the Cowork
     harness guard active (CLAUDE_CODE_REMOTE
     set, no SessionStart to bootstrap out-of-band), the runner MUST still run
@@ -876,7 +876,7 @@ def test_sub_handlers_signature_drift_fails_red(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# (g) FIX 1: shared deadline — early subcommand exceeding budget does NOT
+# (g) shared deadline — early subcommand exceeding budget does NOT
 #     kill later subcommands; the shared deadline is the only os._exit.
 # --------------------------------------------------------------------------- #
 
@@ -953,7 +953,7 @@ def test_fix1_shared_deadline_early_budget_exceeded_later_subcommands_still_run(
 
 
 # --------------------------------------------------------------------------- #
-# (h) FIX 2: ensure-health marker unlink on failure — first call throws =>
+# (h) ensure-health marker unlink on failure — first call throws =>
 #     marker NOT durably set => second prompt retries and bootstraps.
 # --------------------------------------------------------------------------- #
 
@@ -962,7 +962,7 @@ def test_fix2_ensure_health_marker_unlinked_on_failure_next_prompt_retries(
     monkeypatch, tmp_path, capsys,
 ):
     """First ensure-health call raises => marker unlinked => second call retries
-    the bootstrap.  Without the FIX 2 unlink, the marker stays and ensure-health
+    the bootstrap.  Without the unlink, the marker stays and ensure-health
     no-ops for the rest of the session (re-deadlock)."""
     # Create the CLAUDE_CONFIG_DIR before loading the runner so measure's
     # import-time path resolution finds it and scopes QUALITY_CACHE_DIR (and
@@ -1020,7 +1020,7 @@ def test_fix2_ensure_health_marker_unlinked_on_failure_next_prompt_retries(
 
     err = capsys.readouterr().err
     assert "CRITICAL: ensure-health bootstrap failed" in err, (
-        "FIX 2: stderr must escalate on bootstrap failure"
+        "stderr must escalate on bootstrap failure"
     )
 
     # Verify the marker was unlinked (not on disk).
@@ -1028,7 +1028,7 @@ def test_fix2_ensure_health_marker_unlinked_on_failure_next_prompt_retries(
     marker = runner.measure._once_per_session_marker("ensure-health", sid)
     assert marker is not None
     assert not marker.exists(), (
-        "FIX 2: marker must be unlinked after ensure-health failure so next "
+        "marker must be unlinked after ensure-health failure so next "
         "prompt retries"
     )
 
@@ -1037,12 +1037,12 @@ def test_fix2_ensure_health_marker_unlinked_on_failure_next_prompt_retries(
     rc = runner.main()
     assert rc == 0
     assert len(calls["ensure_health"]) == 1, (
-        "FIX 2: second prompt must retry ensure-health after marker unlink"
+        "second prompt must retry ensure-health after marker unlink"
     )
 
 
 # --------------------------------------------------------------------------- #
-# (i) FIX 3: buffered stdout — >=2 subcommands emit simultaneously, stdout
+# (i) buffered stdout — >=2 subcommands emit simultaneously, stdout
 #     is still consumable (not a corrupted blob).
 # --------------------------------------------------------------------------- #
 
@@ -1118,7 +1118,7 @@ def test_fix3_buffered_stdout_multi_emit_is_consumable(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# (j) FIX 4: importlib path import — decoy run.py cannot shadow the real gate.
+# (j) importlib path import — decoy run.py cannot shadow the real gate.
 # --------------------------------------------------------------------------- #
 
 
@@ -1163,6 +1163,6 @@ def test_fix4_explicit_path_import_decoy_run_py_cannot_shadow(monkeypatch, tmp_p
     # The decoy would return False.  If the explicit-path import works,
     # we get True.
     assert runner._check_consent() is True, (
-        "FIX 4: explicit-path import must resolve the real hooks/run.py, "
+        "explicit-path import must resolve the real hooks/run.py, "
         "not the decoy on sys.path"
     )

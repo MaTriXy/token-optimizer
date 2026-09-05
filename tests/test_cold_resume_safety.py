@@ -85,7 +85,7 @@ def _write_checkpoint(cp_dir, sid, sidecar, age_minutes=0):
 
 
 # ---------------------------------------------------------------------------
-# Fix 1 — footer_mode wording
+# footer_mode wording
 # ---------------------------------------------------------------------------
 
 _CONFIDENT = "Use to re-orient on prior work"
@@ -111,7 +111,7 @@ def test_footer_conditional_mode(measure):
 
 
 # ---------------------------------------------------------------------------
-# Fix 2 — vague fallback is staleness-capped + conditional
+# vague fallback is staleness-capped + conditional
 # ---------------------------------------------------------------------------
 
 def test_vague_fresh_uses_conditional_footer(measure, monkeypatch):
@@ -153,7 +153,7 @@ def test_named_topic_uses_conditional_footer(measure, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Fix 3 — explicit session id in the prompt is honored strictly
+# explicit session id in the prompt is honored strictly
 # ---------------------------------------------------------------------------
 
 def test_extract_session_id_from_prompt(measure):
@@ -196,7 +196,7 @@ def test_explicit_id_no_match_returns_empty(measure, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# CE review follow-ups (P1/P2/P3): drive the REAL hook path, not the internal fn
+# Follow-ups (P1/P2/P3): drive the REAL hook path, not the internal fn
 # ---------------------------------------------------------------------------
 
 def test_hook_path_explicit_id_triggers_without_resume_verb(measure):

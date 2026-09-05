@@ -1,4 +1,4 @@
-"""Acceptance tests for Lane B / Windows pythonw.exe preference in
+"""Acceptance tests for Windows pythonw.exe preference in
 ``hooks/python-launcher.sh``.
 
 Covers the FABLE red-team amendments:

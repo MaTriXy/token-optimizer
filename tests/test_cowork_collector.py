@@ -149,7 +149,7 @@ def test_wellformed_ingest_lands_rows_and_derives_cost(tmp_path):
     assert row[3] == 2 * 500
     assert row[4] > 0            # cost derived from priced model
     assert row[5] == "otel_derived"
-    # cache_create attributed to the 5m column, not hardcoded 0 (finding 23b)
+    # cache_create attributed to the 5m column, not hardcoded 0
     assert row[8] == 2 * 100
 
 
@@ -158,7 +158,7 @@ def test_help_and_costview_run_without_traceback(tmp_path):
     _write_capture(dd, [_api_record("sess-cv", EVENING_NANOS)])
     db = tmp_path / "trends.db"
     assert _ingest(dd, db) == 0
-    # --cost-view path (also exercises the Path.as_uri() DB URI, finding 23g)
+    # --cost-view path (also exercises the Path.as_uri() DB URI)
     assert tc.cost_view(measure_path=str(MEASURE), db_override=str(db),
                         days=0, as_json=True) == 0
 

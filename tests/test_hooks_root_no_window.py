@@ -1,4 +1,4 @@
-"""The no-flash fix (Lane D): hooks/, repo-root scripts/ and fleet-auditor must never flash
+"""The no-flash fix: hooks/, repo-root scripts/ and fleet-auditor must never flash
 a console window on Windows.
 
 Companion to ``tests/test_windows_spawn_no_window.py`` (measure.py, hooks/run.py,

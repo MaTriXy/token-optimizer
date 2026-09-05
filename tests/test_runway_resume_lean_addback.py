@@ -2,11 +2,11 @@
 """Regression: the weekly runway card must fold the estimated-tier levers
 (resume_lean, verbosity_steer) back into its dollar figure.
 
-The bug (GLM current-week-undercount finding): `_get_merged_savings` relocates
+The bug (current-week-undercount): `_get_merged_savings` relocates
 resume_lean/verbosity out of `total_cost_usd` into the estimated tier, and the
 counted transcript window excludes resume_lean too. So the weekly card priced
 ONLY the metered removals and silently dropped real, magnitude-metered (v5.13.1)
-savings -- on Alex's live 57%-of-limit week that was $18.78 shown against a true
+savings -- on a live 57%-of-limit week that was $18.78 shown against a true
 $37.10. The fix adds the window's resume_lean/verbosity dollars back into `ctx`
 and flips the tier to "estimated" (the trigger is counterfactual even though the
 magnitude is metered).

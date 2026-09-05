@@ -112,7 +112,7 @@ def test_measure_defines_no_window_helper():
 
 
 # ---------------------------------------------------------------------------
-# CLASS GUARD. Not "are the sites we fixed still fixed" but "is EVERY site in
+# CLASS GUARD. Not "are the fixed sites still fixed" but "is EVERY site in
 # the file hidden", so a future edit that adds an un-hidden spawn goes red in
 # CI instead of in a user's face.
 #
@@ -845,7 +845,7 @@ def test_ensure_daemon_refuses_while_marker_armed(m, monkeypatch):
     """THE no-flash regression: a permanently-failed install must not be retried,
     so the costly (window-flashing) path never runs again.
 
-    Torture Cluster A update: the gate now runs ONE cheap identity-checked
+    The gate now runs ONE cheap identity-checked
     port probe (no subprocess, cannot flash) so a live daemon can disprove and
     clear a stale marker -- hence ``_verify_daemon_port`` is stubbed dead
     rather than exploding. Everything costly must still never run."""
@@ -1015,7 +1015,7 @@ def test_dry_run_install_does_not_clear_the_marker(m, monkeypatch):
 
 def test_marker_survives_a_fresh_session(m, monkeypatch):
     """Never self-heals on TIME or on a reload (a new Claude session). The one
-    self-clearing path is a VERIFIED live daemon (Cluster A), stubbed dead
+    self-clearing path is a VERIFIED live daemon, stubbed dead
     here."""
     _arm_marker(m)
     marker_path = m.DAEMON_INSTALL_FAILED_BREADCRUMB

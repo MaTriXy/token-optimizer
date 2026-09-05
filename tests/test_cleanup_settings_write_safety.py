@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cleanup must never lie about a write, and never clobber.
 
-Two data-safety P1s from the CE review of 6d2400e:
+Two data-safety P1s from the review of 6d2400e:
 
 P1a -- LEASE MISS REPORTED AS SUCCESS. ``_write_settings_atomic`` returns
 early and silently when the advisory settings lease is denied. ``cleanup``

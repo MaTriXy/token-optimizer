@@ -103,7 +103,7 @@ def test_cmd_launcher_flags_are_skipped():
 
 
 def test_cmd_value_taking_flags_dont_hide_script():
-    # Torture FN-E: --require/--loader/--import consume the NEXT token as a value;
+    # FN-E: --require/--loader/--import consume the NEXT token as a value;
     # scanning every token (not stopping at the first non-flag) still finds the
     # real opencode entry behind the flag value.
     assert runtime_env._is_opencode_command(
@@ -116,14 +116,14 @@ def test_cmd_value_taking_flags_dont_hide_script():
 
 
 def test_cmd_bun_run_subcommand():
-    # Torture FN-A: `bun run <script>` — "run" must not short-circuit the scan.
+    # FN-A: `bun run <script>` — "run" must not short-circuit the scan.
     assert runtime_env._is_opencode_command(
         "bun run /app/node_modules/opencode-ai/dist/index.js"
     )
 
 
 def test_cmd_pnpm_versioned_package_dir():
-    # Torture FN-VERSIONED: pnpm stores deps as opencode-ai@<version>.
+    # FN-VERSIONED: pnpm stores deps as opencode-ai@<version>.
     assert runtime_env._is_opencode_command(
         "node /app/.pnpm/opencode-ai@0.3.1/node_modules/opencode-ai/dist/index.js"
     )

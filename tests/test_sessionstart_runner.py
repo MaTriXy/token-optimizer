@@ -296,7 +296,7 @@ def test_once_mark_markers_are_written_for_the_three_marked_subcommands(
 
 
 def test_once_mark_still_runs_when_the_marker_already_exists(monkeypatch, tmp_path):
-    """finding 8: --once-mark is a WRITE, not a check-then-skip. A resume or a
+    """--once-mark is a WRITE, not a check-then-skip. A resume or a
     post-compaction SessionStart keeps the same session_id, so a check-then-skip
     guard would suppress the SECOND SessionStart of a session."""
     runner = _load_runner(monkeypatch, tmp_path)

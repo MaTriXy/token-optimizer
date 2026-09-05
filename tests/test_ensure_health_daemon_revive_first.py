@@ -1,8 +1,8 @@
-"""FIX C (decoupled): the dashboard-daemon ensure/revive must NOT do any work on
+"""The dashboard-daemon ensure/revive must NOT do any work on
 the SessionStart critical path -- zero chance of slowing a user's session start.
 
 Before: ``run_ensure_health`` ran the daemon self-heal inline, so a missing plist
-was only reinstalled if the health scan finished under the 8s budget. GLM's first
+was only reinstalled if the health scan finished under the 8s budget. A first
 pass moved the revive first but still ran it inline under a 6s guard -- still work
 on the session-start path. This decoupled version dispatches the revive as a
 DETACHED, fire-and-forget ``daemon-revive`` child (start_new_session / detach

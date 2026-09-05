@@ -196,7 +196,7 @@ def test_v5_welcome_backfill_grants_when_enterprise_key_absent(race_env):
 
 
 def test_explicit_opt_out_wins_over_v5_backfill(race_env):
-    """Finding D1: enterprise_consent_shown PRESENT and False is an explicit
+    """D1: enterprise_consent_shown PRESENT and False is an explicit
     opt-out (`consent --reset`). The v5_welcome_shown backfill must NOT grant
     over it: consent stays False across repeated hook invocations and the
     backfill must not rewrite the flag to true."""
@@ -214,7 +214,7 @@ def test_explicit_opt_out_wins_over_v5_backfill(race_env):
 
 
 def test_consent_reset_stays_opted_out_end_to_end(monkeypatch, tmp_path):
-    """Finding D1, full flow through the REAL measure.py CLI: from the
+    """D1, full flow through the REAL measure.py CLI: from the
     post-bootstrap state (both flags true, exactly what the SessionStart
     ensure-health bootstrap persists), run `consent --reset`. The pre-fix
     --reset left v5_welcome_shown true, so the run.py backfill silently

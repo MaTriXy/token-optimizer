@@ -1,4 +1,4 @@
-"""FIX A: ``quality_cache`` releases its lease lock even when the wall-clock
+"""``quality_cache`` releases its lease lock even when the wall-clock
 deadline fires mid-computation.
 
 ``_HookTimeout`` inherits from ``BaseException`` so inner ``except Exception``

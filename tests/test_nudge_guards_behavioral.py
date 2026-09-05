@@ -1,9 +1,9 @@
 """Behavioral proof for the nudge guards. These execute the real function.
 
 Why this file exists: the first pass at covering these guards asserted that
-certain source literals appeared in measure.py. An adversarial review showed,
-by mutation testing, that all three guards could be silently gutted by one-line
-reviewer-plausible edits while every one of those tests still passed -- e.g.
+certain source literals appeared in measure.py. Mutation testing showed
+that all three guards could be silently gutted by one-line
+plausible edits while every one of those tests still passed -- e.g.
 re-parenthesising the identity check to
 `(not have_sid or have_sid == "unknown") and have_sid != want_sid`, which keeps
 every checked substring verbatim and lets a wrong-session nudge fire again.

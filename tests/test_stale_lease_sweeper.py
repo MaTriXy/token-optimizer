@@ -1,4 +1,4 @@
-"""FIX B: bounded stale-lease sweeper.
+"""Bounded stale-lease sweeper.
 
 ``hook_runtime.LeaseLock.release()`` leaves the canonical ``.qlease`` tombstone
 on disk for the next contender to reclaim, and a ``_HookTimeout`` between acquire

@@ -68,7 +68,7 @@ CLI_SRC = REPO / "openclaw" / "src" / "cli.ts"
 CLI_DIST = REPO / "openclaw" / "dist" / "cli.js"
 OPENCODE_DASH = REPO / "opencode" / "src" / "tools" / "dashboard.ts"
 
-# The third opener (opencode) was found during the Cluster C fix and carried the
+# The third opener (opencode) was found during the fix and carried the
 # identical injectable `cmd /c start "" <path>` shape. opencode ships src/
 # directly (no dist), so it is guarded here in its shipped form.
 _JS_OPENERS = {

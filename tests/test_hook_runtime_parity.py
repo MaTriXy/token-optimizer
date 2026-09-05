@@ -189,7 +189,7 @@ def test_stable_malformed_lease_is_reclaimable_after_grace(
     sys.platform == "win32",
     reason="adversarial 12-process reclaim of an expired/malformed lease: under "
     "Windows file-locking semantics no contender reliably wins the reclaim "
-    "(same known Windows lease-reclaim gap skipped in test_defeat_exit_cleanup.py). "
+    "(same known Windows lease-reclaim gap skipped in test_exit_cleanup.py). "
     "POSIX rename-based reclaim is the guarded invariant.",
 )
 def test_many_contenders_reclaim_one_malformed_generation_once(tmp_path):
@@ -389,7 +389,7 @@ def test_acquire_stops_waiting_after_timeout(tmp_path, monkeypatch):
     "elapsed < 1.2s: not achievable on slow Windows CI runners (observed "
     "TimeoutExpired, run 33595318811). Same load-sensitivity family as the "
     "win32-skipped 12-process reclaim tests in this file and "
-    "test_defeat_exit_cleanup.py; the one-winner invariant is guarded on POSIX.",
+    "test_exit_cleanup.py; the one-winner invariant is guarded on POSIX.",
 )
 def test_many_contenders_have_one_winner_and_bounded_losers(tmp_path):
     lock_path = tmp_path / "race.lease"

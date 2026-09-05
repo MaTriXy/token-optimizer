@@ -286,12 +286,12 @@ def test_reconcile_preserves_unrelated_hook_when_removing_fossil(measure_mod, tm
 
 
 # ---------------------------------------------------------------------------
-# Round 3 (Sol review follow-up): the two gaps Sol found were STILL-OPEN.
+# Follow-up: the two gaps found were STILL-OPEN.
 # ---------------------------------------------------------------------------
 
 
 def test_existing_script_install_self_heals_on_hook_collect(measure_mod, tmp_path, monkeypatch):
-    """FIX A: an EXISTING script install (fossil in settings.json, NO
+    """An EXISTING script install (fossil in settings.json, NO
     ensure-health hook) heals itself when its own fossil runs collect on the
     hook path. This is the population the SessionStart ensure-health hook
     cannot reach; the SessionStart hook is deliberately absent from the fixture.
@@ -343,7 +343,7 @@ def test_self_heal_throttled_within_24h(measure_mod, tmp_path, monkeypatch):
 
 
 def test_reconcile_reads_and_writes_under_the_lease(measure_mod, tmp_path, monkeypatch):
-    """FIX B: the fresh read + re-apply + atomic write must all happen INSIDE
+    """The fresh read + re-apply + atomic write must all happen INSIDE
     the held _settings_lock() (one critical section), so a concurrent writer
     cannot land between the fresh read and the write. Proven by recording
     whether the lease is held at the moment of the fresh read and the write
@@ -399,14 +399,14 @@ def test_reconcile_reads_and_writes_under_the_lease(measure_mod, tmp_path, monke
 
 
 # ---------------------------------------------------------------------------
-# Round 4 (Sol recheck follow-up): the self-heal must be reached via the real
+# Follow-up: the self-heal must be reached via the real
 # dispatch AND be time-bounded so a stalled settings write can't hold the pipe.
 # ---------------------------------------------------------------------------
 
 
 def test_dispatch_collect_on_hook_path_self_heals_fossil(measure_mod, tmp_path, monkeypatch):
     """Integration: the REAL _dispatch_collect hook path (not the private
-    helper) reconciles an existing script install's fossil. Proves FIX A is
+    helper) reconciles an existing script install's fossil. Proves the fix is
     wired into the dispatch, not just callable in isolation."""
     settings_path = tmp_path / "settings.json"
     settings_path.write_text(json.dumps(_settings([_hook(FOSSIL)])), encoding="utf-8")
@@ -431,7 +431,7 @@ def test_self_heal_whole_tail_runs_under_a_deadline(measure_mod, tmp_path, monke
     """Boundedness: the deadline must cover the ENTIRE self-heal tail -- the
     throttle read, the reconcile, AND the throttle write -- because each does
     synchronous filesystem I/O that could stall and hold the hook pipe open
-    (the re-wedge Sol flagged, incl. _write_config_flag's dir-create/lease/
+    (the re-wedge flagged, incl. _write_config_flag's dir-create/lease/
     temp-write/os.replace). Records the exact order and asserts install is
     FIRST, clear is LAST, and every I/O step happens while armed."""
     events = []

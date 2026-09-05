@@ -1,6 +1,6 @@
 """U12 docs assertions for the Antigravity adapter.
 
-Covers the plan's U12 test scenarios: the README install block and Works-on
+Covers the test scenarios: the README install block and Works-on
 sentence, the docs-site sidebar slugs, the existence of both new pages, and
 the capability-matrix column / port entry.
 """

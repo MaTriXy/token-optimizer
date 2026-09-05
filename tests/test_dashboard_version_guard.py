@@ -3,7 +3,7 @@ dashboard a NEWER build already wrote.
 
 Regression this prevents: a fix ships, but a stale long-lived daemon or a still-
 running pre-upgrade session keeps regenerating the shared dashboard with pre-fix
-code, clobbering the corrected file -- "we fixed it but it's still broken".
+code, clobbering the corrected file -- "fixed but still broken".
 """
 from __future__ import annotations
 

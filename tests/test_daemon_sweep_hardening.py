@@ -205,7 +205,7 @@ def test_clean_sweep_still_prints_the_banner(measure, capsys, monkeypatch):
 
 
 def test_nothing_to_remove_honesty_preserved(measure, capsys, monkeypatch):
-    """Torture-L7 invariant: no artifacts -> no contradictory output."""
+    """L7 invariant: no artifacts -> no contradictory output."""
     mod, base = measure
     (base / "token-optimizer-a" / "data").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(mod, "_ALL_LAUNCH_AGENT_LABELS", ())

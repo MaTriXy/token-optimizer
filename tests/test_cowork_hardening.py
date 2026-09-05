@@ -5,13 +5,13 @@ Covers the six doc-grounded Cowork fixes. Each fix is gated on ``is_cowork()``
 and must never regress native desktop Claude Code, so every test asserts the
 desktop path is unchanged alongside the Cowork behavior.
 
-  FIX 1  injection shape: UserPromptSubmit-path context wrapped in the documented
+  injection shape: UserPromptSubmit-path context wrapped in the documented
          hookSpecificOutput.additionalContext envelope in Cowork.
-  FIX 2  unified per-session state dir: quality-cache + checkpoints + run-once
+  unified per-session state dir: quality-cache + checkpoints + run-once
          markers resolve under the SAME base as SNAPSHOT_DIR in Cowork.
-  FIX 3  is_cowork() keys on the DOCUMENTED CLAUDE_CODE_REMOTE=true signal.
-  FIX 4  measure.py self-location resolver recognizes the /plugins/synced/ tree.
-  FIX 5  report prints an HONEST platform-overhead caveat in Cowork (no fabricated
+  is_cowork() keys on the DOCUMENTED CLAUDE_CODE_REMOTE=true signal.
+  measure.py self-location resolver recognizes the /plugins/synced/ tree.
+  report prints an HONEST platform-overhead caveat in Cowork (no fabricated
          calibration number).
 
 Run: python3 -m pytest tests/test_cowork_hardening.py -q
@@ -59,7 +59,7 @@ def _reset_cowork_env(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# FIX 3 — is_cowork() via the documented CLAUDE_CODE_REMOTE signal
+# is_cowork() via the documented CLAUDE_CODE_REMOTE signal
 # --------------------------------------------------------------------------- #
 
 def test_is_cowork_true_via_documented_remote_env(monkeypatch):
@@ -101,7 +101,7 @@ def test_is_cowork_undocumented_fallback_still_holds(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# FIX 1 — documented additionalContext envelope emitter
+# documented additionalContext envelope emitter
 # --------------------------------------------------------------------------- #
 
 def test_emit_additional_context_wraps_raw_text_userpromptsubmit(capsys):
@@ -144,7 +144,7 @@ def test_codex_wrapper_is_alias_of_shared_emitter(capsys):
 
 
 # --------------------------------------------------------------------------- #
-# FIX 2 — single per-session state dir in Cowork
+# single per-session state dir in Cowork
 # --------------------------------------------------------------------------- #
 
 def test_state_dirs_share_one_base_structurally():
@@ -218,7 +218,7 @@ def test_desktop_state_stays_on_runtime_home(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# FIX 4 — synced-plugin self-location resolver
+# synced-plugin self-location resolver
 # --------------------------------------------------------------------------- #
 
 def test_synced_plugin_detected_and_uses_plugin_root_path(monkeypatch):
@@ -238,7 +238,7 @@ def test_desktop_path_not_flagged_as_synced():
 
 
 # --------------------------------------------------------------------------- #
-# FIX 5 — honest platform-overhead caveat in Cowork (no fabricated number)
+# honest platform-overhead caveat in Cowork (no fabricated number)
 # --------------------------------------------------------------------------- #
 
 def _minimal_snapshot():

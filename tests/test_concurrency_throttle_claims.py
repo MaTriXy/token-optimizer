@@ -34,7 +34,7 @@ def _load_measure(tmp_path, monkeypatch):
     return importlib.import_module("measure")
 
 
-# ── Finding 1: the mkdir lock prevents concurrent throttle bypass ──────────
+# ── the mkdir lock prevents concurrent throttle bypass ──────────
 
 
 def test_acquire_lock_is_mutually_exclusive(tmp_path, monkeypatch):
@@ -125,7 +125,7 @@ def test_throttle_not_concurrently_reachable_via_worker(tmp_path, monkeypatch):
     assert throttle_pos > lock_pos, "throttle must be reached only after the lock"
 
 
-# ── Finding 2: the backfill counter is behind the same lock, and is idempotent ─
+# ── the backfill counter is behind the same lock, and is idempotent ─
 
 
 def test_backfill_counter_is_behind_lock(tmp_path, monkeypatch):

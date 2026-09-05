@@ -3,7 +3,7 @@
 
 Validates that pipeline_analyzer:
   1. Correctly classifies read-only pipelines
-  2. Rejects every injection bypass string from the adversarial review
+  2. Rejects every known injection bypass string
   3. Rejects side-effecting commands
   4. Measures eligibility rate on the safe read-only corpus.
 

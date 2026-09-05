@@ -164,7 +164,7 @@ def test_gate_does_not_import_measure_when_throttle_active(tmp_path):
 
     Importing measure.py costs 682ms cold; a stat() + exit costs ~127ms.
     A 400ms threshold cleanly separates the two. If the gate exceeds it,
-    the gate is importing measure.py on the hot path — the exact bug we fixed.
+    the gate is importing measure.py on the hot path — the exact bug this guards.
     """
     cache_dir = _quality_cache_dir(tmp_path)
     cache_dir.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,7 @@ words ("the", "run", "fix") don't dominate, sanitizes harness markup out of
 sidecar fields before scoring, and treats recency as only a weak prior.
 
 Calibration source for CHECKPOINT_RELEVANCE_THRESHOLD: the U7 replay benchmark
-over Alex's real resume/fresh first-prompt mix (tests/baselines/replay-metrics.json).
+over a real resume/fresh first-prompt mix (tests/baselines/replay-metrics.json).
 """
 
 from __future__ import annotations
@@ -282,7 +282,7 @@ def test_threshold_constant_exposed(m):
 
 
 # ======================================================================
-# ROUND-2 torture-coverage tests (C1/H1/H2/H3/M2/knobs/L1) + multi-client
+# Coverage tests (C1/H1/H2/H3/M2/knobs/L1) + multi-client
 # ======================================================================
 
 def _northwind_cp(tmp_path, name="aaaa1111-20260812-120000-checkpoint.md"):
@@ -420,7 +420,7 @@ def test_pasted_path_matches_right_not_wrong(m, tmp_path):
     ps = m.checkpoint_relevance_score(pasted, northwind, pool=pool)
     ss = m.checkpoint_relevance_score(spoken, northwind, pool=pool)
     # NOTE: we deliberately do NOT require pasted >= spoken. Making a pasted path
-    # out-score the spoken form was the round-2 goal that CAUSED the H2 regression
+    # out-score the spoken form was the goal that CAUSED the H2 regression
     # (dropping non-matching path words made precision 1.0 by construction, so a
     # FOREIGN pasted path grazing one shared word false-matched the wrong client).
     # The correct invariant is weaker: a pasted REAL northwind path still clears the

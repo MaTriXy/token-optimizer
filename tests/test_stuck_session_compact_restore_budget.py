@@ -67,7 +67,7 @@ def test_compact_restore_dispatch_installs_a_budget(src):
     assert idx != -1, "compact-restore dispatch not found"
     # Bound to exactly the compact-restore branch: slice up to the NEXT dispatch
     # handler (`elif args[0]`), not a fixed byte window. The branch grew when the
-    # Cowork additionalContext-wrap landed (FIX 1), so a magic offset would false-
+    # Cowork additionalContext-wrap landed, so a magic offset would false-
     # fail; slicing to the real boundary keeps the guard precise regardless of
     # branch size and still catches a removed budget install/clear.
     nxt = text.find("elif args[0]", idx + 10)

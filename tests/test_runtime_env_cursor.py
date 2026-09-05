@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for Cursor runtime detection in runtime_env (Track B).
+"""Regression tests for Cursor runtime detection in runtime_env.
 
 Cursor joins the runtime lattice at two tiers:
 

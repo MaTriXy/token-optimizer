@@ -83,7 +83,7 @@ def test_session_id_is_sanitized(cache_dir):
 
 
 def test_once_mark_always_runs_and_latches_ups(cache_dir):
-    # Finding 8: SessionStart carries --once-mark, which RUNS the work and
+    # SessionStart carries --once-mark, which RUNS the work and
     # (re)writes the marker but NEVER reports "already ran". So a second
     # SessionStart of the same session (resume/compact keep the session_id) still
     # runs -- quality-cache --force re-warms after auto-compaction, the resume

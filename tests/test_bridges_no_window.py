@@ -48,7 +48,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 _CREATE_NO_WINDOW = 0x08000000
 
-# The full Lane C surface. Every one of these is scanned, including the ones
+# The full surface. Every one of these is scanned, including the ones
 # with zero spawns, so "clean" is an assertion rather than an omission.
 BRIDGE_FILES = (
     "codex_io.py",

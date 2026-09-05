@@ -407,7 +407,7 @@ def test_caching_regression_reports_negative_main_and_hides_headline(measure):
     assert r["transformation_state"] == "net_negative"
     # And crucially it does NOT raise / returns a well-formed dict.
     assert r["reason"] == "net_negative"
-    # FIX 3: the net_negative path populates the fields known at that point (the CLI
+    # The net_negative path populates the fields known at that point (the CLI
     # printer reads baseline_source) instead of leaving them at the `zero` defaults.
     assert r["baseline_source"] == "pretool_baseline"
     assert r["sessions_per_month"] == 40
