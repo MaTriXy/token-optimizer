@@ -50,7 +50,7 @@ _to_realpath() {
 # trust). The pad matters: GNU `stat -c %a` prints "2" for mode 0002, and the
 # caller's last-3-digit slice would then read EMPTY group/other digits -- a set
 # write bit reading as clean, a false-accept. Flooring to 3 digits makes the
-# group/other-writable check robust to stat's short formatting. (torture: batch 2)
+# group/other-writable check robust to stat's short formatting.
 _to_mode() {
     local mode
     mode=$(stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null) || return 1

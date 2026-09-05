@@ -164,7 +164,7 @@ export class TrendsStore {
    * cost that a lean resume avoids. Used by logResumeLeanSavings for the
    * primary avoided-cost estimate.
    *
-   * OVERCOUNT VERIFICATION (Fix 7): tokens_cache_write is populated from
+   * OVERCOUNT VERIFICATION: tokens_cache_write is populated from
    * `t?.cache?.write` in the message.updated handler, which maps directly to
    * OpenCode SDK's `Message.tokens.cache.write` field. Per the SDK type definition
    * (types.gen.d.ts L120), `cache.write` is the cache CREATION count only —

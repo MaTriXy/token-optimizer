@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Re-read from disk and recompute transcript estimates on explicit refresh.
   const refreshNow = () => currentDataSource.refresh(true);
 
-  // FIX 1: Pass a getter so openDashboard resolves paths at call time, not at
+  // Pass a getter so openDashboard resolves paths at call time, not at
   // activation time.  If the user switches runtime after activation the command
   // will use the new paths rather than the stale closure from startup.
   registerCommands(context, { getPaths: () => resolvePathsForRuntime(currentRuntime), onConfigChanged: refreshNow });

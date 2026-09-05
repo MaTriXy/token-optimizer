@@ -518,7 +518,7 @@ function detectToolLoadingOverhead(runs, _config) {
     ];
 }
 // ---------------------------------------------------------------------------
-// Tier 2: Behavioral waste detectors (ported from Python Sprint 2)
+// Tier 2: Behavioral waste detectors (ported from Python)
 // ---------------------------------------------------------------------------
 /** Detect sessions with many errors suggesting retry churn. */
 function detectRetryChurn(runs, _config) {

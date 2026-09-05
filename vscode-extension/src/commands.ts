@@ -12,7 +12,7 @@ const CLAUDE_INSTALL_CMD =
   '/plugin install token-optimizer@alexgreensh-token-optimizer';
 
 export interface CommandDeps {
-  // FIX 1: Accept a getter so openDashboard always resolves paths lazily,
+  // Accept a getter so openDashboard always resolves paths lazily,
   // picking up any runtime switch that happened after activation.
   getPaths: () => ClaudePaths;
   onConfigChanged: () => void; // re-read from disk + re-render immediately
@@ -69,7 +69,7 @@ function daemonAlive(): Promise<boolean> {
     req.on('error', () => resolve(false));
     req.on('timeout', () => {
       req.destroy();
-      // FIX 4: Suppress the unhandled error event that fires after destroy().
+      // Suppress the unhandled error event that fires after destroy().
       req.on('error', () => {});
       resolve(false);
     });

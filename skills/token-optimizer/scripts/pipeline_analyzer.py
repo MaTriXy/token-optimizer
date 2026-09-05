@@ -11,7 +11,7 @@ A pipeline is eligible for compression ONLY when EVERY stage is a known
 read-only command. Any unrecognized, side-effecting, or unparseable stage
 causes the whole pipeline to be rejected (fail-closed: pass through raw).
 
-SECURITY (post-adversarial-review hardening):
+SECURITY hardening:
 - Raw command string is screened for injection constructs BEFORE tokenization:
   newlines, $(), backticks, <(), >(), and bare & (async/background).
 - Every token is checked for glued operators (a|rm passes shlex but

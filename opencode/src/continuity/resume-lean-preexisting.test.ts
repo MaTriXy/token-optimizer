@@ -1,6 +1,6 @@
 /**
  * Pre-existing continuity bugs surfaced alongside the i18n fix (OpenCode).
- * Not caused by the i18n change; fixed alongside it at Alex's request.
+ * Not caused by the i18n change; fixed alongside it.
  */
 import { test, expect } from "bun:test";
 import { resumeIntent, resumeTopicScore, buildLeanResumeContext, type CheckpointRow } from "./resume-lean.js";

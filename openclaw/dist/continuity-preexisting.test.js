@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 /**
  * Pre-existing continuity bug surfaced alongside the i18n fix (OpenClaw).
- * Not caused by the i18n change; fixed alongside it at Alex's request.
+ * Not caused by the i18n change; fixed alongside it.
  */
 const bun_test_1 = require("bun:test");
 const continuity_js_1 = require("./continuity.js");

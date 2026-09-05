@@ -113,7 +113,7 @@ export class DataSource {
     try {
       snap = this.buildFromDisk(recomputeUsageEstimate);
     } catch (e) {
-      // FIX 3: Log the error instead of swallowing it silently.
+      // Log the error instead of swallowing it silently.
       console.error('[Token Optimizer] DataSource.refresh error:', e);
       snap = emptySnapshot();
     }
@@ -142,7 +142,7 @@ export class DataSource {
     }
     const session = this.cachedSession;
 
-    // FIX 2: In copilot mode (sessionStateDir is set), the copilot events.jsonl is
+    // In copilot mode (sessionStateDir is set), the copilot events.jsonl is
     // not in Claude JSONL format — the usage parser always returns null, so tailer
     // reads are wasted.  Skip them and return null cleanly.
     const isCopilotMode = !!this.paths.sessionStateDir;
@@ -163,7 +163,7 @@ export class DataSource {
     const nowMs = Date.now();
     const rateLimitsJson = readIfExists(this.paths.rateLimits);
     if (recomputeUsageEstimate) {
-      // FIX 2: In copilot mode there is no ~/.copilot/projects transcript dir,
+      // In copilot mode there is no ~/.copilot/projects transcript dir,
       // so estimateRateLimitsFromTranscripts would stat a non-existent path on
       // every explicit refresh.  Skip it and leave the estimate as null.
       if (isCopilotMode) {

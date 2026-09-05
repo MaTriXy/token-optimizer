@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Keep-warm mechanism validation experiment (plan U1, HARD GATE).
+"""Keep-warm mechanism validation experiment.
 
 Proves, with real budget-capped API calls, the two inferred claims the
-keep-warm feature depends on (plan KTD-2):
+keep-warm feature depends on:
 
   CLAIM-1  A headless `claude --resume <id> -p` run re-sends the session's
            exact prefix and lands as a cache HIT (cache_read ~ prefix,
@@ -207,7 +207,7 @@ def main() -> int:
     else:
         _results["billing"] = "api_key"
 
-    # Guarded like run_claude (T1 Finding 6): a missing/hung `claude` must
+    # Guarded like run_claude: a missing/hung `claude` must
     # route through fail() (clean ABORT + result json) instead of raising a
     # bare FileNotFoundError/TimeoutExpired out of main() before any result
     # is emitted. FileNotFoundError is an OSError subclass.
@@ -299,7 +299,7 @@ def main() -> int:
     if not (hit and untouched):
         _results["claims"]["CLAIM-2"] = {"verdict": "MOOT"}
         _emit()
-        print("GATE: NO-GO (CLAIM-1 refuted — see plan KTD-2 abort path)")
+        print("GATE: NO-GO (CLAIM-1 refuted — see abort path)")
         return 1
 
     # ---- CLAIM-2: ping refreshes TTL ----

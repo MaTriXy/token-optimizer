@@ -445,7 +445,7 @@ def _update_tally(fields, *, terminal=False, end_reason=None,
 
 
 # ---------------------------------------------------------------------------
-# Restore context (per workspace — R8, review finding)
+# Restore context (per workspace)
 # ---------------------------------------------------------------------------
 
 

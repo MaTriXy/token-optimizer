@@ -817,7 +817,7 @@ _recover_home_from_windows_env() {
     # ── Translate + export (shared with the cmd.exe path) ───────────────
     if [ -n "$win_val" ]; then
         if translated="$(_translate_windows_path_to_wsl "$win_val")"; then
-            # Defense-in-depth (CE review P0): never export an empty translated
+            # Defense-in-depth: never export an empty translated
             # value, and confirm the translation stayed under /mnt/ (rejects a
             # traversal like C:\..\..\..\etc that resolves outside the mount).
             if [ -n "$translated" ] && [ "${translated}" != "${translated#/mnt/}" ]; then

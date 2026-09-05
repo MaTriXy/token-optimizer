@@ -558,7 +558,7 @@ def _dashboard_on_disk_is_newer(html_path):
     An older build must never overwrite a newer dashboard. Without this guard a
     stale long-lived daemon or a still-running pre-upgrade session regenerates
     the shared dashboard with pre-fix code and clobbers a just-shipped fix -- the
-    "we fixed it but it's still broken" report, where the fix ships yet an old
+    "fixed but still broken" report, where the fix ships but an old
     in-memory process keeps overwriting the corrected file.
 
     Fail-OPEN by design: a missing sidecar, an unparseable/dev version on either
@@ -6393,7 +6393,7 @@ def plugin_cleanup(dry_run=False, quiet=False):
     elif not quiet:
         print("\n  Stale plugin cache: clean")
 
-    # --- Fix 2: Local skills that duplicate plugin skills ---
+    # --- Local skills that duplicate plugin skills ---
     # Scan plugin skills to get the set of skill directory names
     plugin_skill_names = set()
     if registry.exists():
@@ -9965,7 +9965,7 @@ def _parse_session_jsonl(filepath):
                     # to that chunk. The previous dedup (skip-if-seen) kept the
                     # FIRST record, which captured only the initial partial
                     # count and discarded the final cumulative total — causing
-                    # a 3-10x under-count of output. Root-caused by verifying
+                    # a 3-10x under-count of output. Identified by verifying
                     # 48,595 requestIds across 30d had monotonically increasing
                     # output values in local JSONL. Fix: track per-requestId
                     # MAX usage and apply it at end of file.
@@ -12915,7 +12915,7 @@ def write_keepwarm_arm_record(session_id, transcript_path, now=None):
         try:
             st = tp.stat()
             transcript_mtime = st.st_mtime
-            # Byte size is the resume signal (checklist M3/M4): an O(1) stat-based
+            # Byte size is the resume signal: an O(1) stat-based
             # equality replaces the old full line-count scan. A resume appends
             # turns -> the file GROWS, so a later size increase past the armed size
             # is the resume marker. This removes the per-arm full read (which the
@@ -13038,7 +13038,7 @@ def classify_keepwarm_record(rec, now=None):
     except (TypeError, ValueError):
         armed_mtime = 0.0
 
-    # Resume detection is O(1) stat-based (checklist M3/M4): a newer mtime is the
+    # Resume detection is O(1) stat-based: a newer mtime is the
     # cheap first signal; a byte-size GROWTH past the armed size confirms real
     # appended turns (a bare touch bumps mtime without growth -> not a resume).
     # Legacy records carry line_count (no byte_size): we cannot do the O(1) size
@@ -13764,7 +13764,7 @@ def _keepwarm_tripwire_off():
 #   * Install marker sidecar (0600) records installed_at + plist path. ensure-
 #     health's repair keys on marker AND consent: a user-deleted plist with a
 #     marker + consent=enabled is regenerated; declined/unasked/absent-marker is
-#     NEVER (re)installed (the sticky-opt-out lesson).
+#     NEVER (re)installed (sticky-opt-out).
 # Per-OS honesty: macOS launchd is implemented fully. The dashboard
 # dispatcher's systemd/schtasks arms ARE real installers, but keep-warm only
 # implements macOS in this unit; Linux/Windows print an honest documented-gap
@@ -14370,7 +14370,7 @@ def keepwarm_scheduler_repair(gate=None):
 
     Regenerate + bootstrap the keep-warm agent ONLY when ALL hold:
       * consent gate allows (api + consent=enabled / limits-lab);
-      * the install marker exists (WE installed here before) -- sticky-opt-out lesson;
+      * the install marker exists (WE installed here before) -- sticky-opt-out;
       * the plist is missing or stale (label drift / older content).
     Otherwise NO-OP. The hot path when nothing needs repair is cheap file-
     existence checks only -- NO subprocess, NO launchctl -- to honour the <50ms
@@ -14892,7 +14892,7 @@ def _keepwarm_extract_cwd(transcript_path):
     field; we scan the tail for the most recent non-empty one.
 
     The cwd is attacker-influenceable (the transcript is a same-UID-writable
-    JSONL file), so it is hardened (security M2 / checklist cwd): the value is
+    JSONL file), so it is hardened (security M2): the value is
     rejected unless it contains no '..' segment, realpath-resolves (following
     symlinks) to an EXISTING directory, and that resolved dir is contained under
     HOME or a private temp root. Any failure -> None (caller skips; never guess).
@@ -17122,7 +17122,7 @@ def keepwarm_tripwire_mode():
     Returns one of 'sustain' | 'probe-only' | 'off'. A missing sidecar reads as
     the most-permissive 'sustain' (no tripwire breach yet); an EXISTING but
     corrupt/unparseable sidecar reads as 'off' (fail-closed, never fail-open to
-    sustain -- the wave-2 poisoning lesson). Read-only, lock-free fast path.
+    sustain). Read-only, lock-free fast path.
     """
     path = _keepwarm_tripwire_path()
     try:
@@ -18743,7 +18743,7 @@ def _insert_normalized_session(conn, dedup_key, parsed, platform, project_fallba
     row is upgraded whenever its stored ``incomplete`` flag differs from the
     incoming one (0/1), so:
       - an idle-finalized row (incomplete=0) whose chat resumes activity
-        (incomplete=1) flips back, instead of freezing (the review finding on
+        (incomplete=1) flips back, instead of freezing (for
         long-lived IDE chats);
       - a crashed/active row (incomplete=1) that later sees sessionEnd flips to
         complete (incomplete=0) with refreshed totals.
@@ -19425,7 +19425,7 @@ def _collect_grok_sessions(days=90, quiet=False, rebuild=False):
 def _copilot_summary():
     """Credits-led session summary for GitHub Copilot (CLI + VS Code planes).
 
-    Cost leads (plan A3): Copilot ships its own fill indicators, but since the
+    Cost leads: Copilot ships its own fill indicators, but since the
     June 2026 AI-Credits billing switch nothing answers "what did this cost me".
     """
     import copilot_state as _cps  # noqa: PLC0415
@@ -20442,7 +20442,7 @@ def collect_sessions(days=90, quiet=False, rebuild=False):
     conn.commit()
     # Ensure schema version is set (idempotent, also set in migration and rebuild)
     conn.execute("PRAGMA user_version = 3")
-    conn.commit()  # PRAGMA write must be committed explicitly (Lang Reviewer H2)
+    conn.commit()  # PRAGMA write must be committed explicitly
     conn.close()
 
     if not quiet:
@@ -20832,7 +20832,7 @@ def _query_trends_db(conn, days):
     ]
 
     # conn.close() removed — caller (_collect_trends_from_db) owns the connection
-    # and closes it in its finally block (Lang Reviewer H3: double-close fix).
+    # and closes it in its finally block (double-close fix).
 
     # Pricing tier info for dashboard
     pricing_tier = _load_pricing_tier()
@@ -23035,7 +23035,7 @@ def _reconcile_sessionend_fossils():
         SessionStart command runs ensure-health, which calls this.
       * EXISTING script installs: their old settings.json has the fossil and
         NO ensure-health hook, so run_ensure_health never runs for them. They
-        are reached by the FIX A self-heal in _dispatch_collect: when their
+        are reached by the self-heal in _dispatch_collect: when their
         fossil invokes post-fix measure.py ``collect`` on the hook path, that
         run calls this once (throttled, fail-open) and removes/rewrites the
         fossil going forward. A separate pre-fix measure.py copy on disk is
@@ -32114,7 +32114,7 @@ def _security_report(as_json=False):
         except OSError:
             return {"exists": True, "size_bytes": 0, "permissions": "???", "mtime": None}
 
-    # FIX A: report the unified state base so the inventory reflects the real
+    # Report the unified state base so the inventory reflects the real
     # Cowork locations (these globals == RUNTIME_DIR/token-optimizer on desktop).
     checkpoint_dir = CHECKPOINT_DIR
     quality_cache_dir = QUALITY_CACHE_DIR
@@ -32903,7 +32903,7 @@ def _once_per_session_marker(tag, session_id):
     """
     if not session_id:
         return None
-    # Reuse the shared session-id sanitizer (finding 22): it enforces a >=6
+    # Reuse the shared session-id sanitizer: it enforces a >=6
     # char floor so degenerate sids ("a!" and "a?" both strip to "a") cannot
     # collide and fail-CLOSED (a collision would silently skip the later
     # session's run-once work). "unknown" is its no-usable-id sentinel -> map
@@ -32942,7 +32942,7 @@ def _ran_once_this_session(tag, session_id):
         return False
     import time as _t
     try:
-        # Atomic claim (finding 17): O_CREAT|O_EXCL means exactly one caller
+        # Atomic claim: O_CREAT|O_EXCL means exactly one caller
         # creates the marker (returns "go"/False) and every racing caller sees
         # FileExistsError (returns "already ran"/True). This closes the
         # exists()-then-write TOCTOU window where a prompt submitted in the
@@ -32970,7 +32970,7 @@ def _mark_ran_this_session(tag, session_id):
     SessionStart is inherently once-per-fire, so its work should ALWAYS run; the
     marker exists only so the UserPromptSubmit ``--once-per-session`` copies
     no-op on native Claude Code. Writing (not checking) here is the fix for the
-    latch regression (finding 8): resume/compact keep the same session_id, so a
+    latch regression: resume/compact keep the same session_id, so a
     check-then-skip guard would suppress the SECOND SessionStart of a session
     (quality-cache --force stops re-warming after auto-compaction; the resume
     checkpoint pointer + forced warm are suppressed). Refreshing the marker on
@@ -33666,7 +33666,7 @@ _RELEVANCE_PATH_TF_WEIGHT = _clamp(
 _RELEVANCE_PATH_TF_CAP = int(_clamp(
     _int_env("TOKEN_OPTIMIZER_RELEVANCE_PATH_TF_CAP", 8), 1, 50))
 
-# H3 (fixAC2): FILESYSTEM-SCAFFOLDING words. A single-client checkpoint pool has
+# FILESYSTEM-SCAFFOLDING words. A single-client checkpoint pool has
 # uniform IDF, so structural container words (retainer, deliverables, clients,
 # reports) weigh the same as true project-identity words. These are NOT project
 # names; they name the folder skeleton every project shares. They are EXCLUDED
@@ -33928,7 +33928,7 @@ def checkpoint_relevance_score(text, checkpoint_path, pool=None, cwd=None):
             return min(_math.log((n + 1) / (d + 1)) + 1.0, _RELEVANCE_IDF_CAP)
 
         hits_all = prompt_tokens & doc_tokens
-        # H3 (fixAC2): drop filesystem-scaffolding words from the HIT set. They are
+        # Drop filesystem-scaffolding words from the HIT set. They are
         # structural container words shared by every project (retainer, clients,
         # reports, ...), not identity. Excluding them from hits means they give no
         # path-TF boost and a resume that only grazes them cannot fire the bonus,
@@ -33966,8 +33966,8 @@ def checkpoint_relevance_score(text, checkpoint_path, pool=None, cwd=None):
             return 1.0 + _RELEVANCE_PATH_TF_WEIGHT * min(tf, _RELEVANCE_PATH_TF_CAP)
 
         # M2: PRECISION counts every token symmetrically in BOTH the numerator and
-        # the denominator (no CJK special-casing). An earlier attempt excluded CJK
-        # from the denominator only, which let CJK hits push precision past 1.0 and a
+        # the denominator (no CJK special-casing). Excluding CJK only from the
+        # denominator let CJK hits push precision past 1.0 and a
         # pure-CJK one-word graze false-match the WRONG checkpoint (0.52). Excluding
         # CJK from both sides instead zeroed out LEGITIMATE pure-CJK resumes (no Latin
         # basis -> precision 0). Symmetric inclusion is correct on all three: precision
@@ -35940,7 +35940,7 @@ def _cleanup_quality_cache():
     if _QUALITY_CACHE_RETENTION_DAYS <= 0:
         return
     try:
-        # FIX A: follow the unified state base. On desktop QUALITY_CACHE_DIR
+        # Follow the unified state base. On desktop QUALITY_CACHE_DIR
         # == RUNTIME_DIR/token-optimizer (unchanged); in Cowork it is the resolved
         # plugin-data base where fix routes quality-cache-*.json / once-*.json, so the
         # retention sweep must target it or those files never age out (slow accumulation).
@@ -35948,7 +35948,7 @@ def _cleanup_quality_cache():
         if not cache_dir.is_dir():
             return
         cutoff = time.time() - (_QUALITY_CACHE_RETENTION_DAYS * 86400)
-        # `once-*.json` are the per-session run-once guard markers (finding 21):
+        # `once-*.json` are the per-session run-once guard markers:
         # three per session, never otherwise cleaned, so age them out here on the
         # same retention window as the quality-cache snapshots.
         for pattern in ("quality-cache-*.json", "once-*.json"):
@@ -36435,7 +36435,7 @@ def _quality_cache_tick_due(
         return False
 
 
-# --- Stale-lease sweeper throttle (FIX B) ------------------------------------
+# --- Stale-lease sweeper throttle ------------------------------------
 # The sweeper itself lives in hook_runtime._sweep_stale_leases (fail-open, never
 # raises). It is invoked here OPPORTUNISTICALLY + THROTTLED to at most once per
 # 24h via a one-stat marker, mirroring the quality-cache throttle pattern. It is
@@ -41573,7 +41573,7 @@ def _baseline_adoption_candidates():
     A plugin re-install under a different marketplace id gets a fresh data dir, so
     the frozen baseline written by the previous identity is ORPHANED, not deleted.
     Re-capturing from scratch months later reads a thinned history and produces a
-    smaller anchor, which silently collapses every reported saving. Alex's own
+    smaller anchor, which silently collapses every reported saving. A user's
     baseline moved from a $14.73/session capture to a $9.87 one exactly this way.
 
     Security: only paths under the plugin-data base (already vetted by
@@ -41704,7 +41704,7 @@ def _get_baseline_state(freeze=True):
             if (isinstance(data, dict) and data.get("typical_session")
                     and data.get("version") == _BASELINE_VERSION):
                 return data
-            # FIX 2: never unlink. The old code deleted a mismatched baseline and
+            # Never unlink. The old code deleted a mismatched baseline and
             # re-captured, so a single bump of _BASELINE_VERSION would destroy EVERY
             # user's only record of their pre-TO cost, on our release schedule, with
             # no way back. Migrate forward when we can; otherwise RETAIN the file
@@ -41730,7 +41730,7 @@ def _get_baseline_state(freeze=True):
     except (json.JSONDecodeError, OSError, ValueError):
         pass
 
-    # FIX 1: before re-capturing from scratch, look for an orphaned baseline left
+    # Before re-capturing from scratch, look for an orphaned baseline left
     # behind by a previous plugin identity. A re-install under a new marketplace id
     # gets a fresh data dir; the old anchor is stranded, not deleted. Re-capturing
     # months later reads a thinned history and yields a smaller, wronger anchor.
@@ -41749,7 +41749,7 @@ def _get_baseline_state(freeze=True):
     if not state:
         return None
 
-    # FIX 3: refuse to silently replace a good anchor with a materially smaller one.
+    # Refuse to silently replace a good anchor with a materially smaller one.
     # A shrinking baseline means the HISTORY thinned, not that the user got cheaper.
     # Keep the incumbent, park the candidate beside it, and surface it rather than
     # letting the reported saving quietly collapse.
@@ -41876,7 +41876,7 @@ def _mix_from_session_rows(cutoff):
 _subagent_pool_memo = {"key": None, "ts": 0.0, "payload": None}
 _SUBAGENT_POOL_TTL = 900.0  # 15 min, matches the cache-health sidecar cadence
 # Bump whenever sidechain classification changes. Old sidecars can contain a
-# signed negative pool from the pre-FIX-1 marker scan and must never feed a new
+# signed negative pool from the earlier marker scan and must never feed a new
 # full-dashboard net calculation.
 _SUBAGENT_POOL_CACHE_SCHEMA = "sidechain-classifier-v2"
 # Long windows (the since-install pool, days >> 30) change slowly and cost the
@@ -45368,7 +45368,7 @@ def run_ensure_health():
     except Exception as _e:
         print(f"  [Token Optimizer] dashboard daemon self-heal failed: {_e}", file=sys.stderr)
 
-    # FIX B: bounded stale-lease sweeper. Self-heals the unbounded ``.qlease``
+    # Bounded stale-lease sweeper. Self-heals the unbounded ``.qlease``
     # tombstone / orphan candidate / legacy ``.qlock`` litter that release()
     # intentionally leaves for the next contender (most sessions get none, so
     # they leak forever). Throttled to once per 24h via a one-stat marker, capped
@@ -45393,7 +45393,7 @@ def run_ensure_health():
 
     # Keep-warm scheduler repair. ADDITIVE + consent-gated +
     # cheap. Regenerates a user-deleted/stale keep-warm agent ONLY when the
-    # install marker exists AND consent allows (the sticky-opt-out lesson:
+    # install marker exists AND consent allows (sticky-opt-out:
     # user-removed != regen-target unless WE installed it and consent still
     # holds). The no-op hot path is file-existence checks only (no subprocess)
     # so it stays well inside the ensure-health budget. Completely separate from
@@ -45761,7 +45761,7 @@ def run_ensure_health():
         pass
 
 
-# FIX C: the dashboard-daemon ensure/revive is DECOUPLED from the SessionStart
+# The dashboard-daemon ensure/revive is DECOUPLED from the SessionStart
 # critical path entirely. It is dispatched as a DETACHED, fire-and-forget child
 # (never run inline, never under a wall-clock guard), so a new session spends ZERO
 # measurable time on install / kickstart / landing verification -- there is no
@@ -47617,7 +47617,7 @@ if __name__ == "__main__":
         # Cowork parity: the --new-session-only pointer is wired onto both
         # SessionStart (native, --once-mark) and UserPromptSubmit (Cowork,
         # --once-per-session). SessionStart always runs and (re)writes the
-        # marker so a resume/compact re-fire is NOT latched out (finding 8);
+        # marker so a resume/compact re-fire is NOT latched out;
         # only the UserPromptSubmit copy checks-then-skips, so it does not
         # re-inject the billed checkpoint pointer on every prompt in Cowork.
         # Only the new-session pointer is guarded -- the --compact restore must
@@ -47856,7 +47856,7 @@ if __name__ == "__main__":
             # --force bypasses the throttle, so unguarded it would recompute the
             # full quality snapshot on every prompt. SessionStart (--once-mark)
             # always re-warms and refreshes the marker so post-compaction /
-            # resume re-warms are NOT latched out (finding 8); only the
+            # resume re-warms are NOT latched out; only the
             # UserPromptSubmit copy (--once-per-session) checks-then-skips, so the
             # throttled --warn / --throttle-only ticks keep maintaining the cache
             # thereafter.
@@ -48261,8 +48261,7 @@ if __name__ == "__main__":
         # first fire of the session. On native Claude Code the SessionStart copy
         # carries --once-mark: it always runs and (re)writes the marker so the
         # UserPromptSubmit copy is a single stat no-op -- zero behaviour change
-        # for existing users -- while a resume/compact SessionStart still runs
-        # (finding 8).
+        # for existing users -- while a resume/compact SessionStart still runs.
         #
         # The stdin hook payload is read ONCE here and reused: stdin is a stream,
         # so a second _read_stdin_hook_input() would come back empty. It also tells
@@ -48296,7 +48295,7 @@ if __name__ == "__main__":
                 _eh_event = "SessionStart"
 
         def _eh_body():
-            # FIX C: the dashboard-daemon ensure/revive runs FIRST, under its own
+            # The dashboard-daemon ensure/revive runs FIRST, under its own
             # short independent guard, BEFORE the 8s health budget is armed. A slow
             # health scan that later trips the 8s watchdog can therefore never skip
             # reinstalling a missing launchd plist / dead daemon. The daemon ensure
