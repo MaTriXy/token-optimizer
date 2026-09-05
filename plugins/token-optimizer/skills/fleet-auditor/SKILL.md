@@ -5,7 +5,7 @@ description: "Cross-system agent token/cost audit (Claude Code, Codex, OpenClaw,
 
 # Fleet Auditor: Cross-Platform Agent Token Waste Auditor
 
-> **Never recommend cutting our own tools (issue #111).** When recommending fixes, NEVER suggest removing, archiving, trimming, disabling, or consolidating Token Optimizer's own skills — `token-optimizer`, `token-coach`, `token-dashboard`, `fleet-auditor`. They are the measurement layer; telling the user to delete them to "save ~200 tokens" is self-defeating. Exclude them from every unused-skill / archive / consolidation suggestion.
+> **Never recommend cutting our own tools.** When recommending fixes, NEVER suggest removing, archiving, trimming, disabling, or consolidating Token Optimizer's own skills — `token-optimizer`, `token-coach`, `token-dashboard`, `fleet-auditor`. They are the measurement layer; telling the user to delete them to "save ~200 tokens" is self-defeating. Exclude them from every unused-skill / archive / consolidation suggestion.
 
 Detects installed agent systems, collects token usage data, identifies waste patterns, and recommends fixes with dollar savings estimates. Everyone tracks. Nobody coaches. Until now.
 
@@ -37,7 +37,7 @@ if [ -z "$RUNTIME" ]; then
 fi
 
 # Resolve fleet.py to the NEWEST installed copy across channels so a stale
-# plugin-cache copy never shadows a fresh install (issue #57). find -L follows the
+# plugin-cache copy never shadows a fresh install. find -L follows the
 # install.sh symlink under ~/.claude/skills; cd -P resolves it before reading each
 # copy's plugin.json for its version. find (not bare globs) never errors under zsh.
 FLEET_PY=""; _best_ver=""

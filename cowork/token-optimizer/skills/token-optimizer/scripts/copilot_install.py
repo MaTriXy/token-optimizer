@@ -8,7 +8,7 @@ Wires Token Optimizer into a Copilot CLI setup:
 2. Writes the hooks config to <copilot_home>/hooks/token-optimizer.json
    (USER-LEVEL ONLY — never .github/hooks/, which would silently affect a
    whole team's repo without consent; user-level hooks load in all modes
-   including non-interactive `copilot -p`, per github/copilot-cli#3345).
+   including non-interactive `copilot -p`, per the Copilot CLI project).
 3. Seeds capabilities.json for the installed CLI version.
 
 Idempotent: re-running refreshes the payload and rewrites OUR hook file only.

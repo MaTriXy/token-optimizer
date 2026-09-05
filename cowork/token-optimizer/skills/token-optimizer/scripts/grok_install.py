@@ -366,7 +366,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     # --home overrides the resolved Grok home (install.sh forwards the
     # WSL-aware resolved path so the install and its banner agree, mirroring
-    # copilot_install --home / issue #78).
+    # copilot_install --home).
     parser.add_argument("--home", type=Path, default=None)
     return parser
 

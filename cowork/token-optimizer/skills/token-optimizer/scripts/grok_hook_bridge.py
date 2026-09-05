@@ -59,7 +59,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 _observed_warned = False
 
-# Windows console-flash guard (#107). getattr -> 0 on POSIX.
+# Windows console-flash guard. getattr -> 0 on POSIX.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 _SCRIPT_DIR = Path(__file__).resolve().parent

@@ -33,7 +33,7 @@ was CANCELLED 372 times and succeeded 9.
 This runner is invoked ONCE per tool call, pays the dispatch overhead ONCE,
 imports each hook module at most once, and runs every subcommand in-process
 under ONE shared deadline. It is the same consolidation the ``UserPromptSubmit``
-group received in issue #139 (``hooks/userpromptsubmit_runner.py``) and the
+group received in ``hooks/userpromptsubmit_runner.py`` and the
 ``SessionStart`` group received in ``hooks/sessionstart_runner.py``; the
 structure here deliberately mirrors those two files.
 

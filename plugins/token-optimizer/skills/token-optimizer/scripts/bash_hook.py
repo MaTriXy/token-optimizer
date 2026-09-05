@@ -66,7 +66,7 @@ def main():
     if tool_name != "Bash":
         return
 
-    # Issue #141: in worktree-isolated sessions (cwd under .claude/worktrees/),
+    # In worktree-isolated sessions (cwd under .claude/worktrees/),
     # Claude Code's isolation guard statically parses every Bash command and
     # REFUSES anything it can't classify as "simple" — the bash_compress
     # for-loop wrapper is refused as "too complex", so every whitelisted
@@ -125,7 +125,7 @@ def main():
         return
 
     # Re-quote each token to handle paths with spaces safely (ARCH-F3).
-    # Use the #80 bash-resolver form so the rewritten command survives a
+    # Use the bash-resolver form so the rewritten command survives a
     # stripped/empty PATH (Claude runs updatedInput under `/bin/sh -c`).
     #
     # CRITICAL: this rewrites the USER's real Bash tool command, not an internal

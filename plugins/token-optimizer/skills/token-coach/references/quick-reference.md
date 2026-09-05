@@ -117,11 +117,11 @@ Surface: `measure.py cache-report [--days N] [--json]` — per-provider breakdow
 
 ## Community Pain Points (Feb-March 2026)
 
-1. No per-request token visibility (GitHub #29600, #30814)
+1. No per-request token visibility (Claude Code community reports)
 2. Compaction triggers too often / unexpectedly (buffer varies 33K-45K by version)
 3. Context fills faster than expected (hidden MCP overhead)
 4. MCP overhead invisible until session degrades (/context hides deferred overhead)
 5. Auto-memory contributing to bloat (v2.1.53-59 regression confirmed by Anthropic)
 6. Plugin cache stale versions accumulating (18+ GitHub issues)
-7. Per-turn token regression in v2.1.x (GitHub #24243)
+7. Per-turn token regression in v2.1.x (Claude Code community report)
 8. Agent Teams burn 7x tokens with unclear ROI

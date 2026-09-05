@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-# Windows console-flash guard (#107). A console-subsystem child spawned from a
+# Windows console-flash guard. A console-subsystem child spawned from a
 # console-less parent -- which is exactly what the Claude Desktop app is -- makes
 # Windows allocate a BRAND NEW console for it, i.e. the cmd window that flashes
 # on screen. CREATE_NO_WINDOW suppresses that allocation. The attribute only
@@ -224,7 +224,7 @@ def _load_pricing() -> dict[str, dict[str, float]]:
                     continue
                 # Normalize the user's key the same way lookups are normalized, so
                 # adding "MiniMax-M3" (the name the unpriced warning shows) actually
-                # prices the run keyed as "minimax-m3" (#150).
+                # prices the run keyed as "minimax-m3".
                 model = normalize_model_name(str(model)) or str(model).lower()
                 merged = {**pricing.get(model, {}), **rates}
                 if "cache_write_1h" not in rates and ("input" in rates or "cache_write" in rates):
@@ -271,7 +271,7 @@ def model_is_priced(model: str) -> bool:
     ``calculate_cost`` returns 0.0 both for genuinely-free usage and for models
     with no pricing row (self-hosted, gateway aliases like ``MiniMax-M3``,
     OpenRouter names). Callers use this to tell "$0 because free" apart from
-    "$0 because unpriced" and surface the gap instead of reporting fake $0 (#150).
+    "$0 because unpriced" and surface the gap instead of reporting fake $0.
     Model is normalized (lowercased) before lookup so it matches pricing keys.
     """
     return _load_pricing().get(model) is not None
@@ -283,7 +283,7 @@ def _recorded_cost(*values) -> float | None:
     A source DB (e.g. Hermes) records its own cost for gateway models our
     pricing table can't price. "Recorded" means present, numeric, finite, and
     >= 0 — a recorded $0 is authoritative (free/comped), NOT an excuse to
-    re-price it (#150). Empty strings, None, NaN, inf, negatives, and garbage
+    re-price it. Empty strings, None, NaN, inf, negatives, and garbage
     all fall through so the caller can price or flag instead of fabricating or
     crashing on a bad cell.
     """
@@ -300,7 +300,7 @@ def _recorded_cost(*values) -> float | None:
 
 
 def unpriced_summary(runs) -> dict[str, int]:
-    """{model: session_count} for runs whose $0 cost is unknown, not free (#150).
+    """{model: session_count} for runs whose $0 cost is unknown, not free.
 
     A run counts when it has real token usage but $0 cost on a model with no
     pricing row — i.e. the $0 is a gap, not a fact. Shared by ``cmd_scan`` and
@@ -857,7 +857,7 @@ class ClaudeCodeAdapter(BaseAdapter):
         # Only the YAML frontmatter (name + description) is loaded into the
         # session at startup. SKILL.md bodies load on demand when the user
         # invokes the skill. Measuring the full file over-counts by ~10-20x
-        # and inflates skill_bloat findings. See issue #16.
+        # and inflates skill_bloat findings.
         skills_dir = CLAUDE_DIR / "skills"
         if skills_dir.exists():
             for sd in skills_dir.iterdir():
@@ -1112,7 +1112,7 @@ class HermesAdapter(BaseAdapter):
         return False, 0.0, "~/.hermes/ not found"
 
     def scan(self, since: datetime, conn: sqlite3.Connection | None = None) -> tuple[list[AgentRun], list[str]]:
-        """Read runs from ~/.hermes/state.db (#149).
+        """Read runs from ~/.hermes/state.db.
 
         BaseAdapter.scan() returned ([], []) so Hermes silently reported zero even
         under heavy use. We open the DB read-only (mode=ro): it can never write to
@@ -1212,7 +1212,7 @@ class HermesAdapter(BaseAdapter):
 
         # Prefer Hermes's own recorded cost — it prices gateway models (MiniMax,
         # Kimi, DeepSeek...) our DEFAULT_PRICING can't, so they don't collapse to a
-        # fake $0 (#150). A recorded value (incl. $0) is authoritative; only a
+        # fake $0. A recorded value (incl. $0) is authoritative; only a
         # genuinely absent/garbage cost falls back to our table.
         db_cost = _recorded_cost(g("actual_cost_usd", None), g("estimated_cost_usd", None))
         cost = db_cost if db_cost is not None else calculate_cost(tokens, model)
@@ -3225,13 +3225,13 @@ def _open_in_browser(path: Path):
     Windows: ``os.startfile`` -- the same helper ``measure.py::_open_in_browser``
     uses. Two earlier shapes were both wrong.
 
-    1. ``subprocess.run(["start", path], shell=True)`` (pre-#107): ``shell=True``
+    1. ``subprocess.run(["start", path], shell=True)`` (the original shape): ``shell=True``
        routes through ``cmd.exe /c``, a console-subsystem binary, so a
        console-less host (the Claude Desktop app) gets a brand-new console
-       allocated -- the cmd window users saw flash (#107). ``start`` is also a
+       allocated -- the cmd window users saw flash. ``start`` is also a
        cmd BUILTIN, so without the shell there is no ``start.exe`` to exec.
     2. ``subprocess.run(["cmd", "/c", "start", "", path], creationflags=...)``
-       (the first #107 fix): dropping ``shell=True`` removed PYTHON's shell, not
+       (the first fix): dropping ``shell=True`` removed PYTHON's shell, not
        cmd.exe's PARSER. ``subprocess.list2cmdline`` quotes an argument only when
        it contains a space, tab or quote -- never on ``&``, ``^``, ``|``, ``(``,
        ``)``. ``&`` is a LEGAL Windows account-name character, so a real path

@@ -6,7 +6,7 @@ effort: high
 
 # Token Optimizer
 
-> **Never recommend cutting our own tools (issue #111).** In every recommendation you produce, NEVER suggest removing, archiving, trimming, disabling, or consolidating Token Optimizer's own skills — `token-optimizer`, `token-coach`, `token-dashboard`, `fleet-auditor`. They are the measurement layer; recommending the user delete them to "save ~200 tokens" is self-cannibalizing. Exclude them from every unused-skill / archive / consolidation suggestion, regardless of invocation history.
+> **Never recommend cutting our own tools.** In every recommendation you produce, NEVER suggest removing, archiving, trimming, disabling, or consolidating Token Optimizer's own skills — `token-optimizer`, `token-coach`, `token-dashboard`, `fleet-auditor`. They are the measurement layer; recommending the user delete them to "save ~200 tokens" is self-cannibalizing. Exclude them from every unused-skill / archive / consolidation suggestion, regardless of invocation history.
 
 Audits a Claude Code or Codex setup, identifies context window waste, implements fixes, and measures savings.
 
@@ -18,7 +18,7 @@ Audits a Claude Code or Codex setup, identifies context window waste, implements
 
 > **Runtime pre-gate (environment only — touches no `~/.claude` path).** Before resolving any script
 > path, check the environment directly. This keeps non-Claude runtimes from ever resolving a
-> `~/.claude` path (issue #57):
+> `~/.claude` path:
 > ```bash
 > # OpenCode / Copilot set these; detect them WITHOUT touching ~/.claude.
 > # Explicit TOKEN_OPTIMIZER_RUNTIME is authoritative and checked first (matches detect_runtime()).
@@ -72,7 +72,7 @@ command below — including the runtime gate — depends on `$MEASURE_PY`, so it
 must be set first:
 ```bash
 # Resolve measure.py to the NEWEST installed copy across channels so a stale
-# plugin-cache copy never shadows a fresh install (issue #57). find -L follows the
+# plugin-cache copy never shadows a fresh install. find -L follows the
 # install.sh symlink under ~/.claude/skills; cd -P resolves it before reading each
 # copy's plugin.json for its version. find (not bare globs) never errors under zsh.
 MEASURE_PY=""; _best_ver=""
@@ -99,7 +99,7 @@ python3 "$MEASURE_PY" report 2>&1 | head -1
 - Prints **"Token Optimizer — OpenCode runtime detected."** → **STOP. Run none
   of the phases below.** Read `references/opencode-workflow.md` and follow it.
   The Claude Code phases scan and mutate `~/.claude`, which is the wrong target
-  when the user is in OpenCode (issue #57).
+  when the user is in OpenCode.
 - Prints any other **"… runtime detected."** notice (for example GitHub
   Copilot) → STOP and follow that runtime's guidance, for the same reason.
 - Otherwise continue: if `TOKEN_OPTIMIZER_RUNTIME=codex` or a Codex environment

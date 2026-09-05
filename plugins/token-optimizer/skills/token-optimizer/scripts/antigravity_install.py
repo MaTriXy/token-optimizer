@@ -9,7 +9,7 @@ or IDE) setup as a USER-LEVEL PLUGIN directory:
    stable path that survives repo moves.
 2. Writes ``hooks.json`` and ``plugin.json`` inside that plugin directory —
    never touching the user-owned ``<home>/config/hooks.json``, ``config.json``,
-   or any ``settings.json`` (issue #147 / R2).
+   or any ``settings.json``.
 3. Records consent in ``<home>/token-optimizer/config.json`` (R20).
 
 Idempotent: re-running refreshes the payload and rewrites OUR files only.

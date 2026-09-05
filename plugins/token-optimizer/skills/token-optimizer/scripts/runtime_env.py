@@ -11,15 +11,15 @@ This module keeps runtime integration deliberately simple:
   command lines, so OpenCode launched through node/bun (its real launch shape) is
   recognized, not only a bare ``opencode`` binary. OpenCode loads ~/.claude/skills
   by default, so this skill can be invoked from inside OpenCode; detecting it keeps
-  the skill from scanning/mutating ~/.claude when the user is actually in OpenCode
-  (issue #57). The ancestor signal is evaluated ahead of the Claude plugin-env
+  the skill from scanning/mutating ~/.claude when the user is actually in OpenCode.
+  The ancestor signal is evaluated ahead of the Claude plugin-env
   heuristic so a coexisting Claude install on the same host can't shadow it.
 - Copilot activates when COPILOT_HOME or TOKEN_OPTIMIZER_COPILOT_HOME is set, a
   `copilot` ancestor process is detected, or TOKEN_OPTIMIZER_RUNTIME=copilot.
   The Copilot hook bridge always sets the explicit override; the other signals
   are a safety net so the skill never scans/mutates ~/.claude while actually
   running under GitHub Copilot. COPILOT_HOME is Copilot's OWN variable — TO
-  reads it but never asks users to set it (issue #78); TOKEN_OPTIMIZER_COPILOT_HOME
+  reads it but never asks users to set it; TOKEN_OPTIMIZER_COPILOT_HOME
   is TO's own collision-free override.
 - Cursor activates when TOKEN_OPTIMIZER_CURSOR_HOME is set, or when the
   hook-spawned pair CURSOR_PROJECT_DIR + CURSOR_VERSION is present, or
@@ -116,10 +116,10 @@ _COWORK_SYNCED_PLUGIN_MARKER = "/plugins/synced/"
 # session with CODEX_HOME set, or a nested-Copilot session with COPILOT_HOME
 # set, still resolves to its own runtime) but ABOVE the weak directory
 # heuristics, so a host with CLAUDECODE=1 and a coexisting ~/.codex DIRECTORY
-# resolves to claude, not codex (issue #120). Copilot's explicit-env tier is
+# resolves to claude, not codex. Copilot's explicit-env tier is
 # _COPILOT_HOME_ENVS below, NOT the ancestor-process signal (which stays at the
 # weak tier) -- a process scan cannot run ahead of CLAUDECODE without
-# reintroducing the #57 shadowing it was added to prevent.
+# reintroducing the shadowing it was added to prevent.
 _CLAUDE_CODE_ENVS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID")
 # Claude Code's official config-dir override. When set, Claude stores
 # projects/, settings.json, etc. under this directory instead of ~/.claude.
@@ -130,7 +130,7 @@ _HERMES_HOME_ENV = "HERMES_HOME"
 # "replaces the entire ~/.copilot path", and Copilot's session-state/,
 # session.db, events.jsonl all live inside it). Token Optimizer must NOT ask
 # users to set it: a WSL /mnt value set for TO's benefit is also read by the
-# native-Windows Copilot CLI and breaks its own session logging (issue #78).
+# native-Windows Copilot CLI and breaks its own session logging.
 # So TO exposes its OWN namespaced override and only READS COPILOT_HOME as a
 # back-compat location hint (with a guardrail warning for /mnt values).
 _COPILOT_HOME_ENV = "COPILOT_HOME"
@@ -148,7 +148,7 @@ _CURSOR_HOOK_ENVS = ("CURSOR_PROJECT_DIR", "CURSOR_VERSION")
 # inherits CLAUDECODE=1) still resolves to copilot, mirroring the Codex/Hermes
 # guard. The ancestor-process signal (_copilot_signal's ps scan) stays at the
 # weak tier below CLAUDECODE, since a process scan ahead of CLAUDECODE would
-# re-introduce the #57 OpenCode-shadowing problem for the copilot path too.
+# re-introduce the OpenCode-shadowing problem for the copilot path too.
 _COPILOT_HOME_ENVS = (_COPILOT_HOME_ENV, _TO_COPILOT_HOME_ENV)
 # Google Antigravity CLI/app/IDE home override. Antigravity is a distinct
 # product from Gemini CLI and ships its own `agy` binary; its data lives under
@@ -184,8 +184,8 @@ _PROC_SCAN_DISABLE_ENV = "TOKEN_OPTIMIZER_NO_PROC_SCAN"
 
 # Warnings printed at most once per process. copilot_home()/_safe_home_from_env
 # can be called several times in a single command (doctor, install, hook fire),
-# and repeating the same warning reads as separate faults (issue #78,
-# assafbem's report). Dedup by exact message text.
+# and repeating the same warning reads as separate faults.
+# Dedup by exact message text.
 #
 # The registry lives on ``sys`` — a guaranteed process-singleton — rather than a
 # module global, because on Windows this module can be imported under two
@@ -193,7 +193,7 @@ _PROC_SCAN_DISABLE_ENV = "TOKEN_OPTIMIZER_NO_PROC_SCAN"
 # separator-normalized path variants resolve to separate module objects). Two
 # module objects mean two module-level sets, so a module global deduped the
 # warning per-copy and it still printed twice. Anchoring the set on ``sys``
-# makes every copy share one registry. (assafbem, native-Windows, #78.)
+# makes every copy share one registry. (assafbem, native-Windows.)
 _WARN_REGISTRY_ATTR = "_token_optimizer_warned_messages"
 
 
@@ -320,7 +320,7 @@ def _is_wsl_context() -> bool:
     Reads ``/proc/version`` and ``/proc/sys/kernel/osrelease`` and looks for
     the ``microsoft`` / ``WSL`` markers the WSL kernel emits. Never raises.
 
-    This gates the WSL-root ``/mnt/`` opt-in (issue #78) so native-Linux
+    This gates the WSL-root ``/mnt/`` opt-in so native-Linux
     ``/mnt`` mounts stay on the strict safe-home path and behavior there is
     byte-identical to before. Tests monkeypatch this function for
     determinism on non-Linux hosts.
@@ -342,7 +342,7 @@ def _is_wsl_context() -> bool:
 def _wsl_mnt_safe_home(candidate: Path, *, mnt_root: Path | None = None) -> Path | None:
     """Return ``candidate`` resolved if it passes the WSL ``/mnt/`` opt-in.
 
-    The opt-in (issue #78): a runtime-home env var value that FAILS the
+    The opt-in: a runtime-home env var value that FAILS the
     strict under-``$HOME`` guard is still accepted when ALL of:
 
       (a) we are running inside WSL (gated on ``/proc`` markers —
@@ -388,7 +388,7 @@ def _wsl_mnt_safe_home(candidate: Path, *, mnt_root: Path | None = None) -> Path
 
 
 def _wsl_root_context() -> bool:
-    """True when running as root inside WSL — the issue #78 wrong-home case.
+    """True when running as root inside WSL — the wrong-home case.
 
     Under `bash install.sh` launched from a Windows shell, WSL runs as root, so
     ``$HOME=/root`` while the user's real Copilot lives on the Windows profile
@@ -409,7 +409,7 @@ def _wsl_root_context() -> bool:
 
 
 def _autodetect_wsl_copilot_home(mnt_root: Path | None = None) -> Path | None:
-    """Find the Windows-profile Copilot home from WSL-root (issue #78).
+    """Find the Windows-profile Copilot home from WSL-root.
 
     When running as root under WSL, ``$HOME/.copilot`` is ``/root/.copilot`` —
     an empty dir the native-Windows Copilot CLI never reads. The real home is
@@ -452,7 +452,7 @@ def _autodetect_wsl_copilot_home(mnt_root: Path | None = None) -> Path | None:
 
 
 def _looks_like_mnt_path(raw: str) -> bool:
-    """True when ``raw`` is an absolute WSL /mnt/ path (the #78 footgun value)."""
+    """True when ``raw`` is an absolute WSL /mnt/ path (the footgun value)."""
     try:
         return Path(raw).is_absolute() and raw.replace("\\", "/").startswith("/mnt/")
     except (OSError, ValueError):
@@ -460,7 +460,7 @@ def _looks_like_mnt_path(raw: str) -> bool:
 
 
 def _warn_mnt_copilot_home(raw: str) -> None:
-    """Warn that a /mnt COPILOT_HOME breaks native-Windows Copilot (issue #78).
+    """Warn that a /mnt COPILOT_HOME breaks native-Windows Copilot.
 
     GitHub Copilot CLI reads COPILOT_HOME itself; a WSL ``/mnt/...`` value —
     meaningless on native Windows — makes Copilot relocate its own
@@ -482,7 +482,7 @@ def _warn_mnt_copilot_home(raw: str) -> None:
 def _safe_home_from_env(env_var: str, fallback: Path, *, mnt_root: Path | None = None) -> Path:
     """Resolve a runtime-home env var without letting it escape user home.
 
-    The WSL-root ``/mnt/`` opt-in (issue #78): under WSL only, a value that
+    The WSL-root ``/mnt/`` opt-in: under WSL only, a value that
     fails the strict under-``$HOME`` guard is still accepted when it points
     at an absolute, existing, non-symlink directory under ``/mnt/`` (the WSL
     Windows-mount root). This is the deliberate cross-filesystem opt-in that
@@ -523,7 +523,7 @@ def _safe_home_from_env(env_var: str, fallback: Path, *, mnt_root: Path | None =
         and _is_safe_home_dir_relaxed(candidate)
     ):
         return candidate.resolve(strict=False)
-    # Name the most common reason so the fix is obvious (assafbem, #78): a
+    # Name the most common reason so the fix is obvious (assafbem): a
     # ``/mnt/...`` value is a WSL mount path and is only honored inside WSL; on
     # native Windows it points nowhere, so it is rejected. The /mnt opt-in above
     # already accepted any legitimately-WSL value, so reaching here with a /mnt
@@ -560,7 +560,7 @@ def _opencode_env_signal() -> bool:
 #    opencode ancestor"), keyed by parent pid + parent process start time
 #    (Linux /proc only) + runtime-signal env signature. Only the negative
 #    result is cached: a stale entry can then only ever reproduce the
-#    pre-#57 claude-tier fallback for at most one TTL window, never flip a
+#    pre-fix claude-tier fallback for at most one TTL window, never flip a
 #    genuine Claude/Codex session into another runtime's home. The start-time
 #    component prevents PID reuse from suppressing a live OpenCode ancestor:
 #    a reused PID has a different incarnation and produces a different key.
@@ -788,8 +788,8 @@ _COPILOT_BASENAMES = frozenset({"copilot", "copilot.exe"})
 _OPENCODE_EXE_BASENAMES = frozenset({"opencode", "opencode.exe"})
 # JS/TS runtimes OpenCode can be launched through. When an ancestor's executable
 # is one of these, OpenCode's own basename ("opencode") is NOT the ancestor
-# basename — the launcher is ("node"/"bun"/…). So a basename-only scan misses it
-# (issue #57). We then inspect the launcher's arguments for an OpenCode entry.
+# basename — the launcher is ("node"/"bun"/…). So a basename-only scan misses it.
+# We then inspect the launcher's arguments for an OpenCode entry.
 # The "run" subcommand (bun run opencode) is skipped so the npm script name
 # after it is recognized. An absolute path to the opencode binary as a launcher
 # argument (node /usr/local/bin/opencode) is also matched.
@@ -815,7 +815,7 @@ _PATH_SPLIT = re.compile(r"[\\/]+")
 def _looks_like_opencode_entrypoint(path_token: str) -> bool:
     """True when an argument token is recognizably OpenCode's entry script.
 
-    Deliberately tight (issue #57): we match the *entry script* or the
+    Deliberately tight: we match the *entry script* or the
     *installed package*, never a bare occurrence of the word "opencode" anywhere
     in the command line. A Claude Code user whose project is named ``opencode``
     — even one with a stock ``index.js`` — must NOT be flipped into OpenCode
@@ -884,8 +884,8 @@ def _opencode_in_process_tree() -> bool:
     """Best-effort: is OpenCode an ancestor of this process?
 
     Scans the parent chain using full command lines so that OpenCode launched
-    through ``node``/``bun`` is recognized, not only a bare ``opencode`` binary
-    (issue #57). Reads the shared one-shot process snapshot (one ``ps`` per
+    through ``node``/``bun`` is recognized, not only a bare ``opencode`` binary.
+    Reads the shared one-shot process snapshot (one ``ps`` per
     process, shared with the Copilot scanner). A fresh NEGATIVE result is
     persisted to a short-TTL disk cache keyed by parent pid + parent start
     time (Linux /proc only) + signal-env signature, so subsequent hook
@@ -895,7 +895,7 @@ def _opencode_in_process_tree() -> bool:
     reuse from flipping an OpenCode session into claude: a reused PID has a
     different incarnation and produces a different key. On non-Linux the
     start time is unavailable cheaply; a stale entry can flip an OpenCode
-    session into claude for at most one TTL window (worst case: the pre-#57
+    session into claude for at most one TTL window (worst case: the pre-fix
     claude-tier fallback). Same safety envelope as
     ``_ancestor_in_process_tree``: disabled on Windows, behind a short timeout,
     skippable via TOKEN_OPTIMIZER_NO_PROC_SCAN, and never raises.
@@ -926,7 +926,7 @@ def _opencode_in_process_tree() -> bool:
 
 
 def _opencode_process_signal() -> bool:
-    """Definitive OpenCode signal from the live process tree (issue #57).
+    """Definitive OpenCode signal from the live process tree.
 
     Ground truth for "running under OpenCode *right now*" — unlike an env var or
     a marker file, an OpenCode ancestor process can't be left behind by a prior
@@ -939,7 +939,7 @@ def _opencode_process_signal() -> bool:
 def _opencode_config_signal() -> bool:
     """Weak OpenCode signal: a populated ~/.config/opencode directory.
 
-    Tertiary tier (issue #57): catches a real OpenCode install that exports
+    Tertiary tier: catches a real OpenCode install that exports
     neither an OPENCODE_* env var nor an opencode ancestor (e.g. a host CLI
     spawned outside OpenCode's process group). A populated config dir is a
     weak signal — a stale uninstalled copy leaves an empty dir, which does
@@ -998,7 +998,7 @@ def _copilot_signal() -> bool:
 
     The Copilot hook bridge always sets TOKEN_OPTIMIZER_RUNTIME=copilot
     explicitly; this signal is the safety net for direct invocations from
-    inside a Copilot CLI session (issue #57 class of bugs: never let an
+    inside a Copilot CLI session (never let an
     unrecognized host fall through to the Claude default and write ~/.claude).
     """
     if os.environ.get(_COPILOT_HOME_ENV) or os.environ.get(_TO_COPILOT_HOME_ENV):
@@ -1028,7 +1028,7 @@ def _antigravity_signal() -> bool:
 
     The Antigravity hook bridge always sets TOKEN_OPTIMIZER_RUNTIME=antigravity
     explicitly; this signal is the safety net for direct invocations from inside
-    an Antigravity session (the same #57 class of bugs: never let an
+    an Antigravity session (the same class of bugs: never let an
     unrecognized host fall through to the Claude default and write ~/.claude).
     """
     if os.environ.get(_TO_ANTIGRAVITY_HOME_ENV):
@@ -1044,11 +1044,11 @@ def detect_runtime() -> str:
       1. Explicit override via TOKEN_OPTIMIZER_RUNTIME
       2. A definitive OpenCode signal — an opencode ancestor process — implies
          OpenCode, evaluated BEFORE the soft Claude plugin-env heuristic so a
-         coexisting Claude Code install on the same host can't shadow it (#57)
+         coexisting Claude Code install on the same host can't shadow it
       3. Claude plugin env vars imply Claude Code
       4. An OPENCODE_* env signal implies OpenCode (medium tier: beats
          Codex/Hermes so a leftover CODEX_HOME can't shadow a genuine
-         OpenCode session — "Guy's bug", issue #57; still AFTER Claude env)
+         OpenCode session — "Guy's bug"; still AFTER Claude env)
       5. CODEX_HOME implies Codex
       6. HERMES_HOME implies Hermes
       7. COPILOT_HOME / TOKEN_OPTIMIZER_COPILOT_HOME implies Copilot (explicit
@@ -1065,7 +1065,7 @@ def detect_runtime() -> str:
          Codex/Hermes/Copilot/Cursor session launched from a CC Bash tool
          (which inherits CLAUDECODE=1) still resolves to its own runtime, but
          ABOVE the directory heuristics so a host with CLAUDECODE=1 and a
-         coexisting ~/.codex DIRECTORY resolves to claude, not codex (#120)
+         coexisting ~/.codex DIRECTORY resolves to claude, not codex
       9. A populated opencode config dir implies OpenCode (weak tertiary
          tier; loses to Claude/Codex/Hermes/Copilot/Cursor env, beats default)
       10. COPILOT_HOME or a copilot ancestor process implies Copilot
@@ -1076,7 +1076,7 @@ def detect_runtime() -> str:
            implies Antigravity (weak tier, below CLAUDECODE)
       12. Default to Claude Code for backward compatibility
 
-    Why step 2 is ahead of the Claude env check (KTD-3, issue #57): on a host
+    Why step 2 is ahead of the Claude env check (KTD-3): on a host
     with BOTH Claude Code and OpenCode installed, a stray CLAUDE_PLUGIN_* env var
     would otherwise resolve a genuine OpenCode session to Claude and let the
     skill scan/mutate ~/.claude. An opencode ancestor process is ground truth
@@ -1172,8 +1172,8 @@ def is_cowork() -> bool:
 
     Doc vs observed: only (1) is in the published docs; (2)-(4) are live-observed
     Cowork markers kept as fallback so detection still holds if a future build
-    stops exporting CLAUDE_CODE_REMOTE into the hook env (issues #24529/#66557
-    show env injection is not guaranteed). Never raises; a missing/blank env just
+    stops exporting CLAUDE_CODE_REMOTE into the hook env (Claude Code does
+    not guarantee env injection). Never raises; a missing/blank env just
     contributes no signal.
     """
     if _truthy_env(_COWORK_REMOTE_ENV):
@@ -1235,7 +1235,7 @@ def hermes_home() -> Path:
 def copilot_home(*, mnt_root: Path | None = None) -> Path:
     """Return GitHub Copilot CLI's home directory (~/.copilot by default).
 
-    Resolution precedence (issue #78 — COPILOT_HOME is Copilot's OWN variable,
+    Resolution precedence (COPILOT_HOME is Copilot's OWN variable,
     so TO must not depend on the user setting it):
 
       1. TOKEN_OPTIMIZER_COPILOT_HOME — Token Optimizer's own override. Honored

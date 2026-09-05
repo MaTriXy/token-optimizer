@@ -224,8 +224,8 @@ def _clear_runner_deadline():
 # The SessionStart stdout envelope.
 #
 # Every subcommand's stdout is buffered and emitted as ONE JSON object in the
-# documented {"hookSpecificOutput": {...}} shape (issue #81 /
-# docs-grounding.md §1), with the event name taken from the firing hook's stdin
+# documented {"hookSpecificOutput": {...}} shape
+# (docs-grounding.md §1), with the event name taken from the firing hook's stdin
 # payload (PR #142) so a SessionStart hook can never emit a UserPromptSubmit
 # envelope (Claude Code rejects the mismatch).
 #
@@ -425,8 +425,8 @@ def _quality_cache_self_heal() -> None:
     For plugin installs (the hooks.json context this runner runs in) the
     ``_is_plugin`` check is True and the block is a no-op, exactly as in the
     dispatch. Replicated verbatim so non-plugin manual installs keep the same
-    self-heal behavior. Uses measure._quality_cache_hook_present (GitHub #155)
-    so an install whose canonical hook is the #139 consolidated dispatcher is
+    self-heal behavior. Uses measure._quality_cache_hook_present
+    so an install whose canonical hook is the consolidated dispatcher is
     not "healed" by appending a duplicate legacy hook. Fail-open: never raises.
     """
     try:

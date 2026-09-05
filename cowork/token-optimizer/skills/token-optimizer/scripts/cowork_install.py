@@ -238,8 +238,8 @@ def _finalize_committed_manifest(manifest_path: Path, version: str) -> None:
 
 
 def _add_hooks_pointer(manifest_path: Path) -> None:
-    """Point the manifest at hooks/hooks.json explicitly. Per issue #16288,
-    some Cowork builds only load plugin hooks when the manifest declares
+    """Point the manifest at hooks/hooks.json explicitly. In some Cowork builds,
+    plugin hooks only load when the manifest declares
     them; Claude Code defaults to the same path, so the field is harmless
     everywhere else."""
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

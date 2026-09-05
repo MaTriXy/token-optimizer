@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-import UserPromptSubmit dispatcher (issue #139).
+"""Single-import UserPromptSubmit dispatcher.
 
 Replaces the six separate ``UserPromptSubmit`` hooks.json entries that each
 spawned ``python-launcher.sh -> run.py -> module_runner.py -> runpy(measure.py)``
@@ -158,7 +158,7 @@ def _run_safely(name: str, fn, *args, **kwargs) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Shared deadline for issue #139: ONE HookDeadline for the whole runner
+# Shared deadline: ONE HookDeadline for the whole runner
 # replaces the six independent 8s per-subcommand deadlines.  The shared
 # deadline fires os._exit(0) only when the TOTAL time runs out, and the
 # remaining time is budgeted across subcommands so an early subcommand cannot
@@ -317,7 +317,7 @@ def _sub_verbosity_steer(hook_input: dict) -> None:
 def _sub_ensure_health(hook_input: dict) -> None:
     """``ensure-health --once-per-session`` (harness-gated). Mirrors __main__ L41138.
 
-    For issue #139, the run-once marker is set BEFORE the work by
+    The run-once marker is set BEFORE the work by
     ``_ran_once_this_session``.  If the first call throws (caught by
     ``_run_safely``), the marker is already on disk but the consent flags
     were never written, so ensure-health no-ops for the rest of the session
@@ -427,7 +427,7 @@ def _sub_compact_restore(hook_input: dict) -> None:
     Mirrors __main__ L40526: the --new-session-only --once-per-session copy
     checks-then-skips the marker, then runs compact_restore(new_session_only).
     Under Codex/Cowork the raw stdout is captured and wrapped in the documented
-    additionalContext envelope (issue #81 / docs-grounding.md §1).
+    additionalContext envelope (docs-grounding.md §1).
     """
     sid = hook_input.get("session_id")
     if measure._ran_once_this_session("compact-restore-new-session", sid):
@@ -472,11 +472,11 @@ def _quality_cache_self_heal() -> None:
                 _sh_settings = json.loads(measure.SETTINGS_PATH.read_text(encoding="utf-8"))
                 _sh_hooks = _sh_settings.get("hooks", {}).get("UserPromptSubmit", [])
                 # Use _quality_cache_hook_present
-                # (the #155 fix in sessionstart_runner.py:448) instead of the
+                # (the fix in sessionstart_runner.py:448) instead of the
                 # naive substring check. The naive check cannot see the
                 # consolidated UPS runner dispatcher as a quality-cache
                 # provider, so on a script (non-plugin) install it re-appends
-                # a duplicate legacy hook -- exactly the #155 bug.
+                # a duplicate legacy hook -- exactly the bug it was meant to prevent.
                 if not measure._quality_cache_hook_present(_sh_hooks):
                     measure.setup_quality_bar(quiet=True)
         except Exception:
@@ -488,13 +488,13 @@ def _quality_cache_self_heal() -> None:
 def _check_consent() -> bool:
     """Consent gate for the consolidated runner, mirroring ``run._check_consent``.
 
-    run.py exempts this script from its own consent gate (issue #139 P0 fix:
+    run.py exempts this script from its own consent gate:
     the runner is dispatched with no distinguishing args, so the
     ``ensure-health`` exempt-command match never fires there; the runner
     contains the ensure-health bootstrap itself). The per-subcommand consent
     decision therefore lives HERE.
 
-    Issue #139 requires importing ``run._check_consent`` by explicit path via
+    The consolidated runner requires importing ``run._check_consent`` by explicit path via
     ``importlib.util.spec_from_file_location`` so a future ``skills/.../run.py``
     on ``sys.path`` cannot shadow the real ``hooks/run.py`` and silently
     disable the consent gate (``import run`` fails-open on any AttributeError).
@@ -514,7 +514,7 @@ def _check_consent() -> bool:
 def main() -> int:
     hook_input = _read_hook_input()
 
-    # Consent gate for issue #139. Before consolidation, the six
+    # Consent gate for the consolidated runner. Before consolidation, the six
     # UserPromptSubmit hooks.json entries each passed distinguishing args, so
     # the ensure-health entry was consent-exempt (it bootstraps the
     # v5_welcome_shown / enterprise_consent_shown flags) and the other five
@@ -538,14 +538,14 @@ def main() -> int:
             _clear_runner_deadline()
         return 0
 
-    # For issue #139, install ONE shared HookDeadline for the entire
+    # Install ONE shared HookDeadline for the entire
     # runner (18s, 2s margin under hooks.json timeout=20).  The per-subcommand
     # _runner_budget calls divide the remaining time fairly.  The shared
     # deadline is the ONLY os._exit(0) in the process -- no individual
     # subcommand deadline can kill later subcommands.
     _install_runner_deadline()
 
-    # For issue #139, capture each subcommand's stdout through ONE
+    # Capture each subcommand's stdout through ONE
     # buffered emitter, then emit at the end in a controlled, host-consumable
     # way.  Pre-consolidation each subcommand was its own hooks.json entry and
     # the host parsed their stdout independently; now all six share one stdout
@@ -560,7 +560,7 @@ def main() -> int:
         if captured:
             _stdout_bufs.append(captured)
 
-    # 1-3: always-on subcommands. Ordering (issue #139 P2): the cheap,
+    # 1-3: always-on subcommands. Ordering: the cheap,
     # user-visible subcommands (prompt-continuity, verbosity-steer) run BEFORE
     # the heavier quality-cache --warn.  The shared deadline's os._exit(0)
     # kills the whole process uncatchably, so a hang in an early subcommand

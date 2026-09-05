@@ -124,11 +124,11 @@ def _check_consent(plugin_root: Path | None = None) -> bool:
                 return True  # Path outside home = skip (fail-open)
             # In-home CLAUDE_PLUGIN_DATA must still be a declared identity of
             # THIS plugin, not a foreign plugin's leaked value sharing the same
-            # shared plugins/data root (issue #140 sibling site). Reuse the
+            # shared plugins/data root. Reuse the
             # SAME identity-checked resolver plugin_env.py uses for every other
             # hook script instead of trusting pd raw. If the resolver truly
             # can't be imported (unusual/non-standard plugin layout), fall back
-            # to trusting pd -- matching pre-#140 behavior -- so a missing
+            # to trusting pd -- matching prior behavior -- so a missing
             # import never blocks the consent check. If it CAN be imported but
             # rejects pd as foreign, fall through to the identical legacy chain
             # a session with no CLAUDE_PLUGIN_DATA at all would use below --
@@ -343,7 +343,7 @@ def main() -> int:
     script_rel = sys.argv[1]
     script_args = sys.argv[2:]
 
-    # Issue #139: whole-UserPromptSubmit-path opt-out. Checked BEFORE the
+    # Whole-UserPromptSubmit-path opt-out. Checked BEFORE the
     # module_runner command is built (no stdin read, no imports, no fs access)
     # so a user who sets TOKEN_OPTIMIZER_HOOKS_USERPROMPTSUBMIT=0 pays zero
     # per-prompt cost. The consolidated dispatcher lives at this relative path;
@@ -393,7 +393,7 @@ def main() -> int:
     # can't run -> flags never written -> plugin permanently inert).
     exempt_commands = {"ensure-health", "consent", "v5"}
     is_exempt = any(arg in exempt_commands for arg in script_args[:2])
-    # Issue #139 P0: the consolidated UserPromptSubmit runner is dispatched as
+    # The consolidated UserPromptSubmit runner is dispatched as
     # `run.py hooks/userpromptsubmit_runner.py` with NO trailing args, so
     # script_args=[] and the exempt_commands check above never matches it. The
     # runner contains the ensure-health bootstrap itself, so it MUST be let

@@ -26,7 +26,7 @@ SUPPORTED_EVENTS = (
 # A Codex marketplace install lives in a versioned directory
 # (.../token-optimizer/<X.Y.Z>/) that the marketplace replaces on upgrade.
 # Used to decide whether the baked hook command must resolve the active version
-# at runtime instead of pinning it (which dies on the next update — see #75).
+# at runtime instead of pinning it (which dies on the next update).
 _SEMVER_DIR_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 
@@ -34,7 +34,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-# Inline POSIX bash-resolver prefix/suffix (#80). When Claude/Codex runs a hook
+# Inline POSIX bash-resolver prefix/suffix. When Claude/Codex runs a hook
 # command under `/bin/sh -c` with a stripped/empty PATH, bare `bash` is not
 # found → exit 127 spam on every tool call. The resolver probes `command -v`
 # for bash in PATH then a fixed list of absolute locations (POSIX guarantees
@@ -105,7 +105,7 @@ def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
         # Marketplace install: root is .../token-optimizer/<X.Y.Z>/, which is
         # deleted when Codex installs a newer version. Pinning it here makes
         # hooks.json point at a missing directory after every upgrade, so each
-        # Codex tool call fails (#75). Resolve the newest installed version at
+        # Codex tool call fails. Resolve the newest installed version at
         # runtime from the stable parent dir, falling back to the baked path.
         base = shlex.quote(str(root.parent))
         fallback = shlex.quote(str(root) + "/")
@@ -459,7 +459,7 @@ def uninstall(project: Path, *, is_global: bool = False, dry_run: bool = False) 
     updated = _remove_hooks(existing)
     details: dict[str, Any] = {"hook_events": sorted(updated.get("hooks", {}).keys())}
     # Reverse the config.toml writes the installer made: the compact-prompt
-    # managed block + prompt file (issue #78, workstream B2) and the [tui]
+    # managed block + prompt file and the [tui]
     # status-line managed block. Both are idempotent and scoped to TO's own
     # managed markers, so user-authored keys are never clobbered.
     if dry_run:
