@@ -247,10 +247,15 @@ def test_hooks_starter_sessionend_is_flush_not_collect():
     cmds = _session_end_commands_from_hooks_json(
         REPO / "skills" / "token-optimizer" / "examples" / "hooks-starter.json"
     )
-    # The starter uses the ``$MEASURE_PY`` install-time placeholder, not a
-    # literal ``measure.py`` path, so key on the flush subcommand itself.
-    flush_cmds = [c for c in cmds if "session-end-flush" in c and "compact-capture" not in c]
-    assert flush_cmds, "hooks-starter.json must ship a SessionEnd flush command"
+    # The starter now uses the runner-based wiring (matching hooks.json), so
+    # SessionEnd points at stop_runner.py (which internally calls
+    # session-end-flush). Accept either the direct flush shape or the runner.
+    flush_cmds = [
+        c for c in cmds
+        if ("session-end-flush" in c or "stop_runner.py" in c)
+        and "compact-capture" not in c
+    ]
+    assert flush_cmds, "hooks-starter.json must ship a SessionEnd flush/runner command"
     for i, cmd in enumerate(flush_cmds):
         _assert_current_shape(f"hooks-starter.json SessionEnd[{i}]", cmd)
 
