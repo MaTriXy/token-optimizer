@@ -1,4 +1,4 @@
-# Force LF line endings for shell scripts so they work on Windows (issue #78).
+# Force LF line endings for shell scripts so they work on Windows.
 # Without this, git's autocrlf converts install.sh to CRLF on clone, and
 # bash fails with "$'\r': command not found" on every line.
 *.sh text eol=lf

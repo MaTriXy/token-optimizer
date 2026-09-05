@@ -40,8 +40,8 @@ The adapter ships a capability map keyed to Copilot CLI versions. A feature turn
 | `updatedInput` on preToolUse | Works on supported versions | Bash output compression |
 | `additionalContext` on sessionStart | Works | Continuity restore |
 | `additionalContext` on postToolUse | Works on supported versions | Context-growth nudges |
-| `additionalContext` on preToolUse | Broken upstream, issue #2585 open | Read interception, deferred |
-| `additionalContext` on userPromptSubmitted | Regressed upstream, issue #3727 open | Per-prompt quality steering, deferred |
+| `additionalContext` on preToolUse | Broken upstream in Copilot CLI | Read interception, deferred |
+| `additionalContext` on userPromptSubmitted | Regressed upstream in Copilot CLI | Per-prompt quality steering, deferred |
 
 When an upstream fix lands before the shipped map catches up, override it with `TOKEN_OPTIMIZER_COPILOT_CAPS_JSON`. See the [configuration reference](/reference/configuration/).
 

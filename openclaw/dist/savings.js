@@ -776,7 +776,7 @@ function computeRealizedSavings(openclawDir, days = 30, now = Date.now()) {
     // A net-negative main pool (now marginally costlier than the frozen baseline this period)
     // is carried honestly into the combined net below rather than clamped to 0 -- clamping it
     // while the "now vs old way" arms stayed honest is what let the headline assert a saving
-    // beside net-negative arms (issue #87). The headline is now the honest net of the arms.
+    // beside net-negative arms (the honest-net invariant). The headline is now the honest net of the arms.
     const mainTransformation = cfMonthlyMain - actualMonthlyMain;
     // SUBAGENT pool (#2) = 0. OpenClaw has NO Claude-style sidechains (subagent
     // transcripts), so there is no separate sidechain pool to price. Documented gap.

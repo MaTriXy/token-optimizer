@@ -414,7 +414,7 @@ export const TokenOptimizerPlugin: Plugin = async (
     // Tag every shell execution with the active runtime so that any Token
     // Optimizer code reached through a shell (e.g. the Claude Code skill that
     // OpenCode auto-loads from ~/.claude/skills) reliably detects OpenCode and
-    // never scans or mutates ~/.claude (issue #57). We only add our own marker
+    // never scans or mutates ~/.claude (the ~/.claude isolation invariant). We only add our own marker
     // and leave the rest of the environment untouched.
     async "shell.env"(_input, output) {
       try {

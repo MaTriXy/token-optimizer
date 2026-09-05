@@ -439,7 +439,7 @@ tr:hover td { background: var(--bg-hover); }
     <!-- TRANSFORMATION HERO: the big picture estimated (old way vs now). -->
     <!-- INVARIANT: compressionMeasuredUsd is rendered below as a SEPARATE card    -->
     <!-- and is NEVER summed into monthlySavingsUsd. Do not change this.           -->
-    <!-- Issue #87: the hero shows only on a GENUINE net win (monthlySavingsUsd>0), -->
+    <!-- Honest-net invariant: the hero shows only on a GENUINE net win (monthlySavingsUsd>0), -->
     <!-- so the clamped headline can never sit beside net-negative arms. When the   -->
     <!-- net is <= 0 we show a neutral "roughly flat" card; the measured floor below -->
     <!-- still reports realized savings.                                            -->

@@ -772,7 +772,7 @@ export interface RealizedSavings {
   /** "Now" cost per session (actual / current session count). */
   afterCostPerSession: number;
   /** Baseline session's native cache-read fraction (0..1). Explains why identical tokens+mix
-   * can price differently across the arms (issue #87 contradiction #1). */
+   * can price differently across the arms (the cache-hit pricing contradiction). */
   beforeCacheHit: number;
   /** Current pool cache-hit rate (0..1). */
   afterCacheHit: number;
@@ -986,7 +986,7 @@ export function computeRealizedSavings(
   // A net-negative main pool (now marginally costlier than the frozen baseline this period)
   // is carried honestly into the combined net below rather than clamped to 0 -- clamping it
   // while the "now vs old way" arms stayed honest is what let the headline assert a saving
-  // beside net-negative arms (issue #87). The headline is now the honest net of the arms.
+  // beside net-negative arms (the honest-net invariant). The headline is now the honest net of the arms.
   const mainTransformation = cfMonthlyMain - actualMonthlyMain;
 
   // SUBAGENT pool (#2) = 0. OpenClaw has NO Claude-style sidechains (subagent

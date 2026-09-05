@@ -163,7 +163,7 @@ export interface RealizedSavings {
   beforeCostPerSession: number;
   afterCostPerSession: number;
   /** Baseline session's native cache-read fraction (0..1) -- explains why identical
-   * tokens+mix can price differently across the arms (issue #87 contradiction #1). */
+   * tokens+mix can price differently across the arms (the cache-hit pricing contradiction). */
   beforeCacheHit: number;
   /** Current pool cache-hit rate (0..1). */
   afterCacheHit: number;
@@ -452,7 +452,7 @@ export function computeRealizedSavings(
   // MAIN transformation = counterfactual − actual, UNCLAMPED, monthly. A net-negative main
   // pool (now marginally costlier than the frozen baseline this period) is carried honestly
   // into the combined net below rather than clamped to 0 -- clamping it while the arms stayed
-  // honest is what let the headline assert a saving beside net-negative arms (issue #87).
+  // honest is what let the headline assert a saving beside net-negative arms (the honest-net invariant).
   const mainTransformation = counterfactualMonthly - actualMonthly;
 
   // SUBAGENT pool (#2) = 0. OpenCode has NO Claude-style sidechains: no

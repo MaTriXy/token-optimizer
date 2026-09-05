@@ -54,7 +54,7 @@ export interface RealizedSavings {
     /** "Now" cost per session (actual / current session count). */
     afterCostPerSession: number;
     /** Baseline session's native cache-read fraction (0..1). Explains why identical tokens+mix
-     * can price differently across the arms (issue #87 contradiction #1). */
+     * can price differently across the arms (the cache-hit pricing contradiction). */
     beforeCacheHit: number;
     /** Current pool cache-hit rate (0..1). */
     afterCacheHit: number;

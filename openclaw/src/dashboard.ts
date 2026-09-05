@@ -1294,7 +1294,7 @@ function renderSavings(data: DashboardData): string {
     : "";
 
   // --- Item 1 + 6: transformation hero with $ AND %, plus old-way vs now arms ---
-  // Gate the hero on a GENUINE net win (issue #87): the headline IS the honest net of the
+  // Gate the hero on a GENUINE net win (the honest-net invariant): the headline IS the honest net of the
   // arms (counterfactual - actual), so when that net is <= 0 we show a neutral "roughly flat"
   // card instead of clamping a positive number beside net-negative arms. No display clamp.
   const heroReady = s.ready && s.monthlySavingsUsd > 0;
