@@ -1,4 +1,4 @@
-"""#107 -- Windows console-flash guard for the JS/TS runtimes.
+"""Windows console-flash guard for the JS/TS runtimes.
 
 ``tests/test_windows_spawn_no_window.py`` covers the Python surface
 (``measure.py``, ``hooks/run.py``, the bridges). This file is its counterpart
@@ -142,7 +142,7 @@ def _arg_list(text: str, open_paren: int) -> str:
 def _bindings(text: str) -> dict[str, str]:
     """Map ``const/let/var NAME = <expr>`` to the expression text.
 
-    The original #107 bug never wrote ``execFile("start", ...)`` literally --
+    The original no-flash bug never wrote ``execFile("start", ...)`` literally --
     it wrote ``execFile(opener, ...)`` where ``opener`` was a platform ternary
     that could evaluate to "start". A guard that only inspects the literal at
     the call site passes on that exact revert, so resolve one hop.
@@ -210,8 +210,9 @@ def test_every_child_process_spawn_passes_windows_hide() -> None:
         "scanner; a silently empty guard is worse than no guard."
     )
     assert not offenders, (
-        "child_process spawn sites missing `windowsHide: true` (#107: each one "
-        "flashes a console window on a Windows Desktop host). Merge the option "
+        "child_process spawn sites missing `windowsHide: true` (the no-flash "
+        "concern: each one flashes a console window on a Windows Desktop host). "
+        "Merge the option "
         "into the existing options object, do not clobber it:\n  "
         + "\n  ".join(offenders)
     )
@@ -221,7 +222,7 @@ def test_every_child_process_spawn_passes_windows_hide() -> None:
 # 2. `start` is a cmd.exe builtin, never an executable.
 # ---------------------------------------------------------------------------
 def test_no_bare_start_opener_passed_as_executable() -> None:
-    """#107 site-1: ``execFile("start", [path])`` is ENOENT on Windows.
+    """The no-flash site-1 bug: ``execFile("start", [path])`` is ENOENT on Windows.
 
     There is no ``start.exe``. Passing "start" as the command silently fails
     (the openclaw dashboard opener swallowed the error), so the browser never
@@ -309,13 +310,13 @@ def test_no_bun_spawn_on_runtime_surface() -> None:
     ["vscode-extension/src", "copilot", "hermes"],
 )
 def test_clean_components_have_no_spawn_code(tree_name: str) -> None:
-    """These three ship no process-spawn code today (#107 census).
+    """These three ship no process-spawn code today (the no-flash census).
 
     ``vscode-extension`` is pure filesystem reads + UI; ``copilot/`` is a
     README; ``hermes/`` delegates every subprocess to
     ``skills/token-optimizer/scripts/hermes_hook_bridge.py`` (covered by
     ``test_windows_spawn_no_window.py``). If a spawn is added here it must be
-    added to the #107 census and given ``windowsHide`` first -- which means
+    added to the no-flash census and given ``windowsHide`` first -- which means
     moving the tree into SPAWNING_TREES above, deliberately.
     """
     tree = REPO / tree_name
@@ -331,7 +332,7 @@ def test_clean_components_have_no_spawn_code(tree_name: str) -> None:
             offenders.append(f"{_rel(path)} -- Bun.spawn")
 
     assert not offenders, (
-        f"{tree_name} was CLEAN in the #107 spawn census and has grown spawn "
+        f"{tree_name} was CLEAN in the no-flash spawn census and has grown spawn "
         "code. Give every new call site `windowsHide: true` and move the tree "
         "into SPAWNING_TREES in this file so it is scanned:\n  "
         + "\n  ".join(offenders)
@@ -345,8 +346,8 @@ def test_openclaw_dist_cli_carries_the_windows_opener_fix() -> None:
     """``dist/cli.js`` is what ships; ``src/cli.ts`` is only what builds it.
 
     ``test_openclaw_dist_freshness.py`` proves a dist artifact EXISTS for each
-    source file, not that it carries current logic. This pins the #107 marker
-    specifically, the same way that file pins the #103 markers -- a src-only
+    source file, not that it carries current logic. This pins the no-flash marker
+    specifically, the same way that file pins the cross-project filter markers -- a src-only
     fix that was never rebuilt fails here instead of shipping as a no-op.
 
     The marker used to be ``"/c", "start", ""``. Do NOT re-pin that: the
@@ -379,7 +380,7 @@ def test_openclaw_dist_cli_carries_the_windows_opener_fix() -> None:
     marker = '"url.dll,FileProtocolHandler", filepath'
     for label, text in (("src/cli.ts", src_text), ("dist/cli.js", dist_text)):
         assert marker in text, (
-            f"openclaw {label} is missing the #107 Windows opener "
+            f"openclaw {label} is missing the no-flash Windows opener "
             "(`rundll32 url.dll,FileProtocolHandler <path>`). If only dist is "
             "missing it, run `npm run build` in openclaw/ and commit the "
             "regenerated dist."

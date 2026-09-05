@@ -1,4 +1,4 @@
-"""#107: no Windows console flash from the hook-script surface.
+"""The no-flash fix: no Windows console flash from the hook-script surface.
 
 These scripts run as Claude Code hooks on every prompt. On Windows, spawning a
 console executable (``git``, ``where``, ``tasklist``, ``wmic``, ``powershell``,

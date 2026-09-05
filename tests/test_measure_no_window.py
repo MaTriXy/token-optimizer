@@ -1,4 +1,4 @@
-"""#107: no console-window flash from anything measure.py launches on Windows.
+"""No console-window flash from anything measure.py launches on Windows.
 
 Three separate mechanisms, all pinned here because each one alone leaves a
 hole:
@@ -208,7 +208,7 @@ def test_posix_allowlist_stays_empty():
     there is no legitimate reason to exempt one. If this fails, someone widened
     the exemption surface -- read why before accepting it."""
     assert _POSIX_ONLY_ALLOWLIST == set(), (
-        f"unexpected #107 exemptions: {_POSIX_ONLY_ALLOWLIST}"
+        f"unexpected no-flash-fix exemptions: {_POSIX_ONLY_ALLOWLIST}"
     )
 
 
@@ -253,7 +253,7 @@ def test_measure_has_no_shell_true_or_os_system():
 def test_detached_spawns_still_use_spawn_utils():
     """The three fire-and-forget spawns must keep routing through
     ``spawn_detached`` (DETACHED_PROCESS + the CREATE_BREAKAWAY_FROM_JOB retry).
-    #107 must not have replaced detach semantics with a bare CREATE_NO_WINDOW --
+    The no-flash fix must not have replaced detach semantics with a bare CREATE_NO_WINDOW --
     the children have to OUTLIVE the hook."""
     src = _measure_source()
     assert "from spawn_utils import spawn_detached" in src
@@ -480,7 +480,7 @@ def test_shim_tries_gui_interpreters_before_console_ones(shim_src):
     long-lived daemon itself ran as a console process. GUI-subsystem
     interpreters must come first.
 
-    #107 updated the pythonw rung: it is now PATH-resolved into
+    The no-flash fix updated the pythonw rung: it is now PATH-resolved into
     ``PYW_EXE`` and guarded against Microsoft Store aliases (see
     ``test_shim_pythonw_rung_guards_windows_store_alias`` in
     test_heal_hardening.py), so ``_rung_order`` sees the remaining bare
@@ -551,7 +551,7 @@ def test_restart_runs_the_heal_between_end_and_run(m):
     heal_idx = body.index("_heal_windows_task_action()")
     run_idx = body.index('"schtasks", "/Run"')
     assert end_idx < heal_idx < run_idx, (
-        "the #107 task-action heal must run between schtasks /End and /Run"
+        "the no-flash task-action heal must run between schtasks /End and /Run"
     )
 
 
@@ -687,7 +687,7 @@ def test_heal_refuses_while_daemon_disabled(m, monkeypatch):
 
 
 def test_heal_refuses_while_sticky_install_failed(m, monkeypatch):
-    """The #107 marker exists to stop exactly this kind of per-session poking."""
+    """The no-flash-fix marker exists to stop exactly this kind of per-session poking."""
     _, installs = _heal_env(m, monkeypatch, r"C:\s\dashboard-launcher.cmd")
     _arm_marker(m)
     assert m._heal_windows_console_flash() is False
@@ -705,7 +705,7 @@ def test_heal_is_a_strict_noop_off_windows(m, monkeypatch):
 
 
 def test_heal_failure_never_runs_a_still_flasher_action(m, monkeypatch):
-    """#107: this test USED to pin the opposite
+    """The no-flash regression: this test USED to pin the opposite
     -- a compensating /Run after a failed re-registration. But when the
     install fails, the registered action is still the .cmd flasher, so that
     /Run IS one extra console flash per session, on exactly the hosts the heal
@@ -717,7 +717,7 @@ def test_heal_failure_never_runs_a_still_flasher_action(m, monkeypatch):
     assert m._heal_windows_console_flash() is False
     assert not any("/Run" in v for v in rec.verbs), (
         "a failed heal must not /Run a still-.cmd action -- that is the flash "
-        "#107 exists to remove"
+        "the no-flash fix exists to remove"
     )
 
 
@@ -775,7 +775,7 @@ def test_shim_heal_rewrites_a_stale_on_disk_launcher(m, monkeypatch):
     assert m._heal_windows_launcher_shim() is True
     healed = launcher.read_text(encoding="utf-8")
     assert "where " not in healed.lower()
-    # #107: the pythonw rung is now PATH-resolved + Store-alias
+    # The no-flash fix: the pythonw rung is now PATH-resolved + Store-alias
     # guarded, so the first BARE rung is pyw.exe; the guarded pythonw
     # invocation still precedes it.
     assert _rung_order(healed)[0] == "pyw.exe"
@@ -800,7 +800,7 @@ def test_ensure_health_calls_the_console_flash_heal():
     to the other _heal_* migrations, inside a fail-open try/except."""
     src = _measure_source()
     assert "if _heal_windows_console_flash():" in src, (
-        "the #107 heal is never called from ensure-health"
+        "the no-flash heal is never called from ensure-health"
     )
     idx = src.index("if _heal_windows_console_flash():")
     window = src[idx - 1500:idx + 500]
@@ -842,7 +842,7 @@ def test_marker_lives_beside_the_thrash_tombstone(m):
 
 
 def test_ensure_daemon_refuses_while_marker_armed(m, monkeypatch):
-    """THE #107 regression: a permanently-failed install must not be retried,
+    """THE no-flash regression: a permanently-failed install must not be retried,
     so the costly (window-flashing) path never runs again.
 
     Torture Cluster A update: the gate now runs ONE cheap identity-checked
@@ -894,7 +894,7 @@ def test_pulse_still_revives_when_marker_absent(m, monkeypatch):
 
 
 def test_transient_install_failure_does_not_arm_the_marker(m, monkeypatch):
-    """#107: this test USED to pin the opposite -- ANY
+    """The no-flash regression: this test USED to pin the opposite -- ANY
     installer failure armed the permanent marker. A missing dashboard file is
     a transient class (disk full once, a regen hiccup); it must stay
     retryable under the 24h throttle, never become a permanent kill switch."""
@@ -965,7 +965,7 @@ def test_restart_stale_does_not_arm_the_marker(m, monkeypatch):
 
 
 def test_revive_spawn_failure_does_not_arm_the_marker(m, monkeypatch):
-    """#107: a spawn returning None is the
+    """The no-flash regression: a spawn returning None is the
     LEAST structural failure in the set (fork EAGAIN under load, AV
     transiently locking the exe, a replaceable corrupt pythonw twin). The
     300s revive throttle bounds retries; one hiccup must not permanently

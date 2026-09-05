@@ -1,4 +1,4 @@
-"""#107: Codex / Hermes / Copilot bridge scripts must never flash a console.
+"""The no-flash concern: Codex / Hermes / Copilot bridge scripts must never flash a console.
 
 Companion to ``tests/test_windows_spawn_no_window.py``, which covers measure.py,
 hooks/run.py, utf8_io.py and the ``spawn_utils`` helper itself. This file covers
@@ -205,7 +205,7 @@ def test_every_spawn_site_carries_no_window(name):
         if not _guarded(call, tree, owner)
     ]
     assert not unguarded, (
-        "spawn site(s) missing the CREATE_NO_WINDOW guard (#107 console flash): "
+        "spawn site(s) missing the CREATE_NO_WINDOW guard (console flash): "
         + ", ".join(unguarded)
     )
 
@@ -221,11 +221,11 @@ def test_spawn_free_files_stay_spawn_free(name):
     if name in SPAWNING_FILES:
         assert found, (
             f"{name} is listed as a spawning file but has no spawn calls; "
-            "update SPAWNING_FILES and the #107 census"
+            "update SPAWNING_FILES and the no-flash census"
         )
     else:
         assert not found, (
-            f"{name} was spawn-free at the #107 sweep but now spawns at {found}; "
+            f"{name} was spawn-free at the no-flash sweep but now spawns at {found}; "
             "add the _NO_WINDOW guard and update SPAWNING_FILES"
         )
 

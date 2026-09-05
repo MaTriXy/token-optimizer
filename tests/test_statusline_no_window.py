@@ -297,7 +297,7 @@ def test_no_call_site_hidden_inside_a_string_literal():
 # The core contract.
 # ---------------------------------------------------------------------------
 def test_every_child_process_call_sets_windows_hide():
-    """#107: every spawning call in statusline.js must pass windowsHide: true."""
+    """No-flash: every spawning call in statusline.js must pass windowsHide: true."""
     *_, sites = _collect_sites()
     offenders = []
     for s in sites:
@@ -352,7 +352,7 @@ def test_git_branch_call_still_hidden():
     )
     for s in git_sites:
         assert re.search(r"windowsHide\s*:\s*true", s["args_raw"]), (
-            "the git branch lookup at line %d lost `windowsHide: true` (#107 revert)"
+            "the git branch lookup at line %d lost `windowsHide: true` (no-flash revert)"
             % s["line"]
         )
         assert s["api"].startswith("execFile") or s["api"].startswith("spawn"), (

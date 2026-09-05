@@ -1,4 +1,4 @@
-"""#161: project-scoped skills and agents were never counted.
+"""Project-scoped skills and agents were never counted.
 
 Claude Code injects `<cwd>/.claude/skills` into the skill listing for every
 session in that cwd, exactly like `~/.claude/skills`. measure.py only ever

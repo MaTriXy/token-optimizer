@@ -65,7 +65,7 @@ def _fake_console_python(store: Path, exit_code: int = 0) -> Path:
     """A stand-in WindowsApps python.exe. Every invocation is a would-be
     console-window flash, so it logs itself to $PROBE_LOG.
 
-    Post-#143 the probe keys on the CANDIDATE's own liveness, so this fake models
+    Post-fix the probe keys on the CANDIDATE's own liveness, so this fake models
     a real console python by response, keyed on exit_code:
       * alive (exit_code 0): writes the ``-c`` proof-of-life marker to $3, and
         prints a real ``Python X.Y.Z`` version string on ``--version``.
@@ -142,12 +142,13 @@ def store(tmp_path: Path) -> Path:
 
 @requires_bash
 def test_live_console_candidate_is_accepted(store, tmp_path):
-    """A healthy Store install must be accepted. Post-#143 the CANDIDATE itself
+    """A healthy Store install must be accepted. Post-fix the CANDIDATE itself
     supplies proof of life (marker write, else a real --version string), because a
     sibling GUI twin can belong to a different package and must not vouch for it.
 
-    #143 deliberately traded #107's no-flash-on-the-healthy-path property for this
-    correctness: probing the console candidate can spawn it once on a cache miss.
+    The liveness probe fix deliberately traded the no-flash fix's
+    no-flash-on-the-healthy-path property for this correctness: probing the
+    console candidate can spawn it once on a cache miss.
     That is why this test no longer asserts an empty PROBE_LOG -- a one-time spawn
     is expected and accepted; a silently-dead cached interpreter is far worse."""
     py = _fake_console_python(store)
@@ -195,14 +196,14 @@ def test_no_gui_twin_console_probe_still_rejects_stub(store, tmp_path):
 def test_candidate_probe_keeps_c6_timeout_semantics():
     """C6: both candidate probe sites (the -c marker write and the --version
     string check) carry the `timeout --kill-after=1s 2s` escalation, alongside the
-    pre-existing pythonw-swap liveness probe (3 total in the launcher). Post-#143
+    pre-existing pythonw-swap liveness probe (3 total in the launcher). Post-fix
     the probes run against `$binpath` (the candidate), never a `$twin`."""
     src = LAUNCHER.read_text(encoding="utf-8")
     assert src.count("--kill-after=1s 2s") == 3
     assert 'timeout --kill-after=1s 2s "$binpath" -c' in src
     # The --version discriminator carries the same bounded semantics.
     assert 'timeout --kill-after=1s 2s "$binpath" --version' in src
-    # The twin proof-of-life probe is gone (the #143 bug); never reference $twin.
+    # The twin proof-of-life probe is gone (the launcher probe fix); never reference $twin.
     assert '"$twin" -c' not in src
 
 
@@ -266,7 +267,7 @@ def test_command_doc_routes_non_claude_python_through_launcher(doc):
     for line in run_lines:
         assert 'bash "$TO_LAUNCHER"' in line, (
             f"{doc} documents a bare console spawn for non-Claude runtimes "
-            f"(#107 flash): {line!r}"
+            f"(the no-flash concern): {line!r}"
         )
 
 

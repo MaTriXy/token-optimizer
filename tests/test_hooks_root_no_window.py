@@ -1,4 +1,4 @@
-"""#107 (Lane D): hooks/, repo-root scripts/ and fleet-auditor must never flash
+"""The no-flash fix (Lane D): hooks/, repo-root scripts/ and fleet-auditor must never flash
 a console window on Windows.
 
 Companion to ``tests/test_windows_spawn_no_window.py`` (measure.py, hooks/run.py,
@@ -60,7 +60,7 @@ SPAWNING_FILES = {
     "keepwarm-experiment.py": ROOT_SCRIPTS / "keepwarm-experiment.py",
 }
 
-# Files in this lane that were CLEAN in the #107 census and must stay clean.
+# Files in this lane that were CLEAN in the no-flash census and must stay clean.
 # If one of these grows a spawn, it needs a guard and a move into SPAWNING_FILES.
 CLEAN_FILES = {
     "module_runner.py": HOOKS / "module_runner.py",
@@ -145,7 +145,7 @@ def test_every_spawn_site_passes_creationflags(name):
     tree = _parse(SPAWNING_FILES[name])
     calls = _spawn_calls(tree)
     assert calls, (
-        f"{name} was in the #107 spawn census but the scanner now finds ZERO "
+        f"{name} was in the no-flash spawn census but the scanner now finds ZERO "
         "spawn sites -- the scanner has stopped matching real code. Fix the "
         "scanner; a silently empty guard is worse than no guard."
     )
@@ -153,7 +153,7 @@ def test_every_spawn_site_passes_creationflags(name):
         f"{name}:{c.lineno}" for c in calls if _kwarg(c, "creationflags") is None
     ]
     assert not offenders, (
-        "spawn sites missing creationflags=_NO_WINDOW (#107: each flashes a "
+        "spawn sites missing creationflags=_NO_WINDOW (the no-flash concern: each flashes a "
         f"console window on a Windows Desktop host): {offenders}"
     )
 
@@ -264,10 +264,10 @@ def _open_in_browser_node() -> ast.FunctionDef:
 
 
 def test_fleet_opener_windows_branch_uses_os_startfile_not_cmd():
-    """#107 site: the Windows branch must be ``os.startfile``, NOT a cmd hop.
+    """The no-flash fix site: the Windows branch must be ``os.startfile``, NOT a cmd hop.
 
     This assertion used to pin ``["cmd", "/c", "start", "", path]`` -- the first
-    #107 fix. Do not re-pin that shape: it is COMMAND INJECTION. Dropping
+    no-flash fix. Do not re-pin that shape: it is COMMAND INJECTION. Dropping
     ``shell=True`` removed Python's shell, not cmd.exe's parser, and
     ``subprocess.list2cmdline`` quotes an argument only on space/tab/quote --
     never on ``&``, ``^``, ``|``, ``(``, ``)``. ``&`` is a legal Windows
@@ -279,7 +279,7 @@ def test_fleet_opener_windows_branch_uses_os_startfile_not_cmd():
     CLAUDE_CONFIG_DIR (deliberately unconfined) and HOME/USERPROFILE.
 
     ``os.startfile`` is ShellExecuteW: the path is a real argument, no command
-    line is parsed, and no console is allocated -- so it satisfies #107 with no
+    line is parsed, and no console is allocated -- so it satisfies the no-flash concern with no
     creationflags at all. It is the same helper ``measure.py::_open_in_browser``
     has always used.
     """
@@ -406,7 +406,7 @@ def test_clean_file_has_no_spawns(name):
         pytest.skip(f"{name} not present in this checkout")
     calls = _spawn_calls(_parse(path))
     assert not calls, (
-        f"{name} was CLEAN in the #107 census and has grown a spawn at lines "
+        f"{name} was CLEAN in the no-flash census and has grown a spawn at lines "
         f"{[c.lineno for c in calls]}. Add creationflags=_NO_WINDOW and move it "
         "into SPAWNING_FILES in this file so it is scanned."
     )
@@ -521,7 +521,7 @@ def test_launcher_swaps_to_pythonw_at_both_exec_sites():
 
 
 def test_launcher_rejects_cached_pythonw_record():
-    """A cache record naming a GUI twin (pythonw.exe, or pyw.exe since the #107
+    """A cache record naming a GUI twin (pythonw.exe, or pyw.exe since the no-flash
     py-launcher swap) is poisoned or a stale artefact of a twin that should have
     been probed out. Rejecting it keeps discovery honest."""
     src = (HOOKS / "python-launcher.sh").read_text(encoding="utf-8")
@@ -553,7 +553,7 @@ def test_no_window_constant_is_real_on_windows():
 def test_create_no_window_child_has_no_console():
     """OS-level proof, not kwargs-level: a child spawned with CREATE_NO_WINDOW
     reports ``GetConsoleWindow() == 0``. Without the flag, a console-subsystem
-    child of a console-less parent gets a fresh console -- the #107 flash."""
+    child of a console-less parent gets a fresh console -- the console flash the no-flash fix targets."""
     child = (
         "import ctypes, sys;\n"
         "sys.exit(0 if ctypes.windll.kernel32.GetConsoleWindow() == 0 else 1)\n"

@@ -11,9 +11,9 @@ substring ``"quality-cache"``, so they treated the consolidated dispatcher as
 "hook missing". ensure-health then called ``setup_quality_bar`` which appended a
 fresh legacy ``python3 '<mp>' quality-cache --quiet`` group -- running
 quality-cache twice per prompt and re-introducing the per-prompt blocking cost
-#139 removed. The duplicate returned on every SessionStart.
+The duplicate was removed. The duplicate returned on every SessionStart.
 
-These tests pin the fix: with the canonical #139 dispatcher already present,
+These tests pin the fix: with the canonical dispatcher already present,
 the quality-cache hook is recognized as installed and setup_quality_bar does
 NOT append a legacy hook.
 
@@ -127,7 +127,7 @@ def test_is_quality_bar_installed_handles_non_string_command_without_raising(mon
 # --- integration: setup_quality_bar (what ensure-health calls) is a no-op ---
 
 def test_setup_quality_bar_does_not_readd_legacy_hook(monkeypatch, tmp_path):
-    """With the #139 dispatcher + our statusline present, setup_quality_bar must
+    """With the dispatcher + our statusline present, setup_quality_bar must
     not append a second, legacy quality-cache hook."""
     statusline_cmd = "node '/install/skills/token-optimizer/statusline.js'"
     settings = {

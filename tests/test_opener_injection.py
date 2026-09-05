@@ -1,6 +1,6 @@
-"""#107 follow-up: the dashboard openers must never hand a path to cmd's parser.
+"""No-flash follow-up: the dashboard openers must never hand a path to cmd's parser.
 
-The first #107 fix replaced ``subprocess.run(["start", path], shell=True)`` /
+The first no-flash fix replaced ``subprocess.run(["start", path], shell=True)`` /
 ``execFile("start", ...)`` with ``cmd /c start "" <path>``. That removed the
 console flash and reintroduced something worse: **command injection**.
 
@@ -219,7 +219,7 @@ _JS_FAILURE_MARKERS = {
 
 
 def test_js_opener_reports_failures():
-    """#107 hid for months behind a noop callback. Every opener must speak now."""
+    """The no-flash concern hid for months behind a noop callback. Every opener must speak now."""
     for label, path in sorted(_JS_OPENERS.items()):
         if not path.is_file():
             continue
@@ -320,7 +320,7 @@ def test_fleet_posix_branches_pass_the_path_as_one_argv_entry(
 
 
 def test_fleet_opener_failure_is_visible(monkeypatch, capsys, tmp_path):
-    """T6-L1: the swallowed error is what hid #107. Failures must print.
+    """T6-L1: the swallowed error is what hid the no-flash concern. Failures must print.
 
     ``check=False`` with a discarded returncode meant a broken opener looked
     exactly like a working one. Now any failure prints a manual-open URL.

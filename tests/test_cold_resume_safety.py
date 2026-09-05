@@ -40,7 +40,7 @@ _UUID_B = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 
 @pytest.fixture
 def measure(monkeypatch):
-    tmp = tempfile.mkdtemp(prefix="to-129-test-")
+    tmp = tempfile.mkdtemp(prefix="to-cold-resume-test-")
     monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", tmp)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", tmp)
     sys.path.insert(0, str(SCRIPTS))
@@ -129,7 +129,7 @@ def test_vague_fresh_uses_conditional_footer(measure, monkeypatch):
 
 def test_vague_stale_is_declined(measure, monkeypatch):
     """Vague 'continue' + a STALE freshest checkpoint (older than the recency cap):
-    declined entirely. This is the exact #129 harm — reopening whichever sibling
+    declined entirely. This is the exact wrong-session harm — reopening whichever sibling
     session was last active in the folder — so we inject NOTHING."""
     mod, cp_dir = measure
     stale = mod._RESUME_RECENCY_CAP_MIN + 120
@@ -185,7 +185,7 @@ def test_explicit_id_scopes_strictly(measure, monkeypatch):
 
 def test_explicit_id_no_match_returns_empty(measure, monkeypatch):
     """Naming an id with no on-disk checkpoint returns "" — never substitutes a
-    different session (the core #129 guarantee)."""
+    different session (the core cold-resume guarantee)."""
     mod, cp_dir = measure
     _write_checkpoint(cp_dir, _UUID_B, _sidecar(_UUID_B, "the beta task"), age_minutes=1)
     monkeypatch.setattr(mod, "_resume_topic_score", lambda text, path: 0.0)

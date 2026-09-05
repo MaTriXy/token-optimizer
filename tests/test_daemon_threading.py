@@ -135,7 +135,7 @@ def test_health_and_identity_routes_do_no_work():
     assert m, "/__to_ping does not answer from the IDENTITY_MAGIC constant"
 
 
-# --- #160 follow-up: bounded concurrency (structural) ------------------------
+# --- bounded concurrency (structural) ----------------------------------------
 
 def test_generated_daemon_bounds_worker_threads():
     """ThreadingTCPServer spawns one thread per connection with no cap.
@@ -385,8 +385,7 @@ def test_health_probe_is_not_blocked_during_regen(live_daemon):
     except (urllib.error.URLError, OSError) as e:
         live_daemon._stop()
         pytest.fail(
-            "health probe was blocked/timed out during a regen "
-            "regression: %r" % e
+            "health probe was blocked/timed out during a regen: %r" % e
         )
 
     assert elapsed < 2 * REGEN_STEP_SLEEP, (
@@ -406,7 +405,7 @@ def test_health_probe_is_not_blocked_during_regen(live_daemon):
 
 def test_overlapping_regen_is_refused(live_daemon):
     """A second POST /api/regenerate sent while the first is running must be
-    refused with 409 immediately. The _regen_inflight guard predates #160; the
+    refused with 409 immediately. The _regen_inflight guard predates the fix; the
     fix keeps it working under the threading server via _STATE_LOCK."""
     base = live_daemon.base
     token = live_daemon.token
@@ -473,7 +472,7 @@ def test_overlapping_regen_is_refused(live_daemon):
     )
 
 
-# --- #160 follow-up: bounded concurrency (live) ------------------------------
+# --- bounded concurrency (live) ----------------------------------------------
 
 def _daemon_config():
     """Read the worker cap + request timeout the generated daemon ships with, so

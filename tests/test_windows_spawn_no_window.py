@@ -1180,9 +1180,10 @@ def test_utf8_io_reexec_nt_keeps_create_no_window_when_stdout_not_tty(monkeypatc
 
 
 def test_utf8_io_reexec_nt_safe_when_stdout_lacks_fileno(monkeypatch):
-    """#105: if sys.stdout has no fileno (pytest capture, embedded hosts),
-    Popen must still be called (no exception escapes) and stdout simply
-    omitted from kwargs. A UTF-8 convenience re-exec must never crash the CLI."""
+    """The detach hardening: if sys.stdout has no fileno (pytest capture,
+    embedded hosts), Popen must still be called (no exception escapes) and
+    stdout simply omitted from kwargs. A UTF-8 convenience re-exec must never
+    crash the CLI."""
     u, cap, _ = _utf8_io_nt_reexec_env(monkeypatch, streams={"stdout": _NoFilenoStream()})
     u.reexec_in_utf8_mode()  # must not raise
     assert "argv" in cap, "Popen must still be called when a stream lacks fileno"
@@ -1200,10 +1201,10 @@ def test_utf8_io_reexec_nt_safe_when_stdout_none(monkeypatch):
 
 
 def test_utf8_io_reexec_nt_flushes_stdout_stderr_before_popen(monkeypatch):
-    """#105: parent stdout/stderr must be flushed BEFORE the Popen spawn so
-    parent-buffered text does not interleave behind the child's output (both
-    then write to the same fd). The post-wait flush is kept as a safety net,
-    not as the only flush."""
+    """The spawn fix: parent stdout/stderr must be flushed BEFORE the Popen
+    spawn so parent-buffered text does not interleave behind the child's
+    output (both then write to the same fd). The post-wait flush is kept as a
+    safety net, not as the only flush."""
     order = []
     class _OrderStream:
         def __init__(self, tag):

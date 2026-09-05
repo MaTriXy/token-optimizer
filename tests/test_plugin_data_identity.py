@@ -19,7 +19,7 @@ HOOKS = REPO / "hooks"
 
 def _load_run_py():
     """Load hooks/run.py as an isolated module (it is a script, not a package)."""
-    spec = importlib.util.spec_from_file_location("run_py_under_test_140", HOOKS / "run.py")
+    spec = importlib.util.spec_from_file_location("run_py_under_test_identity_review", HOOKS / "run.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -134,7 +134,7 @@ def test_legitimate_claude_plugin_data_still_accepted(monkeypatch, tmp_path):
 
 
 def test_dedicated_var_wins_over_valid_claude_plugin_data(monkeypatch, tmp_path):
-    """#140 review follow-up: TOKEN_OPTIMIZER_PLUGIN_DATA must win even when
+    """Plugin-data review follow-up: TOKEN_OPTIMIZER_PLUGIN_DATA must win even when
     CLAUDE_PLUGIN_DATA ALSO resolves to a valid REGISTERED identity (the
     common in-plugin hook case). Pre-fix, the single for-loop iterated
     CLAUDE_PLUGIN_DATA first and returned on the first match, so a valid
@@ -167,7 +167,7 @@ def test_dedicated_var_wins_over_valid_claude_plugin_data(monkeypatch, tmp_path)
 
 
 def test_dedicated_var_rejects_shared_base_root(monkeypatch, tmp_path):
-    """#140 review follow-up: TOKEN_OPTIMIZER_PLUGIN_DATA pointed straight at
+    """Plugin-data review follow-up: TOKEN_OPTIMIZER_PLUGIN_DATA pointed straight at
     the shared plugins/data ROOT (not a real per-plugin subdir) must be
     rejected. is_relative_to() returns True on equal paths, so without an
     explicit inequality check the root itself would pass confinement --
@@ -248,7 +248,7 @@ def test_resolve_claude_plugin_data_env_accepts_registered(monkeypatch, tmp_path
 
 
 def test_run_py_consent_rejects_foreign_claude_plugin_data(monkeypatch, tmp_path):
-    """#140 sibling site: hooks/run.py's consent read (hooks/run.py:119) used
+    """Plugin-data review sibling site: hooks/run.py's consent read (hooks/run.py:119) used
     to trust raw CLAUDE_PLUGIN_DATA with no identity check. A foreign
     plugin's CLAUDE_PLUGIN_DATA -- same shared plugins/data root, but an
     UNREGISTERED identity -- must not misdirect the consent read into that
@@ -342,7 +342,7 @@ def test_run_py_consent_accepts_registered_claude_plugin_data(monkeypatch, tmp_p
 
 
 def test_cache_instability_state_dir_rejects_foreign_claude_plugin_data(monkeypatch, tmp_path):
-    """#140 sibling site: detectors/cache_instability.py's _state_dir()
+    """Plugin-data review sibling site: detectors/cache_instability.py's _state_dir()
     (line ~93) WRITES detector state -- the worst of the sibling sites, since
     a leaked CLAUDE_PLUGIN_DATA there doesn't just misread, it misdirects a
     WRITE into another plugin's directory. A foreign, unregistered
@@ -409,7 +409,7 @@ def test_cache_instability_state_dir_accepts_registered_claude_plugin_data(monke
 
 
 def test_refetch_guard_renderability_read_is_capped(monkeypatch, tmp_path):
-    """#140 review P2: _entry_is_renderable() used to fh.read() the WHOLE
+    """Plugin-data review P2: _entry_is_renderable() used to fh.read() the WHOLE
     archive entry file (up to ~5MB, the archive_result.py entry ceiling)
     before json.loads -- uncapped on this hot PreToolUse path. Proves the cap
     is applied BEFORE parsing: with the cap patched down to a small value, an
@@ -666,7 +666,7 @@ def test_archive_result_post_prune_serves_full_result(monkeypatch, tmp_path):
 
 
 def test_bash_compress_post_prune_serves_full_result_not_lossy(monkeypatch, tmp_path, capsys):
-    """#140 review P0 (data loss): when the archived Bash entry is pruned by a
+    """Plugin-data review P0 (data loss): when the archived Bash entry is pruned by a
     concurrent retention pass right after write, bash_compress.py's main()
     fallback used to clear the archive key but keep serving the LOSSY
     `compressed` preview -- the untouched full raw command output was in

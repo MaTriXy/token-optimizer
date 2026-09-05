@@ -38,7 +38,7 @@ def _reset_pricing_cache():
 
 
 # ---------------------------------------------------------------------------
-# #148 — the install manifest must include spawn_utils.py
+# The install manifest must include spawn_utils.py
 # ---------------------------------------------------------------------------
 
 def test_148_hermes_install_ships_spawn_utils():
@@ -126,7 +126,7 @@ def _base_row(**over):
 
 
 # ---------------------------------------------------------------------------
-# #149 — scan() reads real rows
+# scan() reads real rows
 # ---------------------------------------------------------------------------
 
 def test_149_scan_reads_sessions(hermes_home):
@@ -209,7 +209,7 @@ def test_149_scan_tolerates_missing_columns(hermes_home):
 
 
 # ---------------------------------------------------------------------------
-# #150 — unpriced models keep DB cost; pricing helper; warning surfaces
+# Unpriced models keep DB cost; pricing helper; warning surfaces
 # ---------------------------------------------------------------------------
 
 def test_150_model_is_priced_distinguishes_unknown_from_free():
@@ -315,7 +315,7 @@ def test_150_scan_command_warns_on_unpriced_zero_cost(hermes_home, tmp_path, mon
 
 
 def test_150_dashboard_flags_unpriced_models(tmp_path, monkeypatch):
-    # The dashboard is the surface #150 names: it must NOT present unpriced runs'
+    # The dashboard is the surface the pricing guard names: it must NOT present unpriced runs'
     # $0 as a real total — it renders a banner and marks Total Cost understated.
     fd = tmp_path / "fleetdb"
     fd.mkdir()

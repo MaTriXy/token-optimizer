@@ -1,7 +1,7 @@
-"""#107 regressions: the sticky marker, the Windows heal, and the
+"""No-flash-fix regressions: the sticky marker, the Windows heal, and the
 interpreter-resolution hardening.
 
-The first #107 fix introduced a self-heal whose failure modes were worse than
+The first no-flash fix introduced a self-heal whose failure modes were worse than
 the bug (lanes T1/T2/T3/T5/T7). This file
 pins the hardened behavior:
 
@@ -13,7 +13,7 @@ Cluster A -- the sticky ``.daemon-install-failed`` marker:
   * cleared by any later VERIFIED success, not only manual setup-daemon;
   * visible: ensure-health prints the wedge + remedy, doctor has a check.
 
-Cluster B -- the heal must not make #107 worse:
+Cluster B -- the heal must not make the no-flash concern worse:
   * a failed heal never compensate-/Runs an action still classified as a
     console flasher (that /Run IS an extra flash per session);
   * the restore runs from a ``finally`` (a RAISING installer must not strand
@@ -378,7 +378,7 @@ def test_doctor_has_a_daemon_check():
 
 
 # ---------------------------------------------------------------------------
-# Cluster B -- the heal must not make #107 worse
+# Cluster B -- the heal must not make the no-flash concern worse
 # ---------------------------------------------------------------------------
 def test_heal_restore_runs_in_finally_even_when_installer_raises(
         m, monkeypatch):
