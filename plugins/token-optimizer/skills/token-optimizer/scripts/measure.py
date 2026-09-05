@@ -9812,8 +9812,8 @@ def _parse_session_jsonl(filepath):
                 # orchestrator session that merely *watches* a delegate (running
                 # `outsourcerer.sh status/watch/result`, whose output echoes
                 # OSRC::PROGRESS) was itself misfiled as the delegation. That
-                # mislabelled 234 of Alex's sessions holding 57% of all input
-                # tokens -- her longest human working sessions -- and pulled them
+                # mislabelled 234 of a user's sessions holding 57% of all input
+                # tokens -- the longest human working sessions -- and pulled them
                 # out of the human pool the cost comparison runs on.
                 #
                 # Only `type == "user"` records count, and within them only real
