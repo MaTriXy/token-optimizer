@@ -33164,7 +33164,7 @@ def _collapse_hook_stdout(text, event="SessionStart"):
         payload["systemMessage"] = "\n\n".join(system_messages)
     if contexts:
         payload["hookSpecificOutput"] = {
-            "hookEventName": "SessionStart" if event != "SessionStart" else event,
+            "hookEventName": event,
             "additionalContext": "\n\n".join(contexts),
         }
     if not payload:
