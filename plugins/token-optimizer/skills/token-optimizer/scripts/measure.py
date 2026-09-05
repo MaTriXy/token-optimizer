@@ -33729,7 +33729,7 @@ def _sanitize_sidecar_text(value, limit=400):
 
 # File-path words carry a checkpoint's project identity. Real checkpoints store
 # identity in the DIRECTORY segments of their file paths, e.g.
-# .../clients/meridian/.../meridian-competitor-monitor/reports/2026-08-11__BRIEF.html
+# .../projects/meridian/.../meridian-competitor-monitor/reports/2026-08-11__BRIEF.html
 # -- the distinctive words (meridian, competitor, monitor) live in the dirs, not the
 # basename. Split the WHOLE path (dirs AND basename) on / \ - _ . : and whitespace
 # so that path -> {clients, meridian, competitor, monitor, reports, ...} and a

@@ -4,8 +4,8 @@
 `plugins/token-optimizer/skills/token-optimizer/scripts/` ship the same files to
 different install paths. Nothing in the build copies one to the other, so a fix
 applied to one copy and not the other is invisible until a user on the other
-install path reports the bug a second time. measure.py alone is ~35k lines; no
-reviewer catches that drift by eye.
+install path reports the bug a second time. measure.py alone is ~35k lines;
+that drift is silent under a manual diff.
 
 This converts the invariant from discipline into a red test.
 

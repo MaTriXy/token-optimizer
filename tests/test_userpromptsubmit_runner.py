@@ -543,7 +543,7 @@ def _install_consent_recorder(monkeypatch, runner, write_flags_on_health):
 
 
 def test_consent_false_cowork_bootstraps_then_flips(monkeypatch, tmp_path):
-    """Regression (the Cowork-fatal path). With consent False (config.json
+    """Regression (the path that breaks under Cowork). With consent False (config.json
     holds an explicit opt-out, enterprise_consent_shown: false) and the Cowork
     harness guard active (CLAUDE_CODE_REMOTE
     set, no SessionStart to bootstrap out-of-band), the runner MUST still run

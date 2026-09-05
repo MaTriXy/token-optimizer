@@ -92,7 +92,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
             self._reply(404, {"ok": False})
 
     def do_POST(self) -> None:  # noqa: N802 - http.server API
-        # SECURITY TODO (finding 14): this write surface is unauthenticated —
+        # SECURITY TODO: this write surface is unauthenticated —
         # anything POSTed here becomes billing rows. Auth/allowlist is enforced
         # at the org edge (reverse proxy / shared secret) and must stay there;
         # do not treat this endpoint as trusted.
@@ -180,7 +180,7 @@ def _iter_events(data_dir: Path):
         for path in sorted(data_dir.glob("otlp-logs*.jsonl")):
             tally["files"].append(path.name)
             # Stream line-by-line rather than read_text() the whole file: a
-            # multi-GB capture must not OOM the ingest (finding 14). An
+            # multi-GB capture must not OOM the ingest. An
             # individual over-long line is skipped, not buffered.
             try:
                 fh = path.open(encoding="utf-8", errors="replace")
@@ -235,7 +235,7 @@ def _int(value: Any) -> int:
 def _as_utc(dt: datetime) -> datetime:
     """Force a datetime to aware UTC. `fromisoformat` on a zoneless string
     yields a naive datetime; comparing it against the aware UTC datetimes from
-    timeUnixNano raises TypeError and kills the run (finding 13). Naive input is
+    timeUnixNano raises TypeError and kills the run. Naive input is
     assumed UTC (the exporter emits UTC); aware input is converted."""
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
@@ -282,7 +282,7 @@ def parse_cowork_sessions(data_dir: Path) -> tuple[dict[str, dict[str, Any]], di
     # session key, not on individual events, so an OTLP client retry after a
     # slow-but-200 reply, log rotation, or a second otlp-logs* file would union
     # identical events into the sum and inflate tokens/cost. A
-    # (session, time, model, tokens) seen-set collapses replays (finding 9).
+    # (session, time, model, tokens) seen-set collapses replays.
     seen_events: set = set()
 
     for merged, receipt_ts in events:
@@ -474,7 +474,7 @@ def ingest(data_dir: Path, measure_path: str | None = None, db_override: str | N
     try:
         for sid, s in sorted(sessions.items()):
             jsonl_path = f"cowork:{sid}"
-            # Cross-source double-count guard (finding 6): TO's own Stop hook
+            # Cross-source double-count guard: TO's own Stop hook
             # fires inside Cowork and writes a platform='claude' row keyed by the
             # in-VM transcript path but carrying this same session_uuid. If such a
             # row already exists under a non-cowork platform, ingesting the OTel
@@ -517,7 +517,7 @@ def ingest(data_dir: Path, measure_path: str | None = None, db_override: str | N
             # would inflate the sum ~linearly with call count; until a captured
             # payload proves per-request deltas, accept the reported value only
             # when it lands within a sane multiple of derived, and never accept a
-            # negative (findings 12, 15a).
+            # negative.
             derived = measure._cost_from_model_breakdown(bd)
             reported = s["reported_cost_usd"]
             row_unpriced = [m for m in bd if not measure._is_priced_model(m)]
@@ -542,7 +542,7 @@ def ingest(data_dir: Path, measure_path: str | None = None, db_override: str | N
 
             # OTel carries no cache-TTL split; attribute all cache_create to the
             # 5m column (the derived-cost path prices it at the 5m rate) instead
-            # of hardcoding both TTL columns to 0 (finding 23b).
+            # of hardcoding both TTL columns to 0.
             try:
                 cur = conn.execute(
                     """INSERT INTO session_log
@@ -599,15 +599,14 @@ def ingest(data_dir: Path, measure_path: str | None = None, db_override: str | N
             measure._rebuild_aggregate_tables(conn)
         conn.commit()
         # Match hermes/copilot: stamp the schema version so a DB first created by
-        # an ingest run doesn't trip the next Claude collect into a full rebuild
-        # (finding 15c).
+        # an ingest run doesn't trip the next Claude collect into a full rebuild.
         try:
             conn.execute("PRAGMA user_version = 3")
             conn.commit()
         except sqlite3.Error:
             pass
         # Read back the SPECIFIC rows written this run, not every cowork row ever
-        # (finding 15b) — the latter passes even when this run wrote nothing.
+        # — the latter passes even when this run wrote nothing.
         if written_paths:
             placeholders = ",".join("?" for _ in written_paths)
             check = conn.execute(
@@ -693,7 +692,7 @@ def cost_view(measure_path: str | None = None, db_override: str | None = None,
 
     # Build the read-only URI with Path.as_uri() so a db path containing spaces,
     # '?', '#', or other URI-significant characters is escaped correctly instead
-    # of string-interpolated (finding 23g).
+    # of string-interpolated.
     ro_uri = f"{Path(db).resolve().as_uri()}?mode=ro"
     conn = sqlite3.connect(ro_uri, uri=True)
     try:

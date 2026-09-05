@@ -364,7 +364,7 @@ def test_double_fire_denies_first_read_as_redundant(tmp_path):
             f"First fire should not deny a first-ever read, got: {parsed1}"
         )
 
-    # Fire #2: SAME tool call (same tool_use_id). This is the damage scenario:
+    # Fire #2: SAME tool call (same tool_use_id). This is the failure scenario:
     # the double-hook registration makes the same PreToolUse/Read fire twice.
     # Without the guard, the second fire sees the cache entry from fire #1 and denies
     # the read as "redundant" -- even though the user has never actually read

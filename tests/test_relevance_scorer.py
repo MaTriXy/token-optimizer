@@ -107,7 +107,7 @@ def test_generic_word_only_overlap_stays_low(m, tmp_path):
     # Directory names are deliberately NON-topical (alpha/beta/gamma) so the
     # prompt word "project" genuinely misses every doc. The scorer now splits
     # path DIRECTORY segments into topic words (a real checkpoint's identity
-    # lives in its dirs, e.g. clients/meridian/...), so a dir literally named
+    # lives in its dirs, e.g. projects/meridian/...), so a dir literally named
     # "project-*" would inject "project" into the docs and defeat the very point
     # of this test -- that a generic word carries no signal.
     cp_a = _write_cp(tmp_path, "aaaa1111-20260811-120000-checkpoint.md",
@@ -164,7 +164,7 @@ def test_bare_continue_stale_unrelated_pool_below_threshold(m, tmp_path):
     stale_age = 60 * 60 * 12  # 12h, well past the recency prior window
     cp = _write_cp(tmp_path, "aaaa1111-20260811-000000-checkpoint.md",
                    active_task="unrelated marketing audit work",
-                   modified_files=["clients/acme/audit.md"],
+                   modified_files=["projects/acme/audit.md"],
                    age_seconds=stale_age)
     score = m.checkpoint_relevance_score("continue", cp, pool=[cp])
     assert score < m.CHECKPOINT_RELEVANCE_THRESHOLD, (
@@ -287,16 +287,16 @@ def test_threshold_constant_exposed(m):
 
 def _meridian_cp(tmp_path, name="aaaa1111-20260812-120000-checkpoint.md"):
     """A meridian client checkpoint whose identity lives ONLY in path dirs, with a
-    real clients/<x>/Retainer-Deliverables/... skeleton and a /compact active_task
+    real projects/<x>/... skeleton and a /compact active_task
     (mirrors the real meridian checkpoint whose active_task is literally '/compact')."""
     return _write_cp(
         tmp_path, name, active_task="/compact",
         modified_files=[
-            "clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/scripts/monitor.py",
-            "clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/reports/2026-08-11__BRIEF.html",
-            "clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/competitor.md"],
+            "projects/meridian/data-files/meridian-competitor-monitor/scripts/monitor.py",
+            "projects/meridian/data-files/meridian-competitor-monitor/reports/2026-08-11__BRIEF.html",
+            "projects/meridian/data-files/meridian-competitor-monitor/references/competitor.md"],
         recent_reads=[
-            "clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/config/monitor.json"])
+            "projects/meridian/data-files/meridian-competitor-monitor/config/monitor.json"])
 
 
 def _acme_cp(tmp_path, name="bbbb2222-20260812-120100-checkpoint.md"):
@@ -305,11 +305,11 @@ def _acme_cp(tmp_path, name="bbbb2222-20260812-120100-checkpoint.md"):
     return _write_cp(
         tmp_path, name, active_task="/compact",
         modified_files=[
-            "clients/acme/Retainer-Deliverables/acme-pricing-tracker/scripts/tracker.py",
-            "clients/acme/Retainer-Deliverables/acme-pricing-tracker/reports/2026-08-11__BRIEF.html",
-            "clients/acme/Retainer-Deliverables/acme-pricing-tracker/references/pricing.md"],
+            "projects/acme/data-files/acme-pricing-tracker/scripts/tracker.py",
+            "projects/acme/data-files/acme-pricing-tracker/reports/2026-08-11__BRIEF.html",
+            "projects/acme/data-files/acme-pricing-tracker/references/pricing.md"],
         recent_reads=[
-            "clients/acme/Retainer-Deliverables/acme-pricing-tracker/config/tracker.json"])
+            "projects/acme/data-files/acme-pricing-tracker/config/tracker.json"])
 
 
 # --- R2-A: universal multi-client fix. Two clients, SHARED structure. Each
@@ -414,7 +414,7 @@ def test_pasted_path_matches_right_not_wrong(m, tmp_path):
     acme = _acme_cp(tmp_path)
     pool = [meridian, acme]
     TH = m.CHECKPOINT_RELEVANCE_THRESHOLD
-    pasted = ("continue /Users/dev/work/clients/meridian/Retainer-Deliverables/"
+    pasted = ("continue /Users/dev/work/projects/meridian/data-files/"
               "meridian-competitor-monitor/reports/2026-08-11__BRIEF.html")
     spoken = "continue working on the meridian competitor monitor"
     ps = m.checkpoint_relevance_score(pasted, meridian, pool=pool)
@@ -446,10 +446,10 @@ def test_stoplist_named_project_still_resumes(m, tmp_path):
         tmp_path, "bbbb2222-20260812-120000-checkpoint.md",
         active_task="/compact",
         modified_files=[
-            "/Users/dev/work/clients/meridian/Retainer-Deliverables/"
+            "/Users/dev/work/projects/meridian/data-files/"
             "meridian-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html"],
         recent_reads=[
-            "/Users/dev/work/clients/meridian/Retainer-Deliverables/"
+            "/Users/dev/work/projects/meridian/data-files/"
             "meridian-company-brain/SKILL.md"])
     # unrelated distractor so the pool has >1 doc
     other = _write_cp(tmp_path, "cccc3333-20260812-120000-checkpoint.md",

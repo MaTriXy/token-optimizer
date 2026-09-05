@@ -11,8 +11,8 @@ until a user on the other install path sees a stale dashboard.
 This is not hypothetical: in v5.11.79 the savings-card fix edited
 skills/.../assets/dashboard.html but not its plugins/ mirror. The scripts-only
 byte-identity test stayed green, and the drift was caught only by the
-sign-release Codex-parity gate. dashboard.html is ~9k lines; no reviewer catches
-that drift by eye. This converts the invariant from discipline into a red test
+sign-release Codex-parity gate. dashboard.html is ~9k lines; that drift is
+silent under a manual diff. This converts the invariant from discipline into a red test
 that fails at edit time, before the tag.
 
 Intentional one-sided files are listed in ONE_SIDED.

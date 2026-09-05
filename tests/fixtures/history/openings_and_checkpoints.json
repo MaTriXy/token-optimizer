@@ -1,5 +1,5 @@
 {
-  "_comment": "Checkpoint fixtures for resume/fresh locking, rebuilt 2026-08-11 from ~/.claude/token-optimizer/checkpoints/*.md (50 files). REPLACES the earlier synthetic set whose checkpoints carried clean project-named active_task fields -- that fantasy is exactly what hid the path-identity bug (analysis-notes.md): real checkpoints store project identity in the DIRECTORY segments of modified_files/recent_reads paths (clients/meridian/.../meridian-competitor-monitor, PROJECTS/focus-tracker, PROJECTS/token-optimizer + the token-optimizer plugin tree), while active_task is messy voice-transcript prose that does NOT name the project. The scorer must recover identity from paths, not active_task. active_task/decisions here are lightly paraphrased from the original files (PII/secrets stripped, kept distinct per checkpoint so the replay winner-mapping is deterministic); the file PATHS preserve the same directory-segment structure. Incidents are labeled by their scenario name.",
+  "_comment": "Checkpoint fixtures for resume/fresh locking. Real checkpoints store project identity in the DIRECTORY segments of modified_files/recent_reads paths (projects/meridian/.../meridian-competitor-monitor, PROJECTS/focus-tracker, PROJECTS/token-optimizer + the token-optimizer plugin tree), while active_task is messy voice-transcript prose that does NOT name the project. The scorer must recover identity from paths, not active_task. active_task/decisions here are paraphrased (PII/secrets stripped, kept distinct per checkpoint so the replay winner-mapping is deterministic); the file PATHS preserve the directory-segment structure the scorer relies on. Incidents are labeled by their scenario name.",
   "resume_openings": [
     {
       "id": "resume-meridian-monitor",
@@ -68,15 +68,15 @@
         "draft a self-contained scan prompt so everything is connected"
       ],
       "modified_files": [
-        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/07-market-sweep.md",
-        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html",
-        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/scripts/build_cloud_prompt.py",
-        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/09-environments.md"
+        "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/references/07-market-sweep.md",
+        "/Users/dev/work/projects/meridian/data-files/meridian-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html",
+        "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/scripts/build_cloud_prompt.py",
+        "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/references/09-environments.md"
       ],
       "recent_reads": [
-        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/SKILL.md",
-        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/06-scheduling.md",
-        "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/config/competitors.json"
+        "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/SKILL.md",
+        "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/references/06-scheduling.md",
+        "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/config/competitors.json"
       ],
       "trigger": "milestone-edit-batch",
       "age_seconds": 600
@@ -90,13 +90,13 @@
         "the tests are green because they test the function in isolation"
       ],
       "modified_files": [
-        "/Users/dev/work/os/PROJECTS/token-optimizer/sessions/2026-08-11_session-review/build/plans/2026-08-11-001-review-plan.md",
+        "/Users/dev/work/os/PROJECTS/token-optimizer/notes/plans/2026-08-11-001-review-plan.md",
         "/Users/dev/.claude/plugins/marketplaces/token-optimizer/REVIEW-DEFECTS.md",
         "/Users/dev/.claude/plugins/marketplaces/token-optimizer/plugins/token-optimizer/skills/token-optimizer/scripts/measure.py"
       ],
       "recent_reads": [
-        "/Users/dev/work/os/PROJECTS/token-optimizer/sessions/2026-08-11_session-review/build/analysis-notes.md",
-        "/Users/dev/work/os/PROJECTS/token-optimizer/sessions/2026-08-11_session-review/build/findings-notes.md"
+        "/Users/dev/work/os/PROJECTS/token-optimizer/notes/analysis-notes.md",
+        "/Users/dev/work/os/PROJECTS/token-optimizer/notes/findings-notes.md"
       ],
       "trigger": "quality-80",
       "age_seconds": 1200
@@ -184,7 +184,7 @@
       "issue": 61,
       "description": "Cross-project leak: a token-optimizer checkpoint must not surface in an unrelated marketing session. The cwd is a different project so the same-work bonus must not fire, and there is no topical overlap, so no pointer.",
       "prompt": "help me write a linkedin post about our marketing services",
-      "cwd": "/Users/dev/work/agency/clients/marketing-agency",
+      "cwd": "/Users/dev/work/projects/marketing",
       "checkpoints": [
         {
           "id": "cp-token-optimizer-unrelated",
@@ -268,7 +268,7 @@
     {
       "id": "incident-cross-client-false-positive",
       "issue": null,
-      "description": "Cross-client false positive: a resume-phrased prompt naming a DIFFERENT client ('competitor analysis for acme corp') grazes meridian's competitor-monitor checkpoint on the shared word 'competitor' only. Unmatched high-IDF tokens (acme, corp, analysis) are negative evidence -- the resume-intent bonus is scaled by precision (with a floor), so an incidental one-word overlap cannot ride the flat cue over threshold. Guards the multi-client regime where two clients share the clients/<x>/Retainer-Deliverables/ path shape.",
+      "description": "Cross-client false positive: a resume-phrased prompt naming a DIFFERENT client ('competitor analysis for acme corp') grazes meridian's competitor-monitor checkpoint on the shared word 'competitor' only. Unmatched high-IDF tokens (acme, corp, analysis) are negative evidence -- the resume-intent bonus is scaled by precision (with a floor), so an incidental one-word overlap cannot ride the flat cue over threshold. Guards the multi-client regime where two clients share the projects/<x>/ path shape.",
       "prompt": "continue working on the competitor analysis for acme corp",
       "expected": "no_match",
       "checkpoints": [
@@ -281,15 +281,15 @@
             "draft a self-contained scan prompt so everything is connected"
           ],
           "modified_files": [
-            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/07-market-sweep.md",
-            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html",
-            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/scripts/build_cloud_prompt.py",
-            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/09-environments.md"
+            "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/references/07-market-sweep.md",
+            "/Users/dev/work/projects/meridian/data-files/meridian-company-brain/competitor-monitor/reports/2026-08-11__BRIEF.html",
+            "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/scripts/build_cloud_prompt.py",
+            "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/references/09-environments.md"
           ],
           "recent_reads": [
-            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/SKILL.md",
-            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/references/06-scheduling.md",
-            "/Users/dev/work/agency/clients/meridian/Retainer-Deliverables/meridian-competitor-monitor/config/competitors.json"
+            "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/SKILL.md",
+            "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/references/06-scheduling.md",
+            "/Users/dev/work/projects/meridian/data-files/meridian-competitor-monitor/config/competitors.json"
           ],
           "trigger": "milestone-edit-batch",
           "age_seconds": 600
