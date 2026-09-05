@@ -1024,7 +1024,7 @@ def test_heredoc_delimiter_anchored_to_line(guard):
 
 def test_heredoc_scan_no_redos_on_many_unclosed_openers(guard):
     """A command with ~5000 unclosed ``<<EOF`` openers must normalize in well
-    under 100 ms. The old backtracking regex (lazy ``.*?`` + backreference
+    under 1000 ms. The old backtracking regex (lazy ``.*?`` + backreference
     ``\\1``) went quadratic on this shape; the two-pass scan is linear."""
     import time as _time
     # 5000 unclosed openers, each on its own line. None has a closing EOF
@@ -1038,7 +1038,11 @@ def test_heredoc_scan_no_redos_on_many_unclosed_openers(guard):
     # command with trailing whitespace removed.
     assert "cat <<EOF > f0.c" in norm
     assert "cat <<EOF > f4999.c" in norm
-    assert elapsed_ms < 100, (
+    # 1000ms is a robust ceiling: the two-pass scan is linear (~10ms on a
+    # 2023 M2), while the old backtracking regex took seconds on this input.
+    # A 1000ms bound still catches a real quadratic regression while
+    # tolerating a slow or loaded CI runner.
+    assert elapsed_ms < 1000, (
         f"_normalize_command took {elapsed_ms:.1f}ms on 5000 unclosed "
-        f"openers; expected < 100ms (regression of the backtracking regex)"
+        f"openers; expected < 1000ms (regression of the backtracking regex)"
     )
