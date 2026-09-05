@@ -1,6 +1,6 @@
 """U6 — real-history test harness: resume-lock + fresh-lock + incident fixtures.
 
-Locks both directions against Alex's real sessions (R6). A scorer change that
+Locks both directions against real sessions. A scorer change that
 drops resume recall fails CI; a change that surfaces on fresh fails CI.
 
 Fixtures: tests/fixtures/history/openings_and_checkpoints.json -- sanitized real
