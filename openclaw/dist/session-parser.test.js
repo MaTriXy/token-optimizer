@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 /**
- * Regression test for the OpenClaw nested-role session format (#115).
+ * Regression test for the OpenClaw nested-role session format.
  *
  * OpenClaw writes conversation lines as { type: "message", message: { role } }
  * with the role NESTED, plus type:"session"/"compaction"/"reset" markers
@@ -89,7 +89,7 @@ const OPENCLAW_LINES = [
         },
     },
 ];
-(0, bun_test_1.test)("parseSession reads the OpenClaw nested-role format (#115 regression)", () => {
+(0, bun_test_1.test)("parseSession reads the OpenClaw nested-role format (regression)", () => {
     const p = writeSession("sess-1.jsonl", OPENCLAW_LINES);
     const run = (0, session_parser_1.parseSession)(p, "agent-a", dir);
     // Pre-fix this was null (messageCount stayed 0 -> early return).

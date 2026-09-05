@@ -995,7 +995,7 @@ function renderSavings(data) {
         ? `<span style="font-size:28px;color:var(--c-accent-cyan);font-family:var(--font-mono)">&minus;${(s.transformationPct * 100).toFixed(0)}%</span>`
         : "";
     // Cache-reuse split: shown only when the arms differ, so identical tokens+mix with a
-    // different per-session cost is explainable rather than looking impossible (#87 contra #1).
+    // different per-session cost is explainable rather than looking impossible (cache-reuse arm contra cache-miss arm).
     const cacheLine = Math.round(s.beforeCacheHit * 100) !== Math.round(s.afterCacheHit * 100)
         ? ` &middot; ${Math.round(s.beforeCacheHit * 100)}% &rarr; ${Math.round(s.afterCacheHit * 100)}% cache reuse`
         : "";

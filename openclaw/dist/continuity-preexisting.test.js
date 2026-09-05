@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 /**
- * Pre-existing continuity bug surfaced by the #127 torture-room gauntlet (OpenClaw).
+ * Pre-existing continuity bug surfaced alongside the i18n fix (OpenClaw).
  * Not caused by the i18n change; fixed alongside it at Alex's request.
  */
 const bun_test_1 = require("bun:test");

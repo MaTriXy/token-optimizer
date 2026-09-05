@@ -1,5 +1,5 @@
 /**
- * GitHub #103 — per-project scoping for the lean resume block.
+ * Per-project scoping for the lean resume block.
  *
  * A two-project checkpoint leaks project A's Key Decisions into project B's
  * hint because the checkpoint's session-wide fields are dumped verbatim once

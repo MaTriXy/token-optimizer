@@ -106,7 +106,7 @@ export function platformDataDir(host: HostContext = hostContext()): string {
  *   1. explicit config.dataDir / TOKEN_OPTIMIZER_DATA_DIR -> used VERBATIM.
  *   2. nothing set -> platform-global location + `token-optimizer/`.
  *
- * Verbatim is the whole point of #94: what you type is where data goes, leaf
+ * Verbatim is the whole point: what you type is where data goes, leaf
  * name and all. Set `.opencode/token-optimizer` and that is the folder; set
  * `.token-optimizer` and you get a hidden folder with that exact name. The old
  * behaviour force-appended `token-optimizer`, so the dotted name the user asked

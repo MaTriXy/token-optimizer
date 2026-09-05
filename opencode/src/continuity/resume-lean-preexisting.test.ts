@@ -1,5 +1,5 @@
 /**
- * Pre-existing continuity bugs surfaced by the #127 torture-room gauntlet (OpenCode).
+ * Pre-existing continuity bugs surfaced alongside the i18n fix (OpenCode).
  * Not caused by the i18n change; fixed alongside it at Alex's request.
  */
 import { test, expect } from "bun:test";

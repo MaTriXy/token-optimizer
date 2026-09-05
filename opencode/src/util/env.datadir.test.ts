@@ -1,7 +1,7 @@
 /**
  * Tests for global data-dir resolution and project slugging.
  *
- * Origin: reported by @cawa0505 in #90 (data was written into the user's project
+ * Origin: reported by @cawa0505 (data was written into the user's project
  * directory, polluting repos and preventing cross-project trend aggregation).
  * This implementation is independent; the tests pin the behaviours that review
  * of that report identified as risky.
@@ -106,16 +106,16 @@ test("BRANCH env override is read from the injected host, not the real process",
   );
 });
 
-// --- resolveDataDir: explicit path is honored VERBATIM (#94) ---------------
+// --- resolveDataDir: explicit path is honored VERBATIM ---------------
 
-test("#94: an explicit dataDir is used exactly as typed, no leaf appended", () => {
-  // The whole point of #94: what the user types is where data goes.
+test("an explicit dataDir is used exactly as typed, no leaf appended", () => {
+  // The whole point: what the user types is where data goes.
   expect(resolveDataDir({ dataDir: "/data/token-optimizer" })).toBe("/data/token-optimizer");
   expect(resolveDataDir({ dataDir: ".opencode/token-optimizer" })).toBe(".opencode/token-optimizer");
 });
 
-test("#94: a hidden/dotted leaf is reachable, not nested under token-optimizer", () => {
-  // The exact request in #94. The old force-append produced
+test("a hidden/dotted leaf is reachable, not nested under token-optimizer", () => {
+  // The exact request. The old force-append produced
   // `.token-optimizer/token-optimizer/`, so the dotted name was unreachable.
   expect(resolveDataDir({ dataDir: ".token-optimizer" })).toBe(".token-optimizer");
 });

@@ -1,5 +1,5 @@
 /**
- * GitHub #127 — session continuity blind to non-English prompts (OpenClaw).
+ * Session continuity blind to non-English prompts (OpenClaw).
  *
  * Mirrors the Python measure.py fix: the topic tokenizer is a two-branch class
  * (ASCII/accented-Latin run OR a whole non-ASCII run) so Korean/Chinese/Japanese
@@ -17,14 +17,14 @@ import i18nFixtureJson from "../../tests/fixtures/i18n_topic_score_parity.json";
 type Row = { name: string; prompt: string; checkpoint: string; expect_match: boolean; why: string };
 const I18N_FIXTURE = i18nFixtureJson as Row[];
 
-test("resumeTopicScore matches the shared i18n parity fixture (#127)", () => {
+test("resumeTopicScore matches the shared i18n parity fixture", () => {
   for (const row of I18N_FIXTURE) {
     const score = resumeTopicScore(row.prompt, row.checkpoint);
     expect(score > 0).toBe(row.expect_match);
   }
 });
 
-test("keywordRelevanceScore matches the shared i18n parity fixture (#127)", () => {
+test("keywordRelevanceScore matches the shared i18n parity fixture", () => {
   // Third changed site, live in cross-session scoring. Pass checkpoint as precomputedContent
   // so no file I/O is needed. Same rows, same verdicts as Python + resumeTopicScore.
   for (const row of I18N_FIXTURE) {

@@ -18,7 +18,7 @@ export function createDashboardTool(
 
       try {
         // Roll live sessions into trends.db first so the dashboard is never
-        // empty just because no session-end event has fired yet (#54).
+        // empty just because no session-end event has fired yet.
         try {
           onBeforeGenerate?.();
         } catch (err) {
@@ -35,7 +35,7 @@ export function createDashboardTool(
         } else if (platform === "linux") {
           try { execFileSync("xdg-open", [outputPath], hide); } catch { execFileSync("sensible-browser", [outputPath], hide); }
         } else if (platform === "win32") {
-          // #107: NOT `cmd /c start "" <path>`. That hands the path to cmd.exe's
+          // NOT `cmd /c start "" <path>`. That hands the path to cmd.exe's
           // parser, and libuv's quote_cmd_arg quotes an argument only on
           // space/tab/quote -- never on & ^ | ( ). `&` is a legal Windows
           // account-name character, so C:\Users\R&D\...\dashboard.html arrived

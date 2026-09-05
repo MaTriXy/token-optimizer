@@ -24,13 +24,13 @@
  */
 /** Minimum relevance score to emit a hint. Python default: 0.3 */
 export declare const RELEVANCE_THRESHOLD: number;
-/** Set-overlap keep/drop rule (GitHub #103). KEEP iff < 3 distinctive tokens
+/** Set-overlap keep/drop rule. KEEP iff < 3 distinctive tokens
  *  (inconclusive) OR nonempty intersection with keepTokens; DROP iff >= 3
  *  tokens AND zero overlap. No float threshold. Exported for the parity
  *  fixture test. */
 export declare function keepRecoveredItem(itemText: string, keepTokens: Set<string>): boolean;
 /** True when file path ``p`` is an attributable absolute path that does NOT
- *  live under ``cwd`` — a cross-project file (GitHub #103). The set-overlap
+ *  live under ``cwd`` — a cross-project file. The set-overlap
  *  tokenizer treats a full path as a SINGLE token (the regex includes slashes)
  *  so it has < 3 distinctive tokens and would always be kept by
  *  ``keepRecoveredItem``; this rule drops such paths at the file-filter sites

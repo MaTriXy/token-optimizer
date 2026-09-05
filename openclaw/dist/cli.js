@@ -387,7 +387,7 @@ function cmdDashboard(days) {
     }
     console.log(`Dashboard written to: ${filepath}`);
     const openFailed = (err) => {
-        // #107 shipped unnoticed for months because this callback was a noop. Any
+        // The no-op opener callback shipped unnoticed for months. Any
         // opener failure now names itself and tells the user what to open by hand.
         if (err) {
             console.error(`Could not open a browser (${err.message}). Open manually: ${filepath}`);
@@ -395,7 +395,7 @@ function cmdDashboard(days) {
     };
     // Open in default browser.
     //
-    // #107 history, both wrong shapes:
+    // No-flash history, both wrong shapes:
     //  1. the opener was the bare string "start", but `start` is a cmd.exe
     //     BUILTIN -- there is no start.exe -- so execFile failed with ENOENT and
     //     the browser never opened (swallowed by the old noop callback);

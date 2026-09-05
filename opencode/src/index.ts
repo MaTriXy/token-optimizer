@@ -87,7 +87,7 @@ interface SessionState {
   // as a response streams, so we keep the LAST value per id (final usage) and
   // sum across distinct ids at rollup — mirrors measure.py's per-requestId MAX
   // dedup. OpenCode hooks expose usage nowhere except the message.updated event,
-  // so this map is the only place session token/cost totals can come from (#54).
+  // so this map is the only place session token/cost totals can come from.
   usageByMessage: Map<string, MsgUsage>;
 }
 
@@ -176,7 +176,7 @@ export const TokenOptimizerPlugin: Plugin = async (
    * aggregation that the dashboard reads from. It MUST be called from a trigger
    * that actually fires (session.idle, eviction, dashboard open) and not rely
    * solely on session.deleted, which OpenCode does not reliably emit on a
-   * normal session exit (#54). recordSession() is an idempotent upsert keyed on
+   * normal session exit. recordSession() is an idempotent upsert keyed on
    * session_id, so calling this repeatedly just refreshes the row in place.
    */
   function flushSession(sessionId: string, state: SessionState): void {
@@ -211,7 +211,7 @@ export const TokenOptimizerPlugin: Plugin = async (
   /**
    * Flush every live session before the dashboard renders, so the user always
    * sees their current sessions even if no session.idle / session.deleted has
-   * fired yet. This is the safety net that makes the dashboard non-empty (#54).
+   * fired yet. This is the safety net that makes the dashboard non-empty.
    */
   function flushAllLiveSessions(): void {
     for (const [sid, state] of sessions) flushSession(sid, state);
@@ -686,7 +686,7 @@ export const TokenOptimizerPlugin: Plugin = async (
 
         // Capture per-response token usage. This is the ONLY hook that carries
         // it; the plugin previously discarded message.updated entirely, leaving
-        // session_log.tokens_* / cost_usd / model NULL on OpenCode (#54).
+        // session_log.tokens_* / cost_usd / model NULL on OpenCode.
         if (event.type === "message.updated") {
           const info = (event as MessageUpdatedEvent).properties?.info;
           if (info && info.role === "assistant") {
@@ -709,7 +709,7 @@ export const TokenOptimizerPlugin: Plugin = async (
 
         // session.idle fires when a session stops processing (after each turn).
         // It is far more reliable than session.deleted, so it is the primary
-        // rollup trigger that keeps trends.db -> session_log populated (#54).
+        // rollup trigger that keeps trends.db -> session_log populated.
         if (event.type === "session.idle") {
           const sid = (event as SessionIdleEvent).properties?.sessionID;
           if (sid) {

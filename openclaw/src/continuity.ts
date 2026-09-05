@@ -122,17 +122,17 @@ const CONTINUATION_PHRASES = new Set([
 const CONTINUATION_WORDS = new Set(["continue", "resume"]);
 
 // ---------------------------------------------------------------------------
-// Per-item keep/drop filter (GitHub #103) — set-overlap rule, no float threshold
+// Per-item keep/drop filter — set-overlap rule, no float threshold
 // ---------------------------------------------------------------------------
 
 // DELIBERATELY ASCII-only, and DELIBERATELY NOT the (wider) resume-topic tokenizer
-// TOPIC_TOKEN_RE. Do not "unify" them (#127): widening this to match non-ASCII would make a
+// TOPIC_TOKEN_RE. Do not "unify" them: widening this to match non-ASCII would make a
 // non-Latin item produce 3+ tokens that then fail the ASCII-only keep-set overlap test,
 // dropping needed lines. The keep set is prompt + cwd + in-project paths (ASCII in practice),
 // so a non-Latin item must stay inconclusive (<3 tokens) and be kept, not overlap-tested.
 const RECOVER_TOKEN_RE = /[a-zA-Z0-9_./:-]+/g;
 
-// --- Non-English topic tokenizer (#127) — mirrors Python measure.py _topic_tokens ---
+// --- Non-English topic tokenizer — mirrors Python measure.py _topic_tokens ---
 // Two branches: ASCII/accented-Latin run OR a whole non-ASCII (CJK) run as one token (a token
 // never mixes ASCII and non-ASCII). Latin-1/Extended-A ranges skip × U+00D7 / ÷ U+00F7 (symbols).
 const TOPIC_TOKEN_RE = /[a-zA-Z0-9_.:À-ÖØ-öø-ÿĀ-ɏ/-]+|[^\x00-\x7F]+/g;
@@ -178,7 +178,7 @@ function recoverItemTokens(text: unknown): Set<string> {
   return out;
 }
 
-/** Set-overlap keep/drop rule (GitHub #103). KEEP iff < 3 distinctive tokens
+/** Set-overlap keep/drop rule. KEEP iff < 3 distinctive tokens
  *  (inconclusive) OR nonempty intersection with keepTokens; DROP iff >= 3
  *  tokens AND zero overlap. No float threshold. Exported for the parity
  *  fixture test. */
@@ -247,7 +247,7 @@ function isAbsolutePath(p: string): boolean {
 }
 
 /** True when file path ``p`` is an attributable absolute path that does NOT
- *  live under ``cwd`` — a cross-project file (GitHub #103). The set-overlap
+ *  live under ``cwd`` — a cross-project file. The set-overlap
  *  tokenizer treats a full path as a SINGLE token (the regex includes slashes)
  *  so it has < 3 distinctive tokens and would always be kept by
  *  ``keepRecoveredItem``; this rule drops such paths at the file-filter sites
@@ -261,7 +261,7 @@ export function crossProjectFileDrop(p: string, cwd: string): boolean {
 
 /** True when the checkpoint carries at least one attributable absolute file
  *  path NOT under ``cwd`` — the checkpoint genuinely spans multiple projects
- *  (GitHub #103). DECISION filtering is gated on this: a single-project
+ *  (multi-project). DECISION filtering is gated on this: a single-project
  *  checkpoint (every attributable path in-project, or none) has nothing to
  *  scope, so its decisions are kept verbatim even when they name no project
  *  token (e.g. "Switched from REST polling to websocket push"). Without this
@@ -345,7 +345,7 @@ export function keywordRelevanceScore(
     if (lower.includes(phrase)) return 1.0;
   }
 
-  // Content-word extraction via the shared non-English tokenizer (#127): two-branch
+  // Content-word extraction via the shared non-English tokenizer: two-branch
   // class + script-aware floor (CJK kept at len>=2, ASCII/Latin at len>3). See extractTopicTokens.
   function contentWords(s: string): Set<string> {
     return extractTopicTokens(s);
@@ -664,7 +664,7 @@ export function buildContinuityHint(
     hintLines.push(`- Prior topic: ${summary}`);
   }
 
-  // GitHub #103: rebuild the body from filtered parseCheckpointSections output
+  // Rebuild the body from filtered parseCheckpointSections output
   // instead of dumping a raw 800-char excerpt. A two-project checkpoint would
   // otherwise leak the OTHER project's Key Decisions / File Changes into this
   // hint. Filter FIRST (set-overlap rule, no float threshold), then apply the
@@ -683,7 +683,7 @@ export function buildContinuityHint(
   let fencedBody: string | null = null;
 
   if (keepTokens) {
-    // Decision filtering is gated on checkpoint mixture (GitHub #103): a
+    // Decision filtering is gated on checkpoint mixture: a
     // single-project checkpoint has nothing to scope, so its decisions are
     // kept verbatim even when they name no project token. Only a checkpoint
     // that genuinely spans projects gets its decisions token-filtered.
@@ -1155,7 +1155,7 @@ export function buildResumeLeanBlock(
   const { keyDecisions, fileChanges, userInstructions, activeTaskGuess, headerMeta } =
     parseCheckpointSections(content);
 
-  // GitHub #103: per-item relevance filter. Filter FIRST, then slice. Disclosure
+  // Per-item relevance filter. Filter FIRST, then slice. Disclosure
   // counts = filter drops ONLY, never slice truncation. Kept items pass through
   // byte-for-byte (no cascading drops). Enable-gate is AND: filtering activates
   // only when BOTH promptText AND cwd are present (full topic + project context).
@@ -1186,7 +1186,7 @@ export function buildResumeLeanBlock(
 
   let droppedDecisions = 0;
   let droppedFiles = 0;
-  // Decision filtering is gated on checkpoint mixture (GitHub #103): a
+  // Decision filtering is gated on checkpoint mixture: a
   // single-project checkpoint has nothing to scope, so its decisions are kept
   // verbatim even when they name no project token.
   const multiProject = keepTokens

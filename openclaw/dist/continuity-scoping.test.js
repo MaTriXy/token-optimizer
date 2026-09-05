@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 /**
- * GitHub #103 — per-project scoping for OpenClaw continuity injection.
+ * Per-project scoping for OpenClaw continuity injection.
  *
  * A two-project checkpoint leaks project A's Key Decisions into project B's
  * hint because the checkpoint's session-wide fields are dumped verbatim once
