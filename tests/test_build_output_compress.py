@@ -321,6 +321,18 @@ class TestClassify:
     def test_ctest(self):
         assert classify("ctest --output-on-failure") is True
 
+    def test_docker_build(self):
+        assert classify("docker build -t app .") is True
+        assert classify("docker compose build") is True
+        assert classify("docker compose up --build") is True
+        assert classify("docker ps") is False
+        assert classify("docker run --rm alpine echo hi") is False
+
+    def test_docker_compose_legacy(self):
+        assert classify("docker-compose build") is True
+        assert classify("docker-compose up --build") is True
+        assert classify("docker-compose down") is False
+
 
 # ---------------------------------------------------------------------------
 # classify_by_shape() tests

@@ -107,6 +107,11 @@ _BUILD_TEST_COMMANDS: dict[str, frozenset[str] | None] = {
     "valgrind": None,
     "gdb": frozenset({"-batch"}),
     "ctest": None,
+    # Container builds — docker build / docker compose build produce BuildKit
+    # output (the progress-prefixed error lines the error-before-noise fix
+    # preserves). docker-compose is the legacy hyphenated form.
+    "docker": frozenset({"build", "compose"}),
+    "docker-compose": frozenset({"build", "up"}),
 }
 
 # F5: command-name keywords that make a command eligible for the shape
