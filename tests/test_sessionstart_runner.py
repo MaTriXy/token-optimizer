@@ -415,6 +415,11 @@ def test_one_failing_subcommand_does_not_abort_the_others(monkeypatch, tmp_path,
     _install_fake_deadline(monkeypatch, runner)
     calls, _marker_dir = _install_call_recorder(monkeypatch, runner, tmp_path)
 
+    # Route diagnostics to a tmp log file so we can assert the failure landed
+    # there (not on stderr, which the host captures into model context).
+    log_file = tmp_path / "diag.log"
+    monkeypatch.setattr(runner, "_diagnostics_log_path", lambda: log_file)
+
     def _boom():
         raise RuntimeError("simulated ensure-health failure")
 
@@ -430,8 +435,11 @@ def test_one_failing_subcommand_does_not_abort_the_others(monkeypatch, tmp_path,
     assert len(calls["compact_restore_new_session"]) == 1
 
     err = capsys.readouterr().err
-    assert "ensure-health failed, continuing" in err, (
-        "the failure must be logged to stderr, not swallowed silently"
+    assert "ensure-health failed, continuing" not in err, (
+        "the failure must not leak to stderr (the host captures it into context)"
+    )
+    assert "ensure-health failed, continuing" in log_file.read_text(encoding="utf-8"), (
+        "the failure must be logged to the diagnostics log file, not swallowed silently"
     )
 
 
@@ -545,19 +553,24 @@ def test_budget_is_shared_across_subcommands_not_reset(monkeypatch, tmp_path):
 
 def test_stdout_is_emitted_in_dispatch_order(monkeypatch, tmp_path):
     """The host consumed five separate stdout streams in hooks.json order.
-    Consolidated, the buffered emitter must reproduce that order.
+    Consolidated, the buffered emitter must reproduce that order for the
+    compact-restore payloads that feed the envelope.
 
-    The stream is now ONE JSON object (see
-    tests/test_codex_sessionstart_json_contract.py: Codex rejects a SessionStart
-    stdout that starts with ``[``/``{`` and is not a single valid document), so
-    "order" is the order of the plain-text units INSIDE
-    ``hookSpecificOutput.additionalContext``. The systemMessage unit is carried
-    in the object's own ``systemMessage`` field, which is a sibling of
-    ``additionalContext`` and therefore has no position in that text.
+    Only compact-restore output feeds the SessionStart envelope (ensure-health
+    and quality-cache stdout is diagnostic and routed to the log file). The
+    stream is ONE JSON object (see tests/test_codex_sessionstart_json_contract.py:
+    Codex rejects a SessionStart stdout that starts with ``[``/``{`` and is not
+    a single valid document), so "order" is the order of the plain-text units
+    INSIDE ``hookSpecificOutput.additionalContext``.
     """
     runner = _load_runner(monkeypatch, tmp_path)
     _install_fake_deadline(monkeypatch, runner)
     _calls, _marker_dir = _install_call_recorder(monkeypatch, runner, tmp_path)
+
+    # Route diagnostics to a tmp log file so we can verify ensure-health and
+    # quality-cache output landed there, not in the envelope.
+    log_file = tmp_path / "diag.log"
+    monkeypatch.setattr(runner, "_diagnostics_log_path", lambda: log_file)
 
     monkeypatch.setattr(runner.measure, "run_ensure_health",
                         lambda: print("MARK-ensure-health"))
@@ -584,14 +597,20 @@ def test_stdout_is_emitted_in_dispatch_order(monkeypatch, tmp_path):
         assert runner.main() == 0
     out = cap.getvalue()
 
-    for mark in ("MARK-ensure-health", "MARK-quality-cache", "MARK-compact",
-                 "MARK-new-session"):
+    # Only compact-restore marks are in the envelope.
+    for mark in ("MARK-compact", "MARK-new-session"):
         assert mark in out, f"{mark} missing from consolidated stdout"
+
+    # ensure-health and quality-cache marks are NOT in the envelope (diagnostic
+    # output routed to the log file, not the context stream).
+    for mark in ("MARK-ensure-health", "MARK-quality-cache"):
+        assert mark not in out, (
+            f"{mark} leaked into the envelope (diagnostic output must go to the log)"
+        )
 
     payload = json.loads(out)
     context = payload["hookSpecificOutput"]["additionalContext"]
     positions = [
-        context.index("MARK-ensure-health"),
         context.index("MARK-compact"),
         context.index("MARK-new-session"),
     ]
@@ -599,10 +618,13 @@ def test_stdout_is_emitted_in_dispatch_order(monkeypatch, tmp_path):
         f"stdout order must match hooks.json dispatch order, got {positions}"
     )
 
-    # Shape preserved: the quality-cache systemMessage content survives as the
-    # object's systemMessage, not folded into the context text.
-    assert payload["systemMessage"] == "MARK-quality-cache", (
-        "the systemMessage unit must survive consolidation intact"
+    # ensure-health and quality-cache output landed in the diagnostics log.
+    log_text = log_file.read_text(encoding="utf-8")
+    assert "MARK-ensure-health" in log_text, (
+        "ensure-health stdout must reach the diagnostics log file"
+    )
+    assert "MARK-quality-cache" in log_text, (
+        "quality-cache stdout must reach the diagnostics log file"
     )
 
 

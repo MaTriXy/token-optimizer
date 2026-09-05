@@ -41,11 +41,16 @@ Key properties:
     subcommand HERE: ensure-health was consent-EXEMPT (it bootstraps the consent
     flags), the other four were consent-gated. run.py exempts this runner path
     wholesale, same as the UserPromptSubmit runner.
-  - stdout from all five subcommands is captured through one buffered emitter
-    and emitted in dispatch order at the end of ``main()``, preserving each
-    subcommand's shape (raw text, systemMessage JSON, additionalContext JSON).
+  - stdout from the two compact-restore subcommands is captured and emitted in
+    dispatch order at the end of ``main()`` as ONE host-valid JSON envelope
+    (raw text, systemMessage JSON, additionalContext JSON). ensure-health and
+    quality-cache stdout is diagnostic and routed to a log file, never to the
+    envelope. All subcommand stderr is also routed to the log file -- the host
+    captures both stdout and stderr into the model's session context, so
+    diagnostics must reach neither stream.
   - One subcommand throwing/aborting never aborts the others (each is wrapped in
-    ``_run_safely``); the hook always exits 0.
+    ``_run_safely``); the hook always exits 0. Failure notices and tracebacks
+    go to the diagnostics log file, not stderr.
   - ``run._check_consent`` is imported by explicit path so a future
     ``skills/.../run.py`` on ``sys.path`` cannot shadow the real gate.
 
@@ -63,7 +68,7 @@ import json
 import os
 import sys
 import traceback
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 
@@ -105,6 +110,61 @@ if _MEASURE_DIR and _MEASURE_DIR not in sys.path:
 import measure  # noqa: E402  (path bootstrapped above)
 
 
+# --------------------------------------------------------------------------- #
+# Diagnostics log: the host captures BOTH stdout and stderr from SessionStart
+# hooks into the model's session context, where they are re-billed on every
+# turn. The only correct destination for hook diagnostics is therefore a log
+# file, never stdout and never stderr.
+# --------------------------------------------------------------------------- #
+
+_DIAGNOSTICS_LOG_NAME = "sessionstart_diagnostics.log"
+_DIAGNOSTICS_LOG_CAP = 256 * 1024  # keep the last ~256 KB
+
+
+def _diagnostics_log_path():
+    """Resolve the diagnostics log path under measure's snapshot/state dir.
+
+    Reuses the same state directory measure.py uses for its other log files
+    (e.g. the keep-warm scheduler log). Returns None if no state dir is
+    resolvable, in which case callers silently drop diagnostics (devnull).
+    """
+    try:
+        base = getattr(measure, "SNAPSHOT_DIR", None)
+        if base is None:
+            return None
+        return Path(base) / _DIAGNOSTICS_LOG_NAME
+    except Exception:
+        return None
+
+
+def _write_diagnostics(text: str) -> None:
+    """Append diagnostics text to the capped log file. Fully fail-open.
+
+    Any error is swallowed so logging can never block or break SessionStart.
+    If no writable log dir can be resolved, silently drop (devnull) -- never
+    fall back to real stderr.
+    """
+    if not text:
+        return
+    try:
+        path = _diagnostics_log_path()
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        chunk = text if text.endswith("\n") else text + "\n"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(chunk)
+        # Cap: trim to the last ~256 KB so the file stays small.
+        try:
+            if path.stat().st_size > _DIAGNOSTICS_LOG_CAP:
+                data = path.read_bytes()[-_DIAGNOSTICS_LOG_CAP:]
+                path.write_bytes(data)
+        except OSError:
+            pass
+    except Exception:
+        pass
+
+
 def _read_hook_input() -> dict:
     """Read the hook stdin JSON once, non-blocking, shared across subcommands.
 
@@ -136,22 +196,26 @@ def _is_compact_start(hook_input: dict) -> bool:
 
 
 def _run_safely(name: str, fn, *args, **kwargs) -> None:
-    """Run fn, swallow any failure to stderr, never propagate.
+    """Run fn, swallow any failure to the diagnostics log, never propagate.
 
     Catches ``Exception`` and ``SystemExit`` so one subcommand's bug or internal
     ``sys.exit()`` cannot abort the others. ``_HookTimeout`` (a ``BaseException``
     raised only by tests that inject it) is caught inside each subcommand
     function; in production the ``HookDeadline`` watchdog calls ``os._exit(0)``
     directly, which is uncatchable and correctly terminates the whole hook 0.
+
+    The failure notice and traceback go to the diagnostics log file, never to
+    real stderr (the host captures stderr into the model's session context).
     """
     try:
         fn(*args, **kwargs)
     except (Exception, SystemExit):
         try:
-            sys.stderr.write(f"[Token Optimizer] {name} failed, continuing\n")
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
-        except (OSError, ValueError):
+            buf = io.StringIO()
+            buf.write(f"[Token Optimizer] {name} failed, continuing\n")
+            traceback.print_exc(file=buf)
+            _write_diagnostics(buf.getvalue())
+        except Exception:
             pass
 
 
@@ -493,29 +557,32 @@ def main() -> int:
     # ONE shared HookDeadline for the entire runner (see the sizing note above).
     _install_runner_deadline()
 
-    # Buffer every subcommand's stdout and emit in dispatch order at the end.
-    # Pre-consolidation each subcommand was its own hooks.json entry with its
-    # own stdout stream; now all five share one, so buffering keeps each unit
-    # self-contained and ordered rather than interleaved mid-write.
-    _stdout_bufs: list[str] = []
     # Raw compact-restore text destined for ONE shared additionalContext
     # envelope on the Codex/Cowork path (see the envelope note above).
+    # Only compact-restore produces context-bound output (restored-state
+    # additionalContext); ensure-health and quality-cache stdout is diagnostic
+    # and goes to the log file, not the envelope.
     _wrapped: list[str] = []
 
     def _capture(name: str, fn, *args, **kwargs) -> None:
+        # Capture BOTH stdout and stderr from each subcommand. The host
+        # captures both streams into the model's session context, so
+        # diagnostics must go to the log file, never to either real stream.
         buf = io.StringIO()
-        with redirect_stdout(buf):
+        err_buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(err_buf):
             _run_safely(name, fn, *args, **kwargs)
         captured = buf.getvalue()
-        if captured:
-            _stdout_bufs.append(captured)
+        err_captured = err_buf.getvalue()
+        if captured or err_captured:
+            _write_diagnostics(f"--- {name} ---\n{captured}{err_captured}")
 
     if not consent:
         # Bootstrap only. ensure-health writes the consent flags; every other
         # subcommand stayed dark behind run.py's gate and stays dark here.
         _runner_budget(8, subcommand_count_hint=1)
         _capture("ensure-health", _sub_ensure_health, hook_input)
-        _emit_session_start_stdout(_stdout_bufs, hook_input)
+        _emit_session_start_stdout(_wrapped, hook_input)
         _clear_runner_deadline()
         return 0
 
@@ -535,11 +602,12 @@ def main() -> int:
     _capture("compact-restore --new-session-only", _sub_compact_restore_new_session,
              hook_input, _wrapped)
 
-    # Emit everything as ONE host-valid JSON object, in dispatch order: the
-    # three always-on subcommands first, then both compact-restore payloads.
-    # See _emit_session_start_stdout for why a concatenated raw stream is not an
-    # option on Codex.
-    _emit_session_start_stdout(_stdout_bufs + _wrapped, hook_input)
+    # Emit the compact-restore payloads as ONE host-valid JSON object. Only
+    # compact-restore produces context-bound output (restored-state
+    # additionalContext); ensure-health and quality-cache diagnostics go to the
+    # log file. See _emit_session_start_stdout for why a concatenated raw stream
+    # is not an option on Codex.
+    _emit_session_start_stdout(_wrapped, hook_input)
 
     _clear_runner_deadline()
     return 0
