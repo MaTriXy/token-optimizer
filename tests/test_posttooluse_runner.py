@@ -1139,3 +1139,42 @@ def test_posttooluse_failure_ignores_unparseable_error(monkeypatch, tmp_path, ca
     })
     assert runner.main() == 0
     assert capsys.readouterr().out.strip() == ""
+
+
+def test_posttooluse_failure_arms_per_handler_deadline(monkeypatch, tmp_path, capsys):
+    """The PostToolUseFailure path must arm the shared per-handler deadline
+    so a slow regex/handler there is bounded, not unbounded. The old code
+    returned before ``_install_runner_deadline`` ran, leaving the failure
+    branch with no SIGALRM guard at all."""
+    monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", str(tmp_path / "data"))
+    _fresh_store_modules()
+    runner = _load_runner(monkeypatch, tmp_path)
+
+    deadline_calls: list = []
+    clear_calls: list = []
+
+    def _track_install(total_seconds=None):
+        deadline_calls.append(total_seconds)
+        return None  # no real watchdog in the test process
+
+    def _track_clear():
+        clear_calls.append(True)
+
+    monkeypatch.setattr(runner, "_install_runner_deadline", _track_install)
+    monkeypatch.setattr(runner, "_clear_runner_deadline", _track_clear)
+    monkeypatch.setattr(runner, "_read_hook_input", lambda: {
+        "hook_event_name": "PostToolUseFailure",
+        "session_id": "faildl-" + uuid.uuid4().hex[:8],
+        "tool_name": "Bash",
+        "tool_input": {"command": "make check"},
+        "error": "Exit code 1\none failure\n",
+    })
+    assert runner.main() == 0
+    assert len(deadline_calls) == 1, (
+        f"_install_runner_deadline was not called on the failure path; "
+        f"calls={deadline_calls}"
+    )
+    assert len(clear_calls) == 1, (
+        f"_clear_runner_deadline was not called on the failure path; "
+        f"calls={clear_calls}"
+    )

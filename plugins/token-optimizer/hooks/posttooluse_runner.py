@@ -1020,6 +1020,8 @@ def _handle_post_tool_use_failure(hook_input: dict) -> None:
                 "hookEventName": "PostToolUseFailure",
                 "additionalContext": nudge,
             }}))
+    except _HandlerBudgetExceeded:
+        raise  # Let the deadline wrapper report the overrun
     except Exception:
         pass  # Fail open: never add a hook failure on top of a tool failure
 
@@ -1029,7 +1031,19 @@ def main() -> int:
     tool_name = str(hook_input.get("tool_name") or "")
 
     if hook_input.get("hook_event_name") == "PostToolUseFailure":
-        _handle_post_tool_use_failure(hook_input)
+        # Arm the same shared per-handler deadline as the PostToolUse path so
+        # a slow regex/handler on the failure branch is bounded, not unbounded.
+        _install_runner_deadline()
+        _runner_budget(0.0, subcommand_count_hint=1)
+        budget = _runner_budget(_RUNNER_TOTAL_BUDGET)
+        if budget > 0:
+            _run_safely(
+                "post-tool-use-failure",
+                lambda: _run_with_handler_deadline(
+                    budget, _handle_post_tool_use_failure, hook_input
+                ),
+            )
+        _clear_runner_deadline()
         return 0
 
     _install_shared_stdin(hook_input)
