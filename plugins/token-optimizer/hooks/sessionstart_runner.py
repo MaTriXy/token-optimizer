@@ -597,15 +597,16 @@ def main() -> int:
     _install_runner_deadline()
 
     # Raw compact-restore text destined for ONE shared additionalContext
-    # envelope on the Codex/Cowork path (see the envelope note above).
-    # compact-restore produces the restored-state additionalContext, which is
-    # legitimately model-context (the feature, not the tax). ensure-health and
-    # quality-cache systemMessage lines are user-facing (tax-free) and also
-    # feed the envelope; their plain-text diagnostics go to the log file.
+    # envelope (see the envelope note above). compact-restore produces the
+    # restored-state additionalContext, which is legitimately model-context
+    # (the feature, not the tax). ensure-health and quality-cache
+    # systemMessage lines are user-facing (tax-free) and also feed the
+    # envelope; their bare plain-text star pitch / nudges are model-facing
+    # additionalContext and feed the envelope too. All stderr is diagnostic
+    # and goes to the log file.
     _wrapped: list[str] = []
 
-    def _capture(name: str, fn, *args, split_system_messages: bool = False,
-                 **kwargs) -> None:
+    def _capture(name: str, fn, *args, **kwargs) -> None:
         # Capture BOTH stdout and stderr from each subcommand. The host
         # captures both streams into the model's session context, so
         # diagnostics must go to the log file, never to either real stream.
@@ -615,35 +616,19 @@ def main() -> int:
             _run_safely(name, fn, *args, **kwargs)
         captured = buf.getvalue()
         err_captured = err_buf.getvalue()
-        if split_system_messages:
-            # ensure-health / quality-cache: systemMessage JSON lines are
-            # user-facing (tax-free) and feed the envelope; plain-text
-            # diagnostics go to the log. All stderr goes to the log.
-            keep, log_text = _split_system_messages(captured)
-            if keep:
-                _wrapped.append(keep)
-            log_parts = []
-            if log_text:
-                log_parts.append(log_text)
-            if err_captured:
-                log_parts.append(err_captured)
-            if log_parts:
-                _write_diagnostics(f"--- {name} ---\n" + "\n".join(log_parts))
-        else:
-            # compact-restore: its output is restored-state additionalContext
-            # (legitimately model-context) and is appended to the sink by the
-            # subcommand itself. clear-compacted emits nothing on stdout.
-            # All stderr goes to the log.
-            if captured or err_captured:
-                _write_diagnostics(
-                    f"--- {name} ---\n{captured}{err_captured}")
+        # ALL stdout -> envelope (systemMessage + bare-text + JSON all
+        # collapse into one host-valid object via _emit_session_start_stdout).
+        # stderr -> log.
+        if captured:
+            _wrapped.append(captured)
+        if err_captured:
+            _write_diagnostics(f"--- {name} ---\n{err_captured}")
 
     if not consent:
         # Bootstrap only. ensure-health writes the consent flags; every other
         # subcommand stayed dark behind run.py's gate and stays dark here.
         _runner_budget(8, subcommand_count_hint=1)
-        _capture("ensure-health", _sub_ensure_health, hook_input,
-                 split_system_messages=True)
+        _capture("ensure-health", _sub_ensure_health, hook_input)
         _emit_session_start_stdout(_wrapped, hook_input)
         _clear_runner_deadline()
         return 0
@@ -655,10 +640,8 @@ def main() -> int:
     pending = 5 if is_compact else 3
     _runner_budget(8, subcommand_count_hint=pending)
 
-    _capture("ensure-health", _sub_ensure_health, hook_input,
-             split_system_messages=True)
-    _capture("quality-cache --force", _sub_quality_cache_force, hook_input,
-             split_system_messages=True)
+    _capture("ensure-health", _sub_ensure_health, hook_input)
+    _capture("quality-cache --force", _sub_quality_cache_force, hook_input)
     if is_compact:
         _capture("compact-restore --compact", _sub_compact_restore_compact,
                  hook_input, _wrapped)

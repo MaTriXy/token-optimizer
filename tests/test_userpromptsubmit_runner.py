@@ -1066,7 +1066,9 @@ def test_fix2_ensure_health_marker_unlinked_on_failure_next_prompt_retries(
 def test_fix3_buffered_stdout_multi_emit_is_consumable(monkeypatch, tmp_path):
     """Two subcommands emit hookSpecificOutput JSON simultaneously.  The
     buffered emitter in main() captures each subcommand's stdout separately
-    and emits them in order, so the host receives consumable units."""
+    and collapses them into ONE host-valid JSON envelope, so the host
+    receives a single consumable document with both outputs in
+    additionalContext."""
     runner = _load_runner(monkeypatch, tmp_path)
     monkeypatch.setattr(runner, "_check_consent", lambda: True)
     monkeypatch.setattr(runner, "_harness_only_context", lambda: False)
@@ -1102,35 +1104,26 @@ def test_fix3_buffered_stdout_multi_emit_is_consumable(monkeypatch, tmp_path):
     assert rc == 0
     stdout = captured.getvalue()
 
-    # Both outputs are present and in order.
+    # Both outputs are present in the single JSON envelope.
     assert "fix3-continuity-hint" in stdout, "prompt-continuity output must be present"
     assert "fix3-verbosity-raw-output" in stdout, "verbosity-steer output must be present"
 
-    # Verify the output is consumable: the hookSpecificOutput JSON for
-    # prompt-continuity is valid JSON and self-contained.
-    pos_continuity = stdout.index("fix3-continuity-hint")
-    pos_verbosity = stdout.index("fix3-verbosity-raw-output")
-    assert pos_continuity < pos_verbosity, (
-        "output order must match subcommand dispatch order"
-    )
-
-    # The hookSpecificOutput from prompt-continuity is a valid JSON object.
+    # The output is ONE valid JSON object (the collapsed envelope).
     import json as _json_mod
-    lines = stdout.strip().split("\n")
-    json_objects = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = _json_mod.loads(line)
-            json_objects.append(obj)
-        except _json_mod.JSONDecodeError:
-            pass  # raw text is fine too
-
-    assert len(json_objects) >= 1, "at least one valid JSON object must be present"
-    continuity_obj = json_objects[0]
-    assert continuity_obj.get("hookSpecificOutput", {}).get("additionalContext") == "fix3-continuity-hint"
+    envelope = _json_mod.loads(stdout.strip())
+    additional = envelope.get("hookSpecificOutput", {}).get("additionalContext", "")
+    # Both subcommand outputs are in additionalContext, in dispatch order.
+    assert "fix3-continuity-hint" in additional, (
+        "prompt-continuity output must be in additionalContext"
+    )
+    assert "fix3-verbosity-raw-output" in additional, (
+        "verbosity-steer output must be in additionalContext"
+    )
+    pos_continuity = additional.index("fix3-continuity-hint")
+    pos_verbosity = additional.index("fix3-verbosity-raw-output")
+    assert pos_continuity < pos_verbosity, (
+        "output order in additionalContext must match subcommand dispatch order"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1193,11 +1186,11 @@ def test_fix4_explicit_path_import_decoy_run_py_cannot_shadow(monkeypatch, tmp_p
 def test_userpromptsubmit_diagnostics_routing_systemmessage_survives(
     monkeypatch, tmp_path, capsys,
 ):
-    """User-facing systemMessage JSON lines must reach stdout (tax-free).
-
-    Plain-text diagnostics from ensure-health/quality-cache and all subcommand
-    stderr must go to the diagnostics log file, never to the host's real
-    stdout/stderr (which the host captures into the model's session context).
+    """User-facing systemMessage JSON lines must reach the stdout envelope
+    (tax-free). Bare-text model-facing nudges must reach additionalContext.
+    Genuine diagnostics (printed to stderr) and all subcommand stderr must go
+    to the diagnostics log file, never to the host's real stdout/stderr (which
+    the host captures into the model's session context).
     """
     runner = _load_runner(monkeypatch, tmp_path)
     _stub_budget(monkeypatch, runner)
@@ -1209,11 +1202,13 @@ def test_userpromptsubmit_diagnostics_routing_systemmessage_survives(
                         lambda: {"session_id": "sess-diag-1", "prompt": "x"})
     monkeypatch.setattr(runner, "_harness_only_context", lambda: True)
 
-    # ensure-health prints a systemMessage (user-facing) and a plain-text
-    # diagnostic line (context-bound).
+    # ensure-health prints a systemMessage (user-facing, tax-free) to stdout
+    # and a genuine diagnostic to stderr (diagnostics belong on stderr, not
+    # stdout, so they reach the log instead of the model's context).
     def _eh_with_messages():
+        import sys as _sys
         print('{"systemMessage": "Dashboard: http://localhost:24842"}')
-        print("ensure-health: daemon is reachable on port 24842")
+        _sys.stderr.write("ensure-health: daemon is reachable on port 24842\n")
 
     monkeypatch.setattr(runner.measure, "run_ensure_health", _eh_with_messages)
     monkeypatch.setattr(runner.measure, "_ensure_health_daemon_revive_first", lambda: None)
@@ -1230,21 +1225,21 @@ def test_userpromptsubmit_diagnostics_routing_systemmessage_survives(
     err = capsys.readouterr().err
     log_text = log_file.read_text(encoding="utf-8") if log_file.exists() else ""
 
-    # systemMessage must reach stdout (user-facing, tax-free)
+    # systemMessage must reach stdout envelope (user-facing, tax-free)
     assert "Dashboard: http://localhost:24842" in out, (
-        "systemMessage must survive to stdout (it is user-facing and tax-free)"
+        "systemMessage must survive to the stdout envelope (user-facing, tax-free)"
     )
-    # Plain-text diagnostic must NOT reach stdout
+    # Genuine diagnostic (on stderr) must NOT reach stdout
     assert "daemon is reachable" not in out, (
-        "plain-text diagnostics must not leak to stdout"
+        "genuine diagnostics (stderr) must not leak to stdout"
     )
     # stderr must be empty (all routed to the log)
     assert err == "", (
         "stderr must be empty -- all subcommand stderr goes to the log file"
     )
-    # Plain-text diagnostic must be in the log
+    # Genuine diagnostic must be in the log
     assert "daemon is reachable" in log_text, (
-        "plain-text diagnostics must be in the diagnostics log file"
+        "genuine diagnostics (stderr) must be in the diagnostics log file"
     )
     # stderr diagnostic must be in the log
     assert "computing score" in log_text, (

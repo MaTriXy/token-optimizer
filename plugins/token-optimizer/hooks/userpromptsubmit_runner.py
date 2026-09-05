@@ -184,6 +184,28 @@ def _split_system_messages(captured_stdout: str):
     return "\n".join(keep_lines), "\n".join(log_lines)
 
 
+def _emit_stdout_envelope(bufs: list[str]) -> None:
+    """Collapse all subcommand stdout into ONE host-valid JSON envelope.
+
+    STDOUT is feature output: ``systemMessage`` JSON lines are user-facing
+    (tax-free), bare plain-text nudges and star pitches are model-facing
+    (``additionalContext``), and ``hookSpecificOutput`` JSON from
+    prompt-continuity / verbosity-steer carries ``additionalContext`` too.
+    ``measure._collapse_hook_stdout`` folds all of these into one object so
+    the host sees a single parseable document. STDERR is diagnostic and goes
+    to the log (handled per-subcommand in ``_capture``).
+    """
+    combined = "\n".join(part for part in bufs if part and part.strip())
+    if not combined.strip():
+        return
+    _run_safely(
+        "user-prompt-submit stdout envelope",
+        measure._emit_hook_stdout_envelope,
+        combined,
+        "UserPromptSubmit",
+    )
+
+
 def _read_hook_input() -> dict:
     """Read the hook stdin JSON once, non-blocking, shared across subcommands.
 
@@ -610,17 +632,6 @@ def _check_consent() -> bool:
         return True
 
 
-def _emit_stdout(bufs: list[str]) -> None:
-    """Emit buffered stdout units in dispatch order.
-
-    Each subcommand's output is a self-contained unit (hookSpecificOutput JSON,
-    systemMessage JSON, or raw text), emitted in the order the host expects
-    from the consolidated dispatcher.
-    """
-    for buf in bufs:
-        sys.stdout.write(buf)
-
-
 def main() -> int:
     hook_input = _read_hook_input()
 
@@ -653,20 +664,15 @@ def main() -> int:
                     _run_safely(name, fn, *args, **kwargs)
                 captured = buf.getvalue()
                 err_captured = err_buf.getvalue()
-                keep, log_text = _split_system_messages(captured)
-                if keep:
-                    _bufs.append(keep)
-                log_parts = []
-                if log_text:
-                    log_parts.append(log_text)
+                # ALL stdout is feature output (systemMessage + bare-text
+                # nudges/star-pitch) -> envelope. stderr is diagnostic -> log.
+                if captured:
+                    _bufs.append(captured)
                 if err_captured:
-                    log_parts.append(err_captured)
-                if log_parts:
-                    _write_diagnostics(f"--- {name} ---\n" + "\n".join(log_parts))
+                    _write_diagnostics(f"--- {name} ---\n{err_captured}")
 
             _capture_consent("ensure-health", _sub_ensure_health, hook_input)
-            for _b in _bufs:
-                sys.stdout.write(_b)
+            _emit_stdout_envelope(_bufs)
             _clear_runner_deadline()
         return 0
 
@@ -683,45 +689,28 @@ def main() -> int:
     # the host parsed their stdout independently; now all six share one stdout
     # stream, so we buffer to avoid mixed JSON/raw-text corruption.
     #
-    # The host captures BOTH stdout and stderr into the model's session context,
-    # so all stderr and plain-text diagnostics go to the log file, never to
-    # either real stream. User-facing ``{"systemMessage": ...}`` JSON lines
-    # are tax-free (shown to the USER's terminal) and keep reaching the host on
-    # stdout. Legitimate additionalContext from prompt-continuity, verbosity-
-    # steer, and compact-restore also feeds the envelope (it is the feature,
-    # not the tax).
+    # STDOUT is feature output: systemMessage JSON (user-facing, tax-free),
+    # bare plain-text nudges/star-pitch (model-facing additionalContext), and
+    # hookSpecificOutput JSON from prompt-continuity / verbosity-steer /
+    # compact-restore (model-facing additionalContext). All of it collapses
+    # into ONE envelope via ``_emit_stdout_envelope`` at the end.
+    # STDERR is diagnostic -> log file (the host captures both streams into
+    # the model's session context, so diagnostics must reach neither).
     _stdout_bufs: list[str] = []
 
-    def _capture(name: str, fn, *args, split_system_messages: bool = False,
-                 **kwargs) -> None:
+    def _capture(name: str, fn, *args, **kwargs) -> None:
         buf = io.StringIO()
         err_buf = io.StringIO()
         with redirect_stdout(buf), redirect_stderr(err_buf):
             _run_safely(name, fn, *args, **kwargs)
         captured = buf.getvalue()
         err_captured = err_buf.getvalue()
-        if split_system_messages:
-            # ensure-health / quality-cache: systemMessage JSON lines are
-            # user-facing (tax-free) and feed the envelope; plain-text
-            # diagnostics go to the log. All stderr goes to the log.
-            keep, log_text = _split_system_messages(captured)
-            if keep:
-                _stdout_bufs.append(keep)
-            log_parts = []
-            if log_text:
-                log_parts.append(log_text)
-            if err_captured:
-                log_parts.append(err_captured)
-            if log_parts:
-                _write_diagnostics(f"--- {name} ---\n" + "\n".join(log_parts))
-        else:
-            # prompt-continuity / verbosity-steer / compact-restore: their
-            # stdout is legitimate additionalContext (the feature, not the
-            # tax) and feeds the envelope. All stderr goes to the log.
-            if captured:
-                _stdout_bufs.append(captured)
-            if err_captured:
-                _write_diagnostics(f"--- {name} ---\n{err_captured}")
+        # ALL stdout -> envelope (systemMessage + bare-text + JSON all
+        # collapse into one host-valid object). stderr -> log.
+        if captured:
+            _stdout_bufs.append(captured)
+        if err_captured:
+            _write_diagnostics(f"--- {name} ---\n{err_captured}")
 
     # 1-3: always-on subcommands. Ordering: the cheap,
     # user-visible subcommands (prompt-continuity, verbosity-steer) run BEFORE
@@ -733,17 +722,14 @@ def main() -> int:
     _runner_budget(8, subcommand_count_hint=6)
     _capture("prompt-continuity", _sub_prompt_continuity, hook_input)
     _capture("verbosity-steer", _sub_verbosity_steer, hook_input)
-    _capture("quality-cache --warn", _sub_quality_cache_warn, hook_input,
-             split_system_messages=True)
+    _capture("quality-cache --warn", _sub_quality_cache_warn, hook_input)
 
     # 4-6: harness-only subcommands. The shell guard that used to prefix
     # hooks.json entries 4/5/6 is evaluated once here; when it fails, all three
     # are skipped exactly as the shell `exit 0` skipped each entry.
     if _harness_only_context():
-        _capture("ensure-health", _sub_ensure_health, hook_input,
-                 split_system_messages=True)
-        _capture("quality-cache --force", _sub_quality_cache_force, hook_input,
-                 split_system_messages=True)
+        _capture("ensure-health", _sub_ensure_health, hook_input)
+        _capture("quality-cache --force", _sub_quality_cache_force, hook_input)
         _capture("compact-restore", _sub_compact_restore, hook_input)
     elif _quality_cache_is_missing(hook_input):
         # RECOVERY. Non-harness sessions reach this ONLY when no cache exists.
@@ -757,13 +743,11 @@ def main() -> int:
         # only when the file is genuinely absent, after which the normal
         # throttle governs and this branch is never taken again.
         _capture("quality-cache --force (bootstrap)", _sub_quality_cache_force,
-                 hook_input, split_system_messages=True)
+                 hook_input)
 
-    # Emit all buffered stdout in order (preserves per-shape contract:
-    # hookSpecificOutput JSON objects, systemMessage JSON, raw text -- each
-    # subcommand's output is a self-contained unit, emitted in the order the
-    # host expects from the consolidated dispatcher).
-    _emit_stdout(_stdout_bufs)
+    # Collapse all subcommand stdout into ONE host-valid JSON envelope.
+    # systemMessage -> user (tax-free), bare text + additionalContext -> model.
+    _emit_stdout_envelope(_stdout_bufs)
 
     _clear_runner_deadline()
     return 0

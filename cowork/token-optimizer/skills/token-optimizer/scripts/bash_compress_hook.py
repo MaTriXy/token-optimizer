@@ -50,6 +50,12 @@ from pathlib import Path
 # the command exited non-zero. The remainder of the string is the output.
 _EXIT_CODE_RESPONSE_RE = re.compile(r"^Error: Exit code (\d+)\s*\n?")
 
+# Codex/Cowork deliver a failed Bash tool_response as a plain string starting
+# with "Exit code N\n..." (no "Error: " prefix). Anchored at the string START
+# so a successful command whose output merely contains "Exit code 1" on a later
+# line cannot misfire the failure parse.
+_EXIT_CODE_RESPONSE_RE_CODEX = re.compile(r"^Exit code (\d+)\s*\n?")
+
 
 def main() -> None:
     """Read PostToolUse hook input, compress Bash stdout if eligible."""
@@ -74,19 +80,31 @@ def main() -> None:
     if tool_name != "Bash":
         return
 
-    # Extract tool response. Claude Code delivers a non-zero-exit Bash result
-    # as a plain string ("Error: Exit code N\n<output>"), not a dict. Parse
-    # that form here, once, so every consumer below (thrash guard, build/test
-    # compressor) sees the same stdout and a known exit code.
+    # Extract tool response across ALL host payload shapes so the thrash guard
+    # records EVERY Bash run (not just the ones with a shape we recognize):
+    #   - Claude Code PostToolUse: dict with stdout/stderr/exit_code
+    #   - Claude Code PostToolUseFailure: ``error`` string "Exit code N\n..."
+    #     (handled by the separate PostToolUseFailure path, not here)
+    #   - Codex/Cowork PostToolUse: dict with exit_code, OR a plain string
+    #     "Exit code N\n..." (no "Error: " prefix)
+    #   - Any host: a plain string that does not match a failure prefix is a
+    #     successful command's output (exit_code=0) -- do NOT return early,
+    #     or the thrash guard never records it.
     tool_response = payload.get("tool_response", {})
     exit_code: int | None = None
     if isinstance(tool_response, str):
         m = _EXIT_CODE_RESPONSE_RE.match(tool_response)
         if m is None:
-            return
-        exit_code = int(m.group(1))
-        stdout = tool_response[m.end():]
-        stderr = ""
+            m = _EXIT_CODE_RESPONSE_RE_CODEX.match(tool_response)
+        if m is not None:
+            exit_code = int(m.group(1))
+            stdout = tool_response[m.end():]
+            stderr = ""
+        else:
+            # No failure prefix: treat as a successful command's output so the
+            # thrash guard still records it. exit_code stays None (success).
+            stdout = tool_response
+            stderr = ""
     else:
         if not tool_response or not isinstance(tool_response, dict):
             return
@@ -585,7 +603,15 @@ def _emit_updated_tool_output(stdout: str, stderr: str) -> None:
     Both the thrash nudge and the compression path replace what the agent sees
     through the same envelope, so the hook event name and the four output-shape
     fields (stdout, stderr, interrupted, isImage) live in exactly one place.
+
+    Gated OFF on hosts that do not honor ``updatedToolOutput`` (Codex). The
+    install-time env flag ``TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT`` is set
+    only in the Codex hook command, so runtime host-detection (unreliable
+    inside a hook subprocess) is never consulted. thrash_guard recording and
+    archive_result still run on every host -- only the emission is skipped.
     """
+    if os.environ.get("TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT", "").strip():
+        return
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",

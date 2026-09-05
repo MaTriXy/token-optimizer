@@ -47,8 +47,10 @@ _BASH_RESOLVER_PREFIX = (
 _BASH_RESOLVER_SUFFIX = "; done; exit 0"
 
 
-def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
+def _hook_command(script: str, *args: str, redirect_quiet: bool = False,
+                   extra_env: dict[str, str] | None = None) -> str:
     root = _repo_root()
+    extra_env = extra_env or {}
     if sys.platform == "win32":
         # Codex runs command hooks through cmd.exe on native Windows. Invoke the
         # current interpreter directly so the hot path does not traverse MSYS
@@ -62,6 +64,9 @@ def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
         # (setlocal, for /f, 2^>NUL, >NUL 2>&1) is CORRECT here — do NOT
         # "bash-ify" it. The inverse bug: Claude Code runs hooks via
         # Git Bash, so measure.py's Claude-facing commands are POSIX-shaped.
+        _win_env = ''.join(
+            f'set "{k}={v}" && ' for k, v in extra_env.items()
+        )
         if _SEMVER_DIR_RE.match(root.name):
             # CMD needs a Windows-native counterpart to the POSIX runtime
             # resolver below. Keep the baked path as a fail-open fallback when
@@ -84,6 +89,7 @@ def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
                 f'set "TOKEN_OPTIMIZER_RUNTIME_ROOT={root}" && '
                 f'for /f "delims=" %R in (\'{resolver} 2^>NUL\') '
                 f'do @set "TOKEN_OPTIMIZER_RUNTIME_ROOT={base}\\%R" && '
+                f'{_win_env}'
             )
             python = subprocess.list2cmdline([sys.executable])
             script_args = subprocess.list2cmdline([script, *args])
@@ -92,7 +98,7 @@ def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
                 f"{script_args}"
             )
         else:
-            prefix = 'set "TOKEN_OPTIMIZER_RUNTIME=codex" && '
+            prefix = f'set "TOKEN_OPTIMIZER_RUNTIME=codex" && {_win_env}'
             argv = [sys.executable, str(root / "hooks" / "run.py"), script, *args]
         redirect = " >NUL 2>&1" if redirect_quiet else ""
         if _SEMVER_DIR_RE.match(root.name):
@@ -101,6 +107,8 @@ def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
 
     command_args = " ".join(shlex.quote(arg) for arg in (script, *args))
     redirect = " >/dev/null 2>&1" if redirect_quiet else ""
+    _posix_env = " ".join(f"{k}={shlex.quote(v)}" for k, v in extra_env.items())
+    _posix_env_prefix = f"{_posix_env} " if _posix_env else ""
     if _SEMVER_DIR_RE.match(root.name):
         # Marketplace install: root is .../token-optimizer/<X.Y.Z>/, which is
         # deleted when Codex installs a newer version. Pinning it here makes
@@ -125,7 +133,7 @@ def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
         )
         command = (
             f"{_BASH_RESOLVER_PREFIX}"
-            f'TOKEN_OPTIMIZER_RUNTIME=codex exec "$b" -c {shlex.quote(inner)} "$b"'
+            f'TOKEN_OPTIMIZER_RUNTIME=codex {_posix_env_prefix}exec "$b" -c {shlex.quote(inner)} "$b"'
             f"{_BASH_RESOLVER_SUFFIX}"
         )
     else:
@@ -133,7 +141,7 @@ def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
         runner = shlex.quote(str(root / "hooks" / "run.py"))
         command = (
             f"{_BASH_RESOLVER_PREFIX}"
-            f'TOKEN_OPTIMIZER_RUNTIME=codex exec "$b" {launcher} {runner} {command_args}'
+            f'TOKEN_OPTIMIZER_RUNTIME=codex {_posix_env_prefix}exec "$b" {launcher} {runner} {command_args}'
             f"{redirect}{_BASH_RESOLVER_SUFFIX}"
         )
     return command
@@ -244,9 +252,14 @@ def _managed_hooks(
                 "hooks": [
                     {
                         "type": "command",
+                        # TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT gates off the
+                        # updatedToolOutput emission in bash_compress_hook (Codex
+                        # does not honor that field). thrash_guard recording and
+                        # archive_result still run -- only the emission is skipped.
                         "command": _hook_command(
                             "hooks/posttooluse_runner.py",
                             redirect_quiet=True,
+                            extra_env={"TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT": "1"},
                         ),
                         "timeout": 10,
                     }

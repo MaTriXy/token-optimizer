@@ -665,7 +665,6 @@ _SUBCOMMAND_BUDGETS = {
         ["quality-cache", "--quiet", "--throttle-only"],
         2.0,
     ),
-    "post-tool-use-failure-fallback": ("thrash_guard", ["check"], 0.5),
 }
 
 
@@ -1027,74 +1026,6 @@ def _handle_post_tool_use_failure(hook_input: dict) -> None:
         pass  # Fail open: never add a hook failure on top of a tool failure
 
 
-# --------------------------------------------------------------------------- #
-# PostToolUse failure fallback for hosts that do not fire PostToolUseFailure.
-#
-# Cowork and Codex do not support PostToolUseFailure (verified: Cowork's
-# COWORK_EVENTS and Codex's SUPPORTED_HOOK_EVENTS both omit it). On those hosts
-# a failed Bash call fires PostToolUse with the error in ``tool_response``
-# instead. This fallback extracts the exit code from the tool_response so the
-# thrash guard still runs on hosts that cannot deliver PostToolUseFailure.
-# On Claude Code this fallback is a no-op: PostToolUseFailure fires first and
-# the thrash guard already ran, so the PostToolUse payload for a failed Bash
-# call never reaches this code (Claude Code does not fire PostToolUse for a
-# failed Bash call -- it fires PostToolUseFailure instead).
-# --------------------------------------------------------------------------- #
-
-# tool_response may be a string starting with "Exit code N\n..." (same shape
-# as the PostToolUseFailure ``error`` field) or a dict with an ``exit_code``
-# key. Match both.
-_FAILURE_RESPONSE_RE = re.compile(r"(?:^|\n)Exit code (\d+)\n?(.*)", re.DOTALL)
-
-
-def _handle_post_tool_use_failure_fallback(hook_input: dict) -> None:
-    """Detect a failed Bash call from the PostToolUse payload on hosts that
-    do not support PostToolUseFailure. Runs the thrash guard if found."""
-    try:
-        if str(hook_input.get("tool_name") or "") != "Bash":
-            return
-        # Try the ``error`` field first (same as PostToolUseFailure).
-        error_text = str(hook_input.get("error") or "")
-        m = _FAILURE_ERROR_RE.match(error_text) if error_text else None
-        exit_code = None
-        output = ""
-        if m:
-            exit_code = int(m.group(1))
-            output = m.group(2) or ""
-        else:
-            # Fall back to ``tool_response`` (PostToolUse payload field).
-            tool_response = hook_input.get("tool_response")
-            if isinstance(tool_response, dict):
-                ec = tool_response.get("exit_code")
-                if isinstance(ec, int) and ec != 0:
-                    exit_code = ec
-                    output = str(tool_response.get("stdout") or tool_response.get("output") or "")
-            elif isinstance(tool_response, str) and tool_response:
-                m2 = _FAILURE_RESPONSE_RE.search(tool_response)
-                if m2:
-                    exit_code = int(m2.group(1))
-                    output = m2.group(2) or ""
-        if exit_code is None or exit_code == 0:
-            return
-        command = str((hook_input.get("tool_input") or {}).get("command") or "")
-        if not command:
-            return
-        session_id = str(hook_input.get("session_id") or "")
-        if session_id and not os.environ.get("CLAUDE_SESSION_ID"):
-            os.environ["CLAUDE_SESSION_ID"] = session_id
-        from thrash_guard import check as _thrash_check
-        nudge = _thrash_check(command, output, stderr="", exit_code=exit_code)
-        if nudge:
-            print(json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "additionalContext": nudge,
-            }}))
-    except _HandlerBudgetExceeded:
-        raise
-    except Exception:
-        pass  # Fail open: never add a hook failure on top of a tool failure
-
-
 def main() -> int:
     hook_input = _read_hook_input()
     tool_name = str(hook_input.get("tool_name") or "")
@@ -1151,15 +1082,6 @@ def main() -> int:
     _runner_budget(0.0, subcommand_count_hint=len(pending))
     for name, handler in pending:
         _capture(name, handler, hook_input)
-
-    # Failure fallback for hosts that do not fire PostToolUseFailure (Cowork,
-    # Codex). On Claude Code this is a no-op because failed Bash calls fire
-    # PostToolUseFailure, not PostToolUse. Runs under the same shared deadline.
-    if tool_name == "Bash":
-        _capture(
-            "post-tool-use-failure-fallback",
-            _handle_post_tool_use_failure_fallback, hook_input,
-        )
 
     _emit_post_tool_use_stdout(_stdout_bufs)
 

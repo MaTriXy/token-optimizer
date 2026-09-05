@@ -251,16 +251,17 @@ def test_self_healed_notice_routed_to_log_not_streams(monkeypatch, tmp_path):
 
 
 def test_ensure_health_stdout_diagnostic_routed_to_log(monkeypatch, tmp_path):
-    """ensure-health stdout (e.g. 'Generating initial dashboard') is diagnostic
-    and must go to the log file, NOT into the SessionStart envelope. Only
-    compact-restore output feeds the envelope."""
+    """ensure-health diagnostics (e.g. 'Generating initial dashboard') belong
+    on stderr and must go to the log file, NOT into the SessionStart envelope.
+    Only feature output (systemMessage, compact-restore, bare-text nudges)
+    feeds the envelope."""
     runner = _load_runner(monkeypatch, tmp_path)
     log_file = tmp_path / "diag.log"
     _install_runner_stubs(monkeypatch, runner, tmp_path, log_file)
 
     def _fake_ensure_health():
-        # Diagnostics that used to leak via stdout into the envelope.
-        print("  [Token Optimizer] Generating initial dashboard")
+        # Diagnostics belong on stderr so they reach the log, not the envelope.
+        print("  [Token Optimizer] Generating initial dashboard", file=sys.stderr)
         print("  [Token Optimizer] Captured baseline snapshot for structural savings",
               file=sys.stderr)
 
@@ -280,20 +281,20 @@ def test_ensure_health_stdout_diagnostic_routed_to_log(monkeypatch, tmp_path):
         # The envelope must not carry ensure-health diagnostics.
         blob = json.dumps(obj)
         assert "Generating initial dashboard" not in blob, (
-            "ensure-health stdout diagnostic leaked into the envelope"
+            "ensure-health diagnostic leaked into the envelope"
         )
         assert "Captured baseline snapshot" not in blob, (
             "ensure-health stderr diagnostic leaked into the envelope"
         )
     assert "Generating initial dashboard" not in err, (
-        "ensure-health stdout diagnostic leaked into stderr"
+        "ensure-health diagnostic leaked into stderr"
     )
     assert "Captured baseline snapshot" not in err, (
         "ensure-health stderr diagnostic leaked into stderr"
     )
     log_text = log_file.read_text(encoding="utf-8")
     assert "Generating initial dashboard" in log_text, (
-        "ensure-health stdout diagnostic must reach the log file"
+        "ensure-health diagnostic must reach the log file"
     )
     assert "Captured baseline snapshot" in log_text, (
         "ensure-health stderr diagnostic must reach the log file"
@@ -305,18 +306,18 @@ def test_systemmessage_reaches_envelope_not_log(monkeypatch, tmp_path):
     are user-facing (shown to the USER's terminal, NOT injected into the
     model's context) and must keep reaching the SessionStart stdout envelope.
     They collapse to ``payload["systemMessage"]`` only -- no additionalContext,
-    so zero model-context tax. Plain-text diagnostics alongside them still go
-    to the log file."""
+    so zero model-context tax. Genuine diagnostics (on stderr) still go to
+    the log file."""
     runner = _load_runner(monkeypatch, tmp_path)
     log_file = tmp_path / "diag.log"
     _install_runner_stubs(monkeypatch, runner, tmp_path, log_file)
 
     def _fake_ensure_health():
-        # A user-facing systemMessage (dashboard URL) PLUS a plain-text
-        # diagnostic on the same stdout. The systemMessage must reach the
+        # A user-facing systemMessage (dashboard URL) on stdout PLUS a
+        # genuine diagnostic on stderr. The systemMessage must reach the
         # envelope; the diagnostic must go to the log.
         print(json.dumps({"systemMessage": "Dashboard daemon installed at http://localhost:7777"}))
-        print("  [Token Optimizer] Generating initial dashboard")
+        print("  [Token Optimizer] Generating initial dashboard", file=sys.stderr)
 
     monkeypatch.setattr(runner.measure, "run_ensure_health", _fake_ensure_health)
     monkeypatch.setattr(runner, "_read_hook_input",
@@ -340,9 +341,9 @@ def test_systemmessage_reaches_envelope_not_log(monkeypatch, tmp_path):
     assert "Dashboard daemon installed" not in additional_context, (
         "the systemMessage leaked into additionalContext (model context tax)"
     )
-    # The plain-text diagnostic must NOT be in the envelope.
+    # The genuine diagnostic must NOT be in the envelope.
     assert "Generating initial dashboard" not in json.dumps(obj), (
-        "plain-text diagnostic leaked into the envelope"
+        "genuine diagnostic leaked into the envelope"
     )
 
     # stderr clean.
@@ -350,13 +351,13 @@ def test_systemmessage_reaches_envelope_not_log(monkeypatch, tmp_path):
         "systemMessage leaked into stderr"
     )
     assert "Generating initial dashboard" not in err, (
-        "plain-text diagnostic leaked into stderr"
+        "genuine diagnostic leaked into stderr"
     )
 
-    # The plain-text diagnostic went to the log; the systemMessage did NOT.
+    # The genuine diagnostic went to the log; the systemMessage did NOT.
     log_text = log_file.read_text(encoding="utf-8")
     assert "Generating initial dashboard" in log_text, (
-        "plain-text diagnostic must reach the log file"
+        "genuine diagnostic must reach the log file"
     )
     assert "Dashboard daemon installed" not in log_text, (
         "the systemMessage must NOT go to the log (it reached the user)"

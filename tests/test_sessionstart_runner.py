@@ -575,9 +575,9 @@ def test_stdout_is_emitted_in_dispatch_order(monkeypatch, tmp_path):
     log_file = tmp_path / "diag.log"
     monkeypatch.setattr(runner, "_diagnostics_log_path", lambda: log_file)
 
-    # ensure-health emits a plain-text diagnostic (goes to the log).
+    # ensure-health emits a diagnostic to stderr (goes to the log).
     monkeypatch.setattr(runner.measure, "run_ensure_health",
-                        lambda: print("MARK-ensure-health"))
+                        lambda: sys.stderr.write("MARK-ensure-health\n"))
     # quality-cache emits a systemMessage (user-facing, tax-free, feeds the
     # envelope as payload["systemMessage"]).
     monkeypatch.setattr(

@@ -33138,6 +33138,13 @@ def _collapse_hook_stdout(text, event="SessionStart"):
         if obj is None:
             plain_lines.append(line)
             continue
+        # Flush accumulated plain text as a context unit BEFORE the JSON object
+        # so dispatch order is preserved (plain text from subcommand N appears
+        # before additionalContext from subcommand N+1, not after all of them).
+        plain_text = "\n".join(plain_lines).strip()
+        if plain_text:
+            contexts.append(plain_text)
+            plain_lines = []
         msg = obj.get("systemMessage")
         if isinstance(msg, str) and msg.strip():
             system_messages.append(msg.strip())
@@ -33155,9 +33162,10 @@ def _collapse_hook_stdout(text, event="SessionStart"):
             elif key == "stopReason" and isinstance(value, str):
                 carried[key] = value
 
+    # Flush any trailing plain text as the final context unit.
     plain_text = "\n".join(plain_lines).strip()
     if plain_text:
-        contexts.insert(0, plain_text)
+        contexts.append(plain_text)
 
     payload = dict(carried)
     if system_messages:
