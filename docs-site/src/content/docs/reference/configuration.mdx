@@ -70,7 +70,7 @@ These tune `checkpoint_relevance_score`, the IDF-weighted content-overlap scorer
 
 | Variable | Default | Safe range (clamped) | Effect |
 |---|---|---|---|
-| `TOKEN_OPTIMIZER_CHECKPOINT_RELEVANCE_THRESHOLD` | 0.25 | 0.1–0.9 | Minimum score for the pull tool to resume a checkpoint. Lower widens recall (risks vague-continue false matches, #129); higher demands a stronger topical/resume signal. |
+| `TOKEN_OPTIMIZER_CHECKPOINT_RELEVANCE_THRESHOLD` | 0.25 | 0.1–0.9 | Minimum score for the pull tool to resume a checkpoint. Lower widens recall (risks vague-continue false matches); higher demands a stronger topical/resume signal. |
 | `TOKEN_OPTIMIZER_RELEVANCE_RESUME_BONUS_PRECISION_FLOOR` | 0.5 | 0.0–0.99 | Floor for the precision-scaled resume-intent bonus: effective factor = floor + (1−floor)·precision. Higher protects verbose genuine resumes; lower makes a cross-client graze pay more for its unmatched tokens. |
 | `TOKEN_OPTIMIZER_RELEVANCE_PATH_TF_WEIGHT` | 0.5 | 0.0–2.0 | Weight of the path-identity frequency boost (a token recurring across a checkpoint's file paths out-ranks the same word quoted once in prose). 0 disables the boost. |
 | `TOKEN_OPTIMIZER_RELEVANCE_PATH_TF_CAP` | 8 | 1–50 | Cap on the per-token path frequency counted by the boost, so one mega-repeated path segment cannot dominate recall. |

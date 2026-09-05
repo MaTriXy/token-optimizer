@@ -61,7 +61,7 @@ export TOKEN_OPTIMIZER_RUNTIME="$RUNTIME"
    keeps measurement scoped to the OpenCode session and never writes to `~/.claude`):
    - Claude Code plugin: `bash "$CLAUDE_PLUGIN_ROOT/hooks/python-launcher.sh" $MEASURE_PY quick --json`
    - Codex / OpenCode / standalone: `TOKEN_OPTIMIZER_RUNTIME="$RUNTIME" bash "$TO_LAUNCHER" "$MEASURE_PY" quick --json`
-     (only if `$TO_LAUNCHER` is empty, fall back to `TOKEN_OPTIMIZER_RUNTIME="$RUNTIME" python3 "$MEASURE_PY" quick --json` — the bare-python3 form flashes a console window on Windows, #107)
+     (only if `$TO_LAUNCHER` is empty, fall back to `TOKEN_OPTIMIZER_RUNTIME="$RUNTIME" python3 "$MEASURE_PY" quick --json` — the bare-python3 form flashes a console window on Windows)
 
 3. Parse the JSON output and present concisely:
    - Context overhead: X tokens (Y% of context window)

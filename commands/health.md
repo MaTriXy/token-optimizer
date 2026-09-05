@@ -61,7 +61,7 @@ export TOKEN_OPTIMIZER_RUNTIME="$RUNTIME"
    keeps the session scan scoped to OpenCode and never reaches into `~/.claude`):
    - Claude Code plugin: `bash "$CLAUDE_PLUGIN_ROOT/hooks/python-launcher.sh" $MEASURE_PY health`
    - Codex / OpenCode / standalone: `TOKEN_OPTIMIZER_RUNTIME="$RUNTIME" bash "$TO_LAUNCHER" "$MEASURE_PY" health`
-     (only if `$TO_LAUNCHER` is empty, fall back to `TOKEN_OPTIMIZER_RUNTIME="$RUNTIME" python3 "$MEASURE_PY" health` — the bare-python3 form flashes a console window on Windows, #107)
+     (only if `$TO_LAUNCHER` is empty, fall back to `TOKEN_OPTIMIZER_RUNTIME="$RUNTIME" python3 "$MEASURE_PY" health` — the bare-python3 form flashes a console window on Windows)
 
 3. Present results clearly. For each session show: PID, elapsed time, version, and flags (STALE >24h, ZOMBIE >48h, OUTDATED, HEADLESS, TERMINAL).
 

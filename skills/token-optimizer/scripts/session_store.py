@@ -177,7 +177,7 @@ class SessionStore:
         # hook process). The compaction clear (read_cache.handle_clear_compacted)
         # opts into a higher value so it waits out a sibling write lock on the
         # same per-session db instead of dying at 50ms and silently no-op'ing
-        # (#101 follow-up).
+        # (contention-safe follow-up).
         self._busy_timeout_ms = (
             50 if busy_timeout_ms is None else max(0, int(busy_timeout_ms))
         )

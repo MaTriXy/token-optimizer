@@ -169,7 +169,7 @@ def _cp_from_spec(tmp_path, spec):
     # Age the file on DISK so a "stale" spec is genuinely stale. The relevance
     # scorer's recency bonus reads the checkpoint file's mtime, NOT the ``created``
     # dict field below -- so without this a spec labelled stale still got the
-    # recency bonus (fresh mtime), and #129's stale-pool incident passed for the
+    # recency bonus (fresh mtime), and the stale-pool incident passed for the
     # wrong reason (bare "continue" scores 0 regardless). Now age_seconds is
     # authoritative for both mtime and ``created``.
     age_seconds = spec.get("age_seconds", 60)

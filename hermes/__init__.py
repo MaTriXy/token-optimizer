@@ -25,8 +25,8 @@ After installation the full plugin directory layout is:
       measure-path         (one-line locator → checkout's measure.py)
 
 ``hermes_install.py`` copies the hermes/ payload (this file, plugin.yaml,
-README.md) AND the three runtime modules above into that directory (#58: earlier
-installs copied only the payload, leaving the imports below broken). It does NOT
+README.md) AND the three runtime modules above into that directory. Earlier
+installs copied only the payload, leaving the imports below broken. It does NOT
 copy measure.py itself — that would silently drift on update — and instead writes
 the ``measure-path`` locator naming the canonical measure.py in the checkout;
 hermes_hook_bridge reads it to shell into measure.py.

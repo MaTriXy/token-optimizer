@@ -626,7 +626,7 @@ def _load_proc_snapshot() -> dict:
                 timeout=2,
                 # Unreachable on Windows (the disabled guard above returns
                 # first), but carried anyway so every spawn in this file states
-                # the #107 no-flash intent. 0 on POSIX, so a no-op here.
+                # the no-flash intent. 0 on POSIX, so a no-op here.
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if proc.returncode == 0:

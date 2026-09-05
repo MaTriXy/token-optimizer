@@ -1824,12 +1824,12 @@ def handle_clear_compacted(hook_input: dict[str, Any], quiet: bool) -> None:
     path is gated on the file entry existing, so clearing only ``file_reads`` is
     safe and preserves the delta baseline for an edited file.
 
-    Contention-safe (#101 follow-up): SessionStore connects fail-fast
+    Contention-safe: SessionStore connects fail-fast
     (``busy_timeout=50ms``), so under a sibling SessionStart compact-restore or
     PostToolUse archive write holding the same per-session sqlite write lock, a
     bare ``clear_file_entries()`` raised ``sqlite3.OperationalError('database is
-    locked')`` BEFORE the DELETE, ``main()`` exited 0, and #101 silently
-    resurrected. This path raises a per-call ``busy_timeout`` (default 5000ms,
+    locked')`` BEFORE the DELETE, ``main()`` exited 0, and the silent-resurrection
+    bug returned. This path raises a per-call ``busy_timeout`` (default 5000ms,
     tunable via ``TOKEN_OPTIMIZER_CLEAR_COMPACTED_BUSY_TIMEOUT``) so it waits out
     a short lock within the 10s hook budget, and wraps the clear in
     ``try/except sqlite3.OperationalError`` emitting a LOUD stderr line on
@@ -1842,7 +1842,7 @@ def handle_clear_compacted(hook_input: dict[str, Any], quiet: bool) -> None:
         # C5: FAILED branches stay loud even under --quiet.
         print(
             "[read_cache] --clear-compacted FAILED: no session_id in hook "
-            "input; live session file_reads left intact (#101 not cleared)",
+            "input; live session file_reads left intact (not cleared)",
             file=sys.stderr,
         )
         return
@@ -1862,7 +1862,7 @@ def handle_clear_compacted(hook_input: dict[str, Any], quiet: bool) -> None:
         # C5: FAILED branches stay loud even under --quiet.
         print(
             "[read_cache] --clear-compacted FAILED: SessionStore unavailable; "
-            f"file_reads for {session_id} left intact (#101 not cleared)",
+            f"file_reads for {session_id} left intact (not cleared)",
             file=sys.stderr,
         )
         return
@@ -1873,10 +1873,10 @@ def handle_clear_compacted(hook_input: dict[str, Any], quiet: bool) -> None:
         # of dying at the 50ms fail-fast default during _init_schema.
         store.clear_file_entries()
     except sqlite3.OperationalError as exc:
-        # LOUD failure: never a silent exit-0 no-op that resurrects #101.
+        # LOUD failure: never a silent exit-0 no-op that resurrects the bug.
         print(
             f"[read_cache] --clear-compacted FAILED: {exc}; file_reads for "
-            f"{session_id} left intact (#101 not cleared)",
+            f"{session_id} left intact (not cleared)",
             file=sys.stderr,
         )
         return
@@ -2145,7 +2145,7 @@ def main() -> None:
     quiet = "--quiet" in args or "-q" in args
 
     if "--clear-compacted" in args:
-        # #101: SessionStart(compact) clears ONLY the current session's
+        # SessionStart(compact) clears ONLY the current session's
         # file_reads (via stdin session_id) so a post-compaction re-Read of an
         # unchanged file is not judged redundant. Never touches the decisions
         # telemetry log or legacy cache json (unlike handle_clear's session
@@ -2153,10 +2153,10 @@ def main() -> None:
         hook_input = read_stdin_hook_input(1_000_000)
         if not hook_input:
             # C5: FAILED branches stay loud even under --quiet; --quiet only
-            # suppresses success chatter. A silent exit-0 no-op resurrects #101.
+            # suppresses success chatter. A silent exit-0 no-op resurrects the bug.
             print(
                 "[read_cache] --clear-compacted FAILED: no stdin hook input; "
-                "live session file_reads left intact (#101 not cleared)",
+                "live session file_reads left intact (not cleared)",
                 file=sys.stderr,
             )
             return
