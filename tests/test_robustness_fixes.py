@@ -227,7 +227,7 @@ class TestBearerIdempotency:
 
 
 # ---------------------------------------------------------------------------
-# A3 re-verification findings (N-1, N-1b, N-3, N-4): the Cursor-PR copies of
+# A3 (N-1, N-1b, N-3, N-4): the Cursor-PR copies of
 # _safe_int / _ro_connect missed the H-1/H-2 parity sweep, the MySQL pattern
 # was case-sensitive, and the M-3 resolve() fix was not applied to the
 # hermes/copilot _ro_connect copies.
@@ -262,7 +262,7 @@ class TestCursorRoConnectUriInjection:
     )
     def test_db_path_with_question_mark_opens_readonly(self, tmp_path):
         """N-1 (POSIX-only): the '?' variant of the URI-injection repro —
-        '?' starts the URI query string, which is the exact A3 live repro
+        '?' starts the URI query string, which is the exact A3 repro
         that opened a truncated path read-write. '?' is illegal in Windows
         filenames so this is skipped there; the '#' test covers the same
         escaping cross-platform."""

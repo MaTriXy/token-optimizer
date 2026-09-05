@@ -43,7 +43,7 @@ fix along axes the regression tests do not cover:
 A probe PASSING means the fix held (the defeat failed).  A probe FAILING means
 a real defeat was found and is reported as a ``discoveredIssue``.
 
-Run: python3 -m pytest tests/test_defeat_exit_cleanup.py -q
+Run: python3 -m pytest tests/test_exit_cleanup.py -q
 """
 
 from __future__ import annotations

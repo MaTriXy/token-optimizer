@@ -12,7 +12,7 @@ Covers:
 * commands/health.md and commands/quick.md route the non-Claude-Code
   (Codex/OpenCode/standalone) invocation through python-launcher.sh instead
   of a bare `python3` console spawn.
-* T1 Finding 6: keepwarm-experiment's `claude --help` spawn routes a missing
+* keepwarm-experiment's `claude --help` spawn routes a missing
   binary through fail() (clean ABORT) instead of a bare FileNotFoundError.
 
 Each test fails on the pre-fix code (verified by temporary revert).
@@ -284,7 +284,7 @@ def test_command_doc_resolver_block_is_valid_bash(doc):
 
 
 # ---------------------------------------------------------------------------
-# T1 Finding 6: keepwarm-experiment guards its `claude --help` spawn.
+# keepwarm-experiment guards its `claude --help` spawn.
 # ---------------------------------------------------------------------------
 
 
