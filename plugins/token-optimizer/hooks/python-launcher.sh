@@ -15,7 +15,7 @@
 # Exits 127 with a diagnostic message if none found.
 
 set -eu
-# C7: extglob enables +([0-9]) in the version-number case patterns below so
+# Extglob enables +([0-9]) in the version-number case patterns below so
 # the glob is anchored to the path-component boundary. Without it, * in a
 # case pattern crosses / and Python[23]* matches Python3-evil/python.exe.
 shopt -s extglob
@@ -109,7 +109,7 @@ _is_safe_prefix() {
     # Drive-letter-anchored to preserve the anti-PATH-hijack intent.
     # Version-number suffixes block directory-name spoofing (e.g. Python3-evil).
     case "$binpath" in
-        # C7: +([0-9]) anchors the version suffix to digits-only so a spoofed
+        # +([0-9]) anchors the version suffix to digits-only so a spoofed
         # dir name like Python3-evil cannot pass (previously * crossed / and
         # matched Python3-evil/python.exe). The trailing /* requires a path
         # separator after the version component.
@@ -130,7 +130,7 @@ _is_safe_prefix() {
         /[a-zA-Z]/Windows/py.exe)                                      return 0 ;;
         /[a-zA-Z]/Windows/pyw.exe)                                     return 0 ;;
     esac
-    # C8: case-insensitive WindowsApps allow for Windows-style drive-letter
+    # Case-insensitive WindowsApps allow for Windows-style drive-letter
     # paths. On a case-insensitive FS the dir can be any casing; the drive-
     # letter anchor ([a-zA-Z]/) constrains this to Windows-style paths so
     # Linux is unaffected.
@@ -170,7 +170,7 @@ _is_msys_platform() {
     return 1
 }
 
-# C8: Windows is case-insensitive, so the WindowsApps directory can appear in
+# Windows is case-insensitive, so the WindowsApps directory can appear in
 # any casing (WindowsApps, windowsapps, WINDOWSAPPS, Windowsapps). The old
 # explicit-variant patterns (*/WindowsApps/*|*/windowsapps/*) only covered
 # two casings and would miss others, letting a Store AppExecutionAlias stub
@@ -324,7 +324,7 @@ _maybe_swap_to_pythonw() {
     pythonw="${dir}/${twin}"
     [ -f "$pythonw" ] && [ -x "$pythonw" ] && [ -s "$pythonw" ] || return 0
     _is_safe_prefix "$pythonw" || return 0
-    # C8: case-insensitive WindowsApps skip (any casing on case-insensitive FS).
+    # Case-insensitive WindowsApps skip (any casing on case-insensitive FS).
     _path_contains_windowsapps "$pythonw" && return 0
     # Liveness-probe the twin before committing to it. A corrupt/garbage
     # pythonw.exe (e.g. a half-overwritten install twin, or a 0xC000-style
@@ -336,7 +336,7 @@ _maybe_swap_to_pythonw() {
     # /dev/null so the hook's real stdin is never consumed by the probe.
     # On any doubt, keep python.exe (return 0) -- this can only ever opt
     # INTO pythonw, never block an exec.
-    # C6: --kill-after=1s escalates to SIGKILL 1s after SIGTERM. pythonw is
+    # --kill-after=1s escalates to SIGKILL 1s after SIGTERM. pythonw is
     # GUI-subsystem and can ignore SIGTERM (no console handler), leaving a
     # hung twin holding the 2s budget past expiry and stalling the hook.
     if command -v timeout >/dev/null 2>&1; then
@@ -588,7 +588,7 @@ find_interpreter() {
             # Reject interpreters outside known-safe prefix directories.
             # Prevents PATH-order attacks where a malicious dir appears first.
             _is_safe_prefix "$binpath" || continue
-            # C8: case-insensitive WindowsApps detection (any casing on
+            # Case-insensitive WindowsApps detection (any casing on
             # case-insensitive FS). WindowsApps may contain real Store-installed
             # Python OR non-functional AppExecutionAlias stubs (non-zero-byte,
             # pass -s). Distinguish them flash-free via the GUI

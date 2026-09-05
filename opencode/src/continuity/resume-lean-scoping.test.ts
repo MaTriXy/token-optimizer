@@ -46,7 +46,7 @@ test("keepRecoveredItem is purely set-overlap, no float threshold", () => {
 });
 
 // ---------------------------------------------------------------------------
-// crossProjectFileDrop parity — path normalization (GAUNTLET C2)
+// crossProjectFileDrop parity — path normalization
 // Loaded from tests/fixtures/cross_project_file_drop_parity.json, consumed by
 // all 3 suites. Covers backslash, UNC, trailing separator, mixed separators,
 // case mismatch (casefold on Darwin/Win32), relative, and cwd-absent.
@@ -176,7 +176,7 @@ test("buildLeanResumeContext no filter when promptText present but cwd absent (A
 });
 
 // ---------------------------------------------------------------------------
-// C11: .filter(Boolean) on decisions/files prevents empty-string slots in the
+// .filter(Boolean) on decisions/files prevents empty-string slots in the
 // rendered body. safeScalar returns "" for null/undefined or whitespace-only
 // entries; without .filter(Boolean) the join produces "dec1; ; dec3".
 // ---------------------------------------------------------------------------

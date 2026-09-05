@@ -440,7 +440,7 @@ def test_pasted_path_matches_right_not_wrong(m, tmp_path):
 
 # --- R2.5-A: a project whose slug is built only from scaffolding-adjacent words
 # must still be resumable. "company"/"brain" were wrongly in the scaffold stoplist,
-# so a genuine "continue working on the company brain" scored 0.0 (Fable-flagged FN).
+# so a genuine "continue working on the company brain" scored 0.0 (a real false negative).
 def test_stoplist_named_project_still_resumes(m, tmp_path):
     cb = _write_cp(
         tmp_path, "bbbb2222-20260812-120000-checkpoint.md",

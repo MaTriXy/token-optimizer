@@ -499,7 +499,7 @@ def test_mirror_remains_byte_identical():
 
 
 # ---------------------------------------------------------------------------
-# GAUNTLET C6: both pythonw probe sites must use `timeout --kill-after=1s 2s`.
+# Both pythonw probe sites must use `timeout --kill-after=1s 2s`.
 # A bare `timeout 2s` sends SIGTERM at 2s but a GUI-subsystem pythonw (or a
 # Store AppExecutionAlias stub) can ignore SIGTERM and hold the budget past
 # expiry, stalling the hook. --kill-after=1s escalates to SIGKILL 1s after
@@ -507,7 +507,7 @@ def test_mirror_remains_byte_identical():
 # ---------------------------------------------------------------------------
 
 def test_pythonw_liveness_probe_uses_kill_after():
-    """C6: the _maybe_swap_to_pythonw liveness probe must use
+    """The _maybe_swap_to_pythonw liveness probe must use
     --kill-after=1s so a SIGTERM-ignoring pythonw twin is SIGKILLed."""
     source = LAUNCHER.read_text(encoding="utf-8")
     # The probe is the line with `timeout ... "$pythonw" -c ""`.
@@ -518,7 +518,7 @@ def test_pythonw_liveness_probe_uses_kill_after():
 
 
 def test_windowsapps_probe_uses_kill_after():
-    """C6: the find_interpreter WindowsApps --version probe must use
+    """The find_interpreter WindowsApps --version probe must use
     --kill-after=1s so a SIGTERM-ignoring Store stub is SIGKILLed."""
     source = LAUNCHER.read_text(encoding="utf-8")
     assert 'timeout --kill-after=1s 2s "$binpath" --version' in source, (
@@ -528,7 +528,7 @@ def test_windowsapps_probe_uses_kill_after():
 
 
 def test_kill_after_present_in_mirror():
-    """C6: the mirror must carry the same --kill-after=1s probes."""
+    """The mirror must carry the same --kill-after=1s probes."""
     source = MIRROR.read_bytes()
     assert b"--kill-after=1s 2s" in source, (
         "the mirror launcher must carry --kill-after=1s on both probe sites"
@@ -544,7 +544,7 @@ def test_kill_after_present_in_mirror():
 
 
 # ---------------------------------------------------------------------------
-# GAUNTLET C7: _is_safe_prefix version-number globs must be anchored to the
+# _is_safe_prefix version-number globs must be anchored to the
 # path-component boundary. In bash case patterns, * crosses /, so the old
 # Python[23]* matched Python3-evil/python.exe (spoofed dir name). The fix
 # uses extglob +([0-9])/* to require digits-only until the path separator.
@@ -559,7 +559,7 @@ def _safe_prefix_driver(binpath: str) -> str:
 
 
 def test_safe_prefix_blocks_program_files_dir_spoof():
-    """C7: Python3-evil under Program Files must NOT pass _is_safe_prefix."""
+    """Python3-evil under Program Files must NOT pass _is_safe_prefix."""
     out, rc, _err = _run(
         _safe_prefix_driver("/c/Program Files/Python3-evil/python.exe"),
         "",
@@ -571,7 +571,7 @@ def test_safe_prefix_blocks_program_files_dir_spoof():
 
 
 def test_safe_prefix_blocks_program_files_x86_dir_spoof():
-    """C7: Python3-evil under Program Files (x86) must NOT pass."""
+    """Python3-evil under Program Files (x86) must NOT pass."""
     out, rc, _err = _run(
         _safe_prefix_driver("/c/Program Files (x86)/Python3-evil/python.exe"),
         "",
@@ -583,7 +583,7 @@ def test_safe_prefix_blocks_program_files_x86_dir_spoof():
 
 
 def test_safe_prefix_blocks_root_python_dir_spoof():
-    """C7: Python31-evil at drive root must NOT pass _is_safe_prefix."""
+    """Python31-evil at drive root must NOT pass _is_safe_prefix."""
     out, rc, _err = _run(
         _safe_prefix_driver("/c/Python31-evil/python.exe"),
         "",
@@ -595,7 +595,7 @@ def test_safe_prefix_blocks_root_python_dir_spoof():
 
 
 def test_safe_prefix_allows_legit_program_files_python():
-    """C7: Python313 under Program Files still passes (no false reject)."""
+    """Python313 under Program Files still passes (no false reject)."""
     out, rc, _err = _run(
         _safe_prefix_driver("/c/Program Files/Python313/python.exe"),
         "",
@@ -607,7 +607,7 @@ def test_safe_prefix_allows_legit_program_files_python():
 
 
 def test_safe_prefix_allows_legit_root_python():
-    """C7: Python313 at drive root still passes (no false reject)."""
+    """Python313 at drive root still passes (no false reject)."""
     out, rc, _err = _run(
         _safe_prefix_driver("/c/Python313/python.exe"),
         "",
@@ -619,7 +619,7 @@ def test_safe_prefix_allows_legit_root_python():
 
 
 def test_safe_prefix_extglob_enabled_in_launcher():
-    """C7: the launcher must enable extglob for +([0-9]) to work."""
+    """The launcher must enable extglob for +([0-9]) to work."""
     source = LAUNCHER.read_text(encoding="utf-8")
     assert "shopt -s extglob" in source, (
         "launcher must enable extglob so +([0-9]) patterns work in case"
@@ -627,7 +627,7 @@ def test_safe_prefix_extglob_enabled_in_launcher():
 
 
 def test_safe_prefix_extglob_in_mirror():
-    """C7: the mirror must also enable extglob."""
+    """The mirror must also enable extglob."""
     source = MIRROR.read_text(encoding="utf-8")
     assert "shopt -s extglob" in source, (
         "mirror launcher must enable extglob so +([0-9]) patterns work"
@@ -635,7 +635,7 @@ def test_safe_prefix_extglob_in_mirror():
 
 
 # ---------------------------------------------------------------------------
-# GAUNTLET C8: WindowsApps skip must be case-insensitive. Windows is a
+# WindowsApps skip must be case-insensitive. Windows is a
 # case-insensitive FS, so the directory can appear as WindowsApps,
 # windowsapps, WINDOWSAPPS, Windowsapps, etc. The old explicit-variant
 # patterns (*/WindowsApps/*|*/windowsapps/*) only covered two casings.
@@ -656,7 +656,7 @@ def _windowsapps_driver(binpath: str) -> str:
     "WINDOWsapPS",
 ])
 def test_windowsapps_detected_case_insensitive(casing):
-    """C8: any casing of the WindowsApps directory must be detected."""
+    """Any casing of the WindowsApps directory must be detected."""
     path = f"/c/Users/x/AppData/Local/Microsoft/{casing}/python.exe"
     out, rc, _err = _run(_windowsapps_driver(path), "", {})
     assert "wa=0" in out, (
@@ -665,7 +665,7 @@ def test_windowsapps_detected_case_insensitive(casing):
 
 
 def test_windowsapps_not_detected_for_unrelated_path():
-    """C8: a path that does not contain windowsapps (any casing) must not
+    """A path that does not contain windowsapps (any casing) must not
     be detected."""
     out, rc, _err = _run(
         _windowsapps_driver("/c/Users/x/AppData/Local/Microsoft/NotApps/python.exe"),
@@ -678,7 +678,7 @@ def test_windowsapps_not_detected_for_unrelated_path():
 
 
 def test_windowsapps_helper_in_both_launchers():
-    """C8: both launchers must define _path_contains_windowsapps."""
+    """Both launchers must define _path_contains_windowsapps."""
     for launcher, label in [(LAUNCHER, "canonical"), (MIRROR, "mirror")]:
         source = launcher.read_text(encoding="utf-8")
         assert "_path_contains_windowsapps" in source, (

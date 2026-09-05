@@ -43,7 +43,7 @@ const PARITY_FIXTURE = keep_recovered_parity_json_1.default
     (0, bun_test_1.expect)((0, continuity_js_1.keepRecoveredItem)("alpha beta", new Set())).toBe(true);
 });
 // ---------------------------------------------------------------------------
-// crossProjectFileDrop parity — path normalization (GAUNTLET C2)
+// crossProjectFileDrop parity — path normalization
 // Loaded from tests/fixtures/cross_project_file_drop_parity.json, consumed by
 // all 3 suites. Covers backslash, UNC, trailing separator, mixed separators,
 // case mismatch (casefold on Darwin/Win32), relative, and cwd-absent.
@@ -226,7 +226,7 @@ function mixedAbCheckpointMd() {
     (0, bun_test_1.expect)(hint).not.toContain("- Omitted");
 });
 // ---------------------------------------------------------------------------
-// C4: the disclosure line must survive the 800-char body slice
+// The disclosure line must survive the 800-char body slice
 // ---------------------------------------------------------------------------
 (0, bun_test_1.test)("buildContinuityHint disclosure survives when kept body exceeds the 800-char slice", () => {
     const entry = makeEntry();
@@ -276,7 +276,7 @@ function mixedAbCheckpointMd() {
     (0, bun_test_1.expect)(discIdx).toBeGreaterThan(truncIdx);
 });
 // ---------------------------------------------------------------------------
-// C10: neutralizeRecoveredBody must strip CR (\x0d). The old regex kept CR,
+// NeutralizeRecoveredBody must strip CR (\x0d). The old regex kept CR,
 // so Windows \r\n line endings survived and CR could be used for terminal
 // injection. The fix adds \x0d to the strip class.
 // ---------------------------------------------------------------------------

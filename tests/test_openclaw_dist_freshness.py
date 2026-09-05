@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dist-freshness guard for the OpenClaw shipped artifact (GAUNTLET C1).
+"""Dist-freshness guard for the OpenClaw shipped artifact.
 
 The OpenClaw extension entry (``dist/index.js``) ``require``s the committed
 ``dist/continuity.js``. ``bun test`` imports ``./continuity.js`` which bun

@@ -18,7 +18,7 @@
     "prompt": "결제 모듈 수정해줘",
     "checkpoint": "결제 모듈 리팩터링 진행",
     "expect_match": true,
-    "why": "a typical Korean request built only on short nouns now matches, closing the gap the gauntlet flagged (was 0.0 with regex-only)."
+    "why": "a typical Korean request built only on short nouns now matches, closing the gap (was 0.0 with regex-only)."
   },
   {
     "name": "spanish_accented_latin",

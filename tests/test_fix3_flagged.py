@@ -194,7 +194,7 @@ def test_no_gui_twin_console_probe_still_rejects_stub(store, tmp_path):
 
 
 def test_candidate_probe_keeps_c6_timeout_semantics():
-    """C6: both candidate probe sites (the -c marker write and the --version
+    """Both candidate probe sites (the -c marker write and the --version
     string check) carry the `timeout --kill-after=1s 2s` escalation, alongside the
     pre-existing pythonw-swap liveness probe (3 total in the launcher). Post-fix
     the probes run against `$binpath` (the candidate), never a `$twin`."""

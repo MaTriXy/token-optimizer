@@ -48,7 +48,7 @@ with open(REPO / "tests" / "fixtures" / "keep_recovered_parity.json", encoding="
     ]
 
 
-# Shared path-normalization fixture for _cross_project_file_drop (GAUNTLET C2).
+# Shared path-normalization fixture for _cross_project_file_drop.
 # Single source of truth consumed by all 3 suites (Python, OpenClaw TS, OpenCode
 # TS). Each row: (path, cwd, expected_drop_case_sensitive, expected_drop_casefold).
 # expected_drop_casefold is None for rows whose result is platform-independent.
@@ -123,8 +123,8 @@ def test_keep_recovered_item_no_float_threshold():
 
 
 # ---------------------------------------------------------------------------
-# Parity: _cross_project_file_drop on the shared path-normalization fixture
-# (GAUNTLET C2). Covers backslash, UNC, trailing separator, mixed separators,
+# Parity: _cross_project_file_drop on the shared path-normalization fixture.
+# Covers backslash, UNC, trailing separator, mixed separators,
 # case mismatch (casefold on Darwin/Windows), relative, and cwd-absent.
 # ---------------------------------------------------------------------------
 
@@ -145,7 +145,7 @@ def test_cross_project_file_drop_parity_fixture():
 
 
 # ---------------------------------------------------------------------------
-# C10: _neutralize_recovered_body must strip CR (\x0d). The old regex
+# _neutralize_recovered_body must strip CR (\x0d). The old regex
 # [\x00-\x08\x0b\x0c\x0e-\x1f\x7f] kept CR, so Windows \r\n line endings
 # survived in the recovered body and CR could be used for terminal injection
 # (CR moves the cursor to column 0, letting later text overwrite the start
@@ -153,7 +153,7 @@ def test_cross_project_file_drop_parity_fixture():
 # ---------------------------------------------------------------------------
 
 def test_neutralize_recovered_body_strips_cr(measure):
-    """C10: CR (\x0d) must be stripped from the recovered body."""
+    """CR (\x0d) must be stripped from the recovered body."""
     mod, _ = measure
     text = "line1\r\nline2\rXoverwritten"
     result = mod._neutralize_recovered_body(text)
@@ -165,7 +165,7 @@ def test_neutralize_recovered_body_strips_cr(measure):
 
 
 def test_neutralize_recovered_body_strips_all_c0_except_tab_and_lf(measure):
-    """C10: the strip class covers all C0 controls except tab (\x09) and
+    """The strip class covers all C0 controls except tab (\x09) and
     LF (\x0a), now including CR (\x0d)."""
     mod, _ = measure
     # Every C0 control char except \x09 (tab) and \x0a (LF):
@@ -414,7 +414,7 @@ def test_continuity_prompt_hint_no_filter_when_cwd_absent(measure, monkeypatch):
 
 
 def test_continuity_prompt_hint_no_crash_when_keep_tokens_none(measure, monkeypatch):
-    """GAUNTLET C3: site 1 of the hint decision filter must guard
+    """Site 1 of the hint decision filter must guard
     ``keep_tokens is not None``.
 
     ``keep_tokens`` is ``... if (text and cwd) else None``. When it is None

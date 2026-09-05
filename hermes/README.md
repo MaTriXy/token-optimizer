@@ -136,7 +136,7 @@ The plugin is model-agnostic. Hermes routes sessions to whichever model the user
 - A working Hermes install (the plugin copies into Hermes's plugin directory and relies on Hermes to load and invoke it)
 - The Token Optimizer repo cloned locally (the installer reads from `hermes/` in the repo root)
 
-**Beta status:** the plugin has been through a full internal gauntlet but has not yet been validated against a live Hermes install. Live smoke-testing is the remaining gate before a stable release. Expect rough edges; file issues on the [Token Optimizer repo](https://github.com/alexgreensh/token-optimizer).
+**Beta status:** the plugin has been through full internal testing but has not yet been validated against a live Hermes install. Live smoke-testing is the remaining gate before a stable release. Expect rough edges; file issues on the [Token Optimizer repo](https://github.com/alexgreensh/token-optimizer).
 
 ## How It Works
 

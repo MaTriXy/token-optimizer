@@ -6,7 +6,7 @@ description: "Hermes: a three-signal quality score, a pre-turn context nudge, re
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="caution" title="Beta">
-The Hermes adapter is beta, version 0.1.0. It has passed a full internal gauntlet but is not yet validated against a live Hermes install. Live smoke-testing is the remaining gate before stable.
+The Hermes adapter is beta, version 0.1.0. It has passed full internal testing but is not yet validated against a live Hermes install. Live smoke-testing is the remaining gate before stable.
 </Aside>
 
 Hermes runs Token Optimizer through a read-only adapter. It scores quality from a three-signal subset, fires a one-line context nudge before each turn, and never writes to the Hermes session database. The narrower feature set follows directly from what Hermes exposes to plugins.

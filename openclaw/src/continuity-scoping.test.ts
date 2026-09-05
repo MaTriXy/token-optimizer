@@ -52,7 +52,7 @@ test("keepRecoveredItem is purely set-overlap, no float threshold", () => {
 });
 
 // ---------------------------------------------------------------------------
-// crossProjectFileDrop parity — path normalization (GAUNTLET C2)
+// crossProjectFileDrop parity — path normalization
 // Loaded from tests/fixtures/cross_project_file_drop_parity.json, consumed by
 // all 3 suites. Covers backslash, UNC, trailing separator, mixed separators,
 // case mismatch (casefold on Darwin/Win32), relative, and cwd-absent.
@@ -266,7 +266,7 @@ test("buildContinuityHint no filter when promptText present but cwd absent (AND 
 });
 
 // ---------------------------------------------------------------------------
-// C4: the disclosure line must survive the 800-char body slice
+// The disclosure line must survive the 800-char body slice
 // ---------------------------------------------------------------------------
 
 test("buildContinuityHint disclosure survives when kept body exceeds the 800-char slice", () => {
@@ -319,7 +319,7 @@ test("buildContinuityHint disclosure survives when kept body exceeds the 800-cha
 });
 
 // ---------------------------------------------------------------------------
-// C10: neutralizeRecoveredBody must strip CR (\x0d). The old regex kept CR,
+// NeutralizeRecoveredBody must strip CR (\x0d). The old regex kept CR,
 // so Windows \r\n line endings survived and CR could be used for terminal
 // injection. The fix adds \x0d to the strip class.
 // ---------------------------------------------------------------------------

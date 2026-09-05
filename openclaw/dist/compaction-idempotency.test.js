@@ -40,7 +40,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
  * Mock-harness test: proves two successive after_compaction events on a
  * session where sessionKey === sessionId and the host omits previousSessionId,
  * compactedCount, AND messageCount produce DISTINCT idempotency keys and BOTH
- * enqueue (the HIGH bug from the torture gauntlet).
+ * enqueue (a high-severity ordering bug).
  *
  * Before the fix, every compaction yielded the identical key
  * `checkpoint-restore:SID:SID:0`, so the 2nd+ got enqueued:false and the

@@ -133,7 +133,7 @@ def test_broken_override_falls_through_exit_zero(tmp_path):
 @posix_only
 @pytest.mark.parametrize("shell", ["/bin/sh", "/bin/bash", "/bin/dash"])
 def test_override_pointing_at_a_shell_does_not_block(shell, tmp_path):
-    # Torture batch-2 finding: a POSIX shell accepts `-c ''` exactly like Python,
+    # A POSIX shell accepts `-c ''` exactly like Python,
     # so a naive probe would exec it on run.py, parse Python as shell, and exit
     # non-zero (2) -- a BLOCKING hook. The Python-specific probe must reject any
     # shell and fall through to real discovery instead.
@@ -148,7 +148,7 @@ def test_override_pointing_at_a_shell_does_not_block(shell, tmp_path):
 
 @posix_only
 def test_closed_stderr_does_not_block(tmp_path):
-    # Torture batch-1 finding: under `set -e`, a diagnostic `echo >&2` fails when the
+    # Under `set -e`, a diagnostic `echo >&2` fails when the
     # harness invoked the hook with stderr (fd 2) closed, aborting non-zero before the
     # final exit 0 -- a blocking hook. A broken override forces the diagnostic path;
     # closing fd 2 must not turn it into a non-zero exit.

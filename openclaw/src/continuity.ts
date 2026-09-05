@@ -710,7 +710,7 @@ export function buildContinuityHint(
     }
     const disclosure = formatDisclosure(droppedDecisions, droppedFiles);
 
-    // C4: slice the item body FIRST, then append the disclosure OUTSIDE the
+    // Slice the item body FIRST, then append the disclosure OUTSIDE the
     // truncated region so the transparency line survives even when kept
     // decisions + files exceed the 800-char budget. Previously the disclosure
     // was pushed into bodyLines and the whole joined body was _safeSlice(...,

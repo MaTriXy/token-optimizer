@@ -8332,7 +8332,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
 
     # --- Rule 15: claude.ai MCP servers ---
     # Resolve across process env + all settings files (project overrides global)
-    # so a project-level opt-out suppresses this nudge too (same class).
+    # so a project-level opt-out suppresses this nudge too (the same opt-out class of setting).
     claudeai_val = _resolve_feature_env("ENABLE_CLAUDEAI_MCP_SERVERS") or ""
     if str(claudeai_val).lower() != "false":
         # Estimate: each cloud-synced server adds ~300-500 tokens (tool defs + instructions)
@@ -11604,7 +11604,7 @@ _TIER_DISPLAY_NAMES = {
 _FEATURE_FIRST_READ_SKELETON = "first_read_skeleton"
 _FEATURE_FIRST_READ_EDIT_FOLLOWUP = "first_read_edit_followup"
 
-# C4: render the agent-result harm rate from the single source of truth
+# Render the agent-result harm rate from the single source of truth
 # (archive_result._AGENT_RESULT_HARM_PCT) so this label never drifts from the
 # backfill number. Fail-open to a bare label if the import is unavailable.
 try:

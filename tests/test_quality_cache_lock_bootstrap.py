@@ -119,7 +119,7 @@ def test_breadcrumb_on_lease_busy(measure, tmp_path, monkeypatch, capsys):
 
 
 def test_double_checked_read_skips_redundant_recompute(measure, tmp_path, monkeypatch):
-    """Gauntlet MEDIUM (double-checked locking): if a bootstrap waiter acquires the
+    """Double-checked locking: if a bootstrap waiter acquires the
     lease AFTER the holder already wrote the cache, it must return that fresh score,
     not recompute the same thing ~200ms again."""
     tx = _session(tmp_path)

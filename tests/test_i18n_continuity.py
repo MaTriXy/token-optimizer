@@ -8,7 +8,7 @@ at the accent (``módulo`` -> ``dulo``). The fix is a single shared tokenizer
 (``_topic_tokens`` = ``_TOPIC_TOKEN_RE`` + a script-aware length floor) used at
 all three topic-scoring sites (``_resume_topic_score`` x2, ``keyword_relevance_score``).
 
-Two design points the gauntlet pinned:
+Two design points:
   * The floor is script-aware: CJK (>= U+3000) is kept at len>=2 because a 2-char
     Hangul/Han word (결제, 모듈) carries a full topic; ASCII/accented Latin keep len>3.
   * ``_RECOVER_TOKEN_RE`` is deliberately NOT widened — doing so makes non-Latin items
@@ -59,7 +59,7 @@ def test_resume_topic_score_i18n_parity_fixture():
 
 def test_keyword_relevance_score_i18n_parity_fixture():
     """keyword_relevance_score (the 3rd changed site, live in OpenClaw's cross-session
-    scorer) must agree with the fixture too — closes the coverage gap the gauntlet found."""
+    scorer) must agree with the fixture too — closes the coverage gap."""
     mod = _measure()
     tmp = Path(tempfile.mkdtemp(prefix="to-127-kr-"))
     for row in I18N_FIXTURE:

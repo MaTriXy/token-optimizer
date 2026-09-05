@@ -94,7 +94,7 @@ def read_stdin_hook_input(max_bytes: int = 1_048_576) -> dict:
             return {}
         parsed = json.loads(data)
         if not isinstance(parsed, dict):
-            # C9: loud fail + return. A non-dict payload (list, string, number)
+            # Loud fail + return. A non-dict payload (list, string, number)
             # is a protocol violation; callers would AttributeError on .get().
             print(
                 f"[hook_io] stdin JSON is {type(parsed).__name__}, not a dict; "

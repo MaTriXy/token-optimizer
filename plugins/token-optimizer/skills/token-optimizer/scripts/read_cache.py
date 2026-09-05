@@ -1839,7 +1839,7 @@ def handle_clear_compacted(hook_input: dict[str, Any], quiet: bool) -> None:
         hook_input.get("agent_id") or hook_input.get("session_id") or "unknown"
     )
     if not session_id or session_id == "unknown":
-        # C5: FAILED branches stay loud even under --quiet.
+        # FAILED branches stay loud even under --quiet.
         print(
             "[read_cache] --clear-compacted FAILED: no session_id in hook "
             "input; live session file_reads left intact (not cleared)",
@@ -1859,7 +1859,7 @@ def handle_clear_compacted(hook_input: dict[str, Any], quiet: bool) -> None:
         busy_timeout_ms = 5000
     store = _make_store(session_id, busy_timeout_ms=busy_timeout_ms)
     if store is None:
-        # C5: FAILED branches stay loud even under --quiet.
+        # FAILED branches stay loud even under --quiet.
         print(
             "[read_cache] --clear-compacted FAILED: SessionStore unavailable; "
             f"file_reads for {session_id} left intact (not cleared)",
@@ -2152,7 +2152,7 @@ def main() -> None:
         # branch). Bare --clear semantics are left untouched.
         hook_input = read_stdin_hook_input(1_000_000)
         if not hook_input:
-            # C5: FAILED branches stay loud even under --quiet; --quiet only
+            # FAILED branches stay loud even under --quiet; --quiet only
             # suppresses success chatter. A silent exit-0 no-op resurrects the bug.
             print(
                 "[read_cache] --clear-compacted FAILED: no stdin hook input; "
@@ -2170,7 +2170,7 @@ def main() -> None:
             if arg == "--session" and index + 1 < len(args):
                 session_id = args[index + 1]
                 has_explicit_session = True
-        # C12: bare --clear (no --session) defaults to "all" which wipes EVERY
+        # Bare --clear (no --session) defaults to "all" which wipes EVERY
         # session's file_reads cache. The PreCompact and CwdChanged hooks call
         # bare --clear, so a compact or cwd-change in one session nukes the
         # read cache of all other active sessions too. Scope it: when no

@@ -5394,7 +5394,7 @@ var DB = (function() {
         ['Balanced', 'Recommended. Installs SessionStart, UserPromptSubmit, and Stop for quality cache, loop signals, continuity, and dashboard refresh.', balancedCmd, 'recommended'],
         ['Quiet', 'Stop-only. Lowest visible noise, but prompt-quality hooks stay off and telemetry is weaker.', quietCmd, ''],
         ['Telemetry', 'Adds PostToolUse rows for tool-output archive/context intel. Useful for QA, noisier in Desktop.', telemetryCmd, ''],
-        ['Aggressive', 'All currently available Codex hooks, including experimental Bash PreToolUse. Best for torture-room testing, not default Desktop UX.', aggressiveCmd, '']
+        ['Aggressive', 'All currently available Codex hooks, including experimental Bash PreToolUse. Best for stress testing, not default Desktop UX.', aggressiveCmd, '']
       ].forEach(function(profile) {
         if (!profile[2]) return;
         html += '<div class="hook-profile-card ' + profile[3] + '">' +
@@ -7061,9 +7061,9 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   // v5.4.19: helper that all mutating API calls must use. Adds the per-install
   // CSRF token header so the server accepts the request. Without this, POSTs
-  // are rejected with 403 -- that's the whole point of the M-4 hardening.
+  // are rejected with 403 -- that's the whole point of the CSRF hardening.
   //
-  // Torture-room M-1 (2026-04-16): surface auth errors as a distinct message
+  // Surface auth errors as a distinct message
   // rather than letting callers hit r.json() on a text body ("Forbidden:
   // invalid token") and seeing a confusing JSON parse error. The helper
   // intercepts 403 responses and rejects with an Error whose .authError flag

@@ -448,13 +448,13 @@ def test_clear_compacted_screams_on_missing_session(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# GAUNTLET C5: --quiet must NOT silence FAILED branches. --quiet suppresses
+# --quiet must NOT silence FAILED branches. --quiet suppresses
 # success chatter ONLY. A silent exit-0 no-op on a broken/partial install
 # resurrects the live-session leak with zero signal, contradicting the docstring.
 # ---------------------------------------------------------------------------
 
 def test_clear_compacted_screams_on_no_stdin_even_with_quiet(tmp_path):
-    """C5: the no-stdin FAILED branch stays loud under --quiet."""
+    """The no-stdin FAILED branch stays loud under --quiet."""
     out = _run_read_cache(tmp_path, ["--clear-compacted", "--quiet"], None)
     assert out.returncode == 0, out.stderr
     assert "[read_cache] --clear-compacted FAILED" in out.stderr, (
@@ -464,7 +464,7 @@ def test_clear_compacted_screams_on_no_stdin_even_with_quiet(tmp_path):
 
 
 def test_clear_compacted_screams_on_missing_session_even_with_quiet(tmp_path):
-    """C5: the missing-session_id FAILED branch stays loud under --quiet."""
+    """The missing-session_id FAILED branch stays loud under --quiet."""
     out = _run_read_cache(
         tmp_path, ["--clear-compacted", "--quiet"], {"tool_name": "Read"}
     )
@@ -476,7 +476,7 @@ def test_clear_compacted_screams_on_missing_session_even_with_quiet(tmp_path):
 
 
 def test_clear_compacted_success_chatter_still_suppressed_by_quiet(tmp_path):
-    """C5: --quiet still suppresses the SUCCESS chatter (the contract is
+    """--quiet still suppresses the SUCCESS chatter (the contract is
     'quiet suppresses success only', so the success path must stay quiet)."""
     file_f = str(tmp_path / "ok.txt")
     Path(file_f).write_text("ok\n", encoding="utf-8")
@@ -493,13 +493,13 @@ def test_clear_compacted_success_chatter_still_suppressed_by_quiet(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# GAUNTLET C9: non-dict stdin (valid JSON but not a dict) must produce a loud
+# Non-dict stdin (valid JSON but not a dict) must produce a loud
 # warning and return {}, not crash with AttributeError on .get(). The shared
 # read_stdin_hook_input in hook_io.py is the single source of truth.
 # ---------------------------------------------------------------------------
 
 def test_clear_compacted_loud_fail_on_list_stdin(tmp_path):
-    """C9: a JSON list on stdin must not crash; it must warn and no-op."""
+    """A JSON list on stdin must not crash; it must warn and no-op."""
     # _run_read_cache json.dumps the payload, so we need a custom runner for
     # non-dict JSON (raw string stdin).
     import subprocess as sp
@@ -522,7 +522,7 @@ def test_clear_compacted_loud_fail_on_list_stdin(tmp_path):
 
 
 def test_clear_compacted_loud_fail_on_string_stdin(tmp_path):
-    """C9: a JSON string on stdin must not crash; it must warn and no-op."""
+    """A JSON string on stdin must not crash; it must warn and no-op."""
     import subprocess as sp
     env = dict(os.environ)
     env["TOKEN_OPTIMIZER_SNAPSHOT_DIR"] = str(tmp_path)
@@ -539,7 +539,7 @@ def test_clear_compacted_loud_fail_on_string_stdin(tmp_path):
 
 
 def test_clear_compacted_loud_fail_on_number_stdin(tmp_path):
-    """C9: a JSON number on stdin must not crash; it must warn and no-op."""
+    """A JSON number on stdin must not crash; it must warn and no-op."""
     import subprocess as sp
     env = dict(os.environ)
     env["TOKEN_OPTIMIZER_SNAPSHOT_DIR"] = str(tmp_path)
@@ -556,7 +556,7 @@ def test_clear_compacted_loud_fail_on_number_stdin(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# GAUNTLET C12: bare --clear (no --session) must scope to the stdin session_id
+# Bare --clear (no --session) must scope to the stdin session_id
 # instead of defaulting to "all". The PreCompact and CwdChanged hooks call
 # bare --clear, so the old "all" default wiped every active session's cache.
 # ---------------------------------------------------------------------------
@@ -576,7 +576,7 @@ def _legacy_cache_exists(tmp_path: Path, session_id: str) -> bool:
 
 
 def test_bare_clear_scopes_to_stdin_session_id(tmp_path):
-    """C12: bare --clear with stdin session_id clears ONLY that session."""
+    """Bare --clear with stdin session_id clears ONLY that session."""
     _seed_legacy_cache(tmp_path, SESSION_S)
     _seed_legacy_cache(tmp_path, SESSION_S2)
     assert _legacy_cache_exists(tmp_path, SESSION_S)
@@ -596,7 +596,7 @@ def test_bare_clear_scopes_to_stdin_session_id(tmp_path):
 
 
 def test_bare_clear_uses_agent_id_fallback(tmp_path):
-    """C12: bare --clear should also check agent_id if session_id is absent."""
+    """Bare --clear should also check agent_id if session_id is absent."""
     _seed_legacy_cache(tmp_path, SESSION_S)
     _seed_legacy_cache(tmp_path, SESSION_S2)
 
@@ -614,7 +614,7 @@ def test_bare_clear_uses_agent_id_fallback(tmp_path):
 
 
 def test_bare_clear_no_stdin_falls_back_to_all(tmp_path):
-    """C12: bare --clear with no stdin (manual CLI) still clears all
+    """Bare --clear with no stdin (manual CLI) still clears all
     (backward compatibility)."""
     _seed_legacy_cache(tmp_path, SESSION_S)
     _seed_legacy_cache(tmp_path, SESSION_S2)
@@ -631,7 +631,7 @@ def test_bare_clear_no_stdin_falls_back_to_all(tmp_path):
 
 
 def test_explicit_session_overrides_stdin(tmp_path):
-    """C12: explicit --session takes precedence over stdin session_id."""
+    """Explicit --session takes precedence over stdin session_id."""
     _seed_legacy_cache(tmp_path, SESSION_S)
     _seed_legacy_cache(tmp_path, SESSION_S2)
 

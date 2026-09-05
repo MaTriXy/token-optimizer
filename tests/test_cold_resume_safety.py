@@ -200,7 +200,7 @@ def test_explicit_id_no_match_returns_empty(measure, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_hook_path_explicit_id_triggers_without_resume_verb(measure):
-    """P1: the real hook entry (_continuity_prompt_hint) must reach the strict
+    """The real hook entry (_continuity_prompt_hint) must reach the strict
     explicit-id branch for 'continue session <id>' even though _resume_intent
     rejects that phrasing. The gate now also fires on a named id."""
     mod, cp_dir = measure
@@ -216,7 +216,7 @@ def test_hook_path_explicit_id_triggers_without_resume_verb(measure):
 
 
 def test_incidental_id_falls_through_to_topic(measure, monkeypatch):
-    """P2: resume_intent True + an incidental id matching NO checkpoint must NOT
+    """Resume_intent True + an incidental id matching NO checkpoint must NOT
     suppress the good topic match -- it falls through to topic/recency."""
     mod, cp_dir = measure
     _write_checkpoint(cp_dir, _UUID_A, _sidecar(_UUID_A, "the widget refactor"), age_minutes=5)
@@ -230,7 +230,7 @@ def test_incidental_id_falls_through_to_topic(measure, monkeypatch):
 
 
 def test_explicit_id_uses_filename_not_sidecar(measure):
-    """P3: when a checkpoint's sidecar session_id DISAGREES with its filename, the
+    """When a checkpoint's sidecar session_id DISAGREES with its filename, the
     explicit-id match reconstructs the FILENAME's session (the one the user named),
     not the sidecar's -- else it could confidently reopen a different session."""
     mod, cp_dir = measure
@@ -247,7 +247,7 @@ def test_explicit_id_uses_filename_not_sidecar(measure):
 
 
 def test_explicit_id_cross_project_is_declined(measure, monkeypatch):
-    """Adversarial gauntlet P2: naming a session id must NOT inject a DIFFERENT
+    """Naming a session id must NOT inject a DIFFERENT
     project's checkpoint (its topic/continuation/open-questions) into the current
     cwd. When the named session is out-of-project, decline -- no leak, no confident
     reopen. The explicit-id branch must honor the same-project guard the topic and
@@ -265,7 +265,7 @@ def test_explicit_id_cross_project_is_declined(measure, monkeypatch):
 
 
 def test_bare_uuid_uses_conditional_footer(measure):
-    """Gauntlet (multi-lens LOW): a BARE UUID with no 'session' keyword and no resume
+    """A BARE UUID with no 'session' keyword and no resume
     verb may be incidental (a log line, a ticket ref), so it gets the CONDITIONAL
     footer -- the assistant verifies before claiming a reopen -- while a keyworded
     'continue session <id>' stays confident (test_explicit_id_scopes_strictly)."""
