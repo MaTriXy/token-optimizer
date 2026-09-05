@@ -484,7 +484,7 @@ _exec_cached_interpreter "$@" || :
 # and exec'd the dead stub on every hook. Only the candidate's own liveness
 # decides now.
 #
-# Flash tradeoff (was #107's concern): the twin was GUI-subsystem, so probing
+# Flash tradeoff (the no-flash concern): the twin was GUI-subsystem, so probing
 # it never flashed a console; probing the console candidate directly can flash
 # a window ONCE on a cache miss. That regression is accepted deliberately -- a
 # silently-dead cached interpreter breaks EVERY hook for affected users, which
@@ -513,7 +513,7 @@ _exec_cached_interpreter "$@" || :
 # _path_contains_windowsapps, exactly like the old inline probe.
 _probe_windowsapps_candidate() {
     local binpath="$1" probe_tmp probe_arg out ver
-    # #143: probe the CANDIDATE ITSELF, never a sibling "twin". In WindowsApps each
+    # Probe the CANDIDATE ITSELF, never a sibling "twin". In WindowsApps each
     # App Execution Alias name is claimed independently, so pythonw.exe can resolve
     # to a DIFFERENT, live package (e.g. the Python Install Manager) while this
     # candidate (python3.exe) is a dead Microsoft Store redirector. The old code

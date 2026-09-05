@@ -60,7 +60,7 @@ def _hook_command(script: str, *args: str, redirect_quiet: bool = False) -> str:
         # `%COMSPEC% /C <command>` (fallback cmd.exe) on Windows unless the
         # user overrides the hook shell in config. So the cmd.exe syntax below
         # (setlocal, for /f, 2^>NUL, >NUL 2>&1) is CORRECT here — do NOT
-        # "bash-ify" it. #118 was the inverse bug: Claude Code runs hooks via
+        # "bash-ify" it. The inverse bug: Claude Code runs hooks via
         # Git Bash, so measure.py's Claude-facing commands are POSIX-shaped.
         if _SEMVER_DIR_RE.match(root.name):
             # CMD needs a Windows-native counterpart to the POSIX runtime

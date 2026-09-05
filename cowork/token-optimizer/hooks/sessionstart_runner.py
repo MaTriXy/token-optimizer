@@ -15,8 +15,8 @@ This runner is invoked ONCE per session start, imports ``measure.py`` ONCE, and
 runs all five subcommands in-process under ONE shared deadline. That removes
 repeated startup work while keeping the host-specific timeout as a backstop.
 
-This is the same consolidation the ``UserPromptSubmit`` group received in issue
-#139 (``hooks/userpromptsubmit_runner.py``); SessionStart never got it. The
+This is the same consolidation the ``UserPromptSubmit`` group received in
+``hooks/userpromptsubmit_runner.py``; SessionStart never got it. The
 structure here deliberately mirrors that file.
 
 Key properties:
@@ -40,7 +40,7 @@ Key properties:
   - The consent gate that run.py used to apply per-entry is applied per
     subcommand HERE: ensure-health was consent-EXEMPT (it bootstraps the consent
     flags), the other four were consent-gated. run.py exempts this runner path
-    wholesale, same as the #139 runner.
+    wholesale, same as the UserPromptSubmit runner.
   - stdout from all five subcommands is captured through one buffered emitter
     and emitted in dispatch order at the end of ``main()``, preserving each
     subcommand's shape (raw text, systemMessage JSON, additionalContext JSON).
@@ -169,7 +169,7 @@ def _run_safely(name: str, fn, *args, **kwargs) -> None:
 #     spawn chain, ~1-2s on a cold cache).
 #   * The internal deadline is 18s: 2s of margin under the declared 20 so the
 #     runner self-exits 0 with its buffered stdout emitted, rather than being
-#     SIGKILLed by the host mid-write. Same 2s margin the #139 UserPromptSubmit
+#     SIGKILLed by the host mid-write. Same 2s margin the UserPromptSubmit
 #     runner uses under its own timeout=20.
 # --------------------------------------------------------------------------- #
 
@@ -389,7 +389,7 @@ def _sub_clear_compacted(hook_input: dict) -> None:
         # C5 parity: FAILED branches stay loud even under --quiet.
         sys.stderr.write(
             "[read_cache] --clear-compacted FAILED: no stdin hook input; "
-            "live session file_reads left intact (#101 not cleared)\n"
+            "live session file_reads left intact (not cleared)\n"
         )
         return
     import read_cache  # noqa: PLC0415  (lazy: only compact starts pay for it)

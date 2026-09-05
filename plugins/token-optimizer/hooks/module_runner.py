@@ -106,7 +106,7 @@ def main() -> int:
     # (consolidated Claude runners, or entries with no precise argv rule) we
     # fall back to the 110s orphan backstop described below.
     #
-    # Generic Windows orphan-grandchild backstop, NOT a #114 fossil bound.
+    # Generic Windows orphan-grandchild backstop, NOT a collect/dashboard fossil bound.
     #
     # When the host TerminateProcess-es run.py on Windows it bypasses run.py's
     # SIGTERM handler, orphaning this in-process grandchild while it still
@@ -115,11 +115,11 @@ def main() -> int:
     # The 110s sits a few seconds under run.py's 120s wait so a normally
     # reaped hook never trips it.
     #
-    # This does NOT bound the #114 collect/dashboard fossil: that fossil is a
+    # This does NOT bound the collect/dashboard fossil: that fossil is a
     # raw `measure.py collect && dashboard` in settings.json that invokes
     # measure.py directly via the launcher, never through run.py/module_runner,
     # so this layer never sees it. The fossil is bounded by the 20s dispatch
-    # budget in measure.py._dispatch_collect/_dispatch_dashboard (#114 Fix 4),
+    # budget in measure.py._dispatch_collect/_dispatch_dashboard,
     # armed only on the hook path. The session-end-flush path this DOES wrap
     # already self-bounds at 60s, so 110s is a last-resort backstop for any
     # OTHER hook that runs past run.py's wait while orphaned on Windows.

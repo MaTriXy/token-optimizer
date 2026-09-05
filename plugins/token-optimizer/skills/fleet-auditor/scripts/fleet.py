@@ -1200,8 +1200,8 @@ class HermesAdapter(BaseAdapter):
         # Hermes stores input_tokens and cache_read_tokens as SEPARATE columns
         # (a cache-heavy run has cache_read >> input_tokens), so input_tokens is
         # already the fresh-input count. Do NOT subtract cache_read — that floored
-        # cache-heavy gateway runs to 0 input, corrupting the very numbers #149/#150
-        # exist to surface. (Codex's total_input_tokens IS inclusive, hence its
+        # cache-heavy gateway runs to 0 input, corrupting the very numbers
+        # the pricing guard exists to surface. (Codex's total_input_tokens IS inclusive, hence its
         # subtraction; Hermes is not.)
         tokens = TokenBreakdown(
             input=max(0, input_total),
@@ -1911,7 +1911,7 @@ def cmd_scan(args: list[str]):
     total_new = 0
     total_errors = []
     scan_results = []
-    # #150: collect every scanned run so we can flag models whose $0 is unknown
+    # Collect every scanned run so we can flag models whose $0 is unknown
     # (no pricing row), not free — computed once via unpriced_summary() below.
     all_scanned_runs: list[AgentRun] = []
 
@@ -1951,7 +1951,7 @@ def cmd_scan(args: list[str]):
     _update_daily_aggregates(conn)
     conn.close()
 
-    # #150: one warning naming every unpriced model, so a $0.00 total reads as
+    # One warning naming every unpriced model, so a $0.00 total reads as
     # "unknown, not free" and the user knows where to add rates.
     unpriced_sessions = unpriced_summary(all_scanned_runs)
     if unpriced_sessions:
@@ -2053,7 +2053,7 @@ def cmd_audit(args: list[str]):
         )
         runs_by_system.setdefault(system, []).append(run)
 
-    # #150: the dashboard/audit repro from the issue — flag runs priced at $0 only
+    # The dashboard/audit repro: flag runs priced at $0 only
     # because the model is unpriced, so the audit doesn't present a fake $0 total.
     audit_unpriced = unpriced_summary([r for rs in runs_by_system.values() for r in rs])
 
@@ -2318,7 +2318,7 @@ def cmd_dashboard(args: list[str]):
         GROUP BY project ORDER BY SUM(cost_usd) DESC LIMIT 10
     """).fetchall()
 
-    # #150: models with real tokens but $0 cost because they have no pricing row.
+    # Models with real tokens but $0 cost because they have no pricing row.
     # Surface them so the dashboard's Total Cost reads as understated, not real.
     # NULL-safe: `cost_usd = 0` alone would drop NULL-cost rows (SQL NULL equality),
     # and a single NULL token column would NULL the whole row's `a+b+c+d` sum. Per-
@@ -2474,7 +2474,7 @@ def _generate_dashboard_html(daily_rows, waste_rows, system_stats, model_mix, to
           <span class="proj-cost">{fmt_cost(p["cost"])}</span>
         </div>'''
 
-    # #150: banner + Total-Cost asterisk when unpriced models are present, so the
+    # Banner + Total-Cost asterisk when unpriced models are present, so the
     # dollar figure isn't read as complete/real.
     unpriced_banner = ""
     cost_asterisk = ""
@@ -3246,14 +3246,14 @@ def _open_in_browser(path: Path):
 
     ``os.startfile`` calls ShellExecuteW with the path as a real ARGUMENT: no
     command line is built, no parser sees the metacharacters, no console is
-    allocated (so #107 needs no creationflags on this branch at all), and the
+    allocated (so the no-flash fix needs no creationflags on this branch at all), and the
     browser it hands off to is a GUI app that stays visible.
 
     ``open`` / ``xdg-open`` keep ``creationflags=_NO_WINDOW``; it is ``0`` off
     Windows, where ``creationflags=0`` is the documented default, so POSIX
     behaviour is unchanged.
 
-    Failures are reported (#107 stayed hidden for months behind ``check=False``
+    Failures are reported (the no-flash bug stayed hidden for months behind ``check=False``
     and a discarded returncode): any opener error prints the file:// URL to open
     by hand, matching ``measure.py``.
     """
