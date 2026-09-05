@@ -267,7 +267,12 @@ def test_codex_installer_does_not_emit_collect_dashboard_chain():
     hooks = codex_install._managed_hooks()
     blob = json.dumps(hooks)
     assert "collect --quiet &&" not in blob
-    assert "session-end-flush" in blob
+    # The Codex installer now routes Stop through stop_runner.py (which
+    # internally calls session-end-flush), so accept either the direct
+    # flush shape or the runner.
+    assert "session-end-flush" in blob or "stop_runner.py" in blob, (
+        "Codex Stop must invoke session-end-flush directly or via stop_runner.py"
+    )
     for event, groups in hooks.items():
         if event not in ("SessionEnd", "Stop"):
             continue

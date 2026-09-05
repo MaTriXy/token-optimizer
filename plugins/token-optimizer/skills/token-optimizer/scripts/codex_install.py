@@ -148,15 +148,14 @@ def _managed_hooks(
 ) -> dict[str, list[dict[str, Any]]]:
     """Build Codex project hooks.
 
-    Default is the aggressive profile (max savings). All hooks are wired to run
-    silently: prompt/session/subagent hooks via redirect_quiet, the PostToolUse
-    archive hook via redirect_quiet, and context_intel emits no stdout. The
-    PostToolUse hooks match Bash only, so archive_result never reaches its
-    MCP-output-replacement branch (which Codex rejects as unsupported anyway).
-    The result is no visible Codex Desktop rows under normal operation.
-
-    Bash compression is the one genuinely-visible hook (Codex cannot rewrite
-    command input yet), so it stays explicit opt-in on every profile.
+    Default is the aggressive profile (max savings). SessionStart,
+    UserPromptSubmit, PostToolUse, and Stop are routed through the consolidated
+    runner scripts (hooks/sessionstart_runner.py, hooks/userpromptsubmit_runner.py,
+    hooks/posttooluse_runner.py, hooks/stop_runner.py) so Codex users receive the
+    same diagnostics-routing, systemMessage-preservation, and process-
+    consolidation fixes as Claude Code. SubagentStart/Stop remain on the
+    Codex-specific bridge (no runner exists for subagent events). Bash
+    compression stays explicit opt-in (Codex cannot rewrite command input yet).
     """
     hooks = {
         "Stop": [
@@ -165,15 +164,10 @@ def _managed_hooks(
                     {
                         "type": "command",
                         "command": _hook_command(
-                            "skills/token-optimizer/scripts/measure.py",
-                            "session-end-flush",
-                            "--trigger",
-                            "stop",
-                            "--quiet",
-                            "--defer",
+                            "hooks/stop_runner.py",
                             redirect_quiet=True,
                         ),
-                        "timeout": 8,
+                        "timeout": 15,
                     }
                 ]
             }
@@ -187,10 +181,9 @@ def _managed_hooks(
                     {
                         "type": "command",
                         "command": _hook_command(
-                            "skills/token-optimizer/scripts/codex_hook_bridge.py",
-                            "session-start",
+                            "hooks/sessionstart_runner.py",
                         ),
-                        "timeout": 15,
+                        "timeout": 20,
                     }
                 ],
             }
@@ -201,10 +194,9 @@ def _managed_hooks(
                     {
                         "type": "command",
                         "command": _hook_command(
-                            "skills/token-optimizer/scripts/codex_hook_bridge.py",
-                            "user-prompt-submit",
+                            "hooks/userpromptsubmit_runner.py",
                         ),
-                        "timeout": 12,
+                        "timeout": 20,
                     }
                 ]
             }
@@ -253,21 +245,7 @@ def _managed_hooks(
                     {
                         "type": "command",
                         "command": _hook_command(
-                            "skills/token-optimizer/scripts/context_intel.py",
-                            "--quiet",
-                        ),
-                        "timeout": 10,
-                    }
-                ],
-            },
-            {
-                "matcher": "Bash",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": _hook_command(
-                            "skills/token-optimizer/scripts/archive_result.py",
-                            "--quiet",
+                            "hooks/posttooluse_runner.py",
                             redirect_quiet=True,
                         ),
                         "timeout": 10,
