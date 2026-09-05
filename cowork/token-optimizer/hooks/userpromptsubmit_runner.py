@@ -23,9 +23,15 @@ Key properties:
   - stdout from all six subcommands is captured through one buffered emitter and
     emitted at the end of ``main()`` in a controlled, host-consumable way,
     preserving the per-shape contract (hookSpecificOutput JSON, systemMessage
-    JSON, raw text).
+    JSON, raw text). ensure-health and quality-cache ``{"systemMessage": ...}``
+    JSON lines are user-facing (shown to the USER's terminal, NOT injected into
+    the model's context) and also feed the envelope; their plain-text
+    diagnostics go to a log file. All subcommand stderr is also routed to the
+    log file -- the host captures both stdout and stderr into the model's
+    session context, so diagnostics must reach neither stream.
   - One subcommand throwing/aborting never aborts the others (each is wrapped in
-    ``_run_safely``); the hook always exits 0.
+    ``_run_safely``); the hook always exits 0. Failure notices and tracebacks
+    go to the diagnostics log file, not stderr.
   - ensure-health's run-once marker is unlinked on failure so a single
     transient failure never permanently deadlocks the consent gate for the
     session.
@@ -47,7 +53,7 @@ import os
 import sys
 import time as _time
 import traceback
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 
@@ -87,6 +93,95 @@ if _MEASURE_DIR and _MEASURE_DIR not in sys.path:
     sys.path.insert(0, _MEASURE_DIR)
 
 import measure  # noqa: E402  (path bootstrapped above)
+
+
+# --------------------------------------------------------------------------- #
+# Diagnostics log: the host captures BOTH stdout and stderr from
+# UserPromptSubmit hooks into the model's session context, where they are
+# re-billed on every turn. The only correct destination for hook diagnostics
+# is therefore a log file, never stdout and never stderr. User-facing
+# ``{"systemMessage": ...}`` JSON lines are tax-free (shown to the USER's
+# terminal, not injected into the model's context) and must keep reaching the
+# host on stdout.
+# --------------------------------------------------------------------------- #
+
+_DIAGNOSTICS_LOG_NAME = "userpromptsubmit_diagnostics.log"
+_DIAGNOSTICS_LOG_CAP = 256 * 1024  # keep the last ~256 KB
+
+
+def _diagnostics_log_path():
+    """Resolve the diagnostics log path under measure's snapshot/state dir.
+
+    Reuses the same state directory measure.py uses for its other log files.
+    Returns None if no state dir is resolvable, in which case callers silently
+    drop diagnostics.
+    """
+    try:
+        base = getattr(measure, "SNAPSHOT_DIR", None)
+        if base is None:
+            return None
+        return Path(base) / _DIAGNOSTICS_LOG_NAME
+    except Exception:
+        return None
+
+
+def _write_diagnostics(text: str) -> None:
+    """Append diagnostics text to the capped log file. Fully fail-open.
+
+    Any error is swallowed so logging can never block or break the hook.
+    If no writable log dir can be resolved, silently drop -- never fall back
+    to real stderr.
+    """
+    if not text:
+        return
+    try:
+        path = _diagnostics_log_path()
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        chunk = text if text.endswith("\n") else text + "\n"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(chunk)
+        try:
+            if path.stat().st_size > _DIAGNOSTICS_LOG_CAP:
+                data = path.read_bytes()[-_DIAGNOSTICS_LOG_CAP:]
+                path.write_bytes(data)
+        except OSError:
+            pass
+    except Exception:
+        pass
+
+
+def _split_system_messages(captured_stdout: str):
+    """Split captured stdout into user-facing systemMessage lines and the rest.
+
+    A ``{"systemMessage": "..."}`` JSON line is shown to the USER's terminal by
+    Claude Code and is NOT injected into the model's context (tax-free), so it
+    must keep reaching the host on stdout. Every other line (plain-text
+    diagnostics, additionalContext) is model-context-bound and must go to the
+    diagnostics log instead.
+    """
+    keep_lines: list[str] = []
+    log_lines: list[str] = []
+    for line in (captured_stdout or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        is_system_message = False
+        if stripped[0] in "{[":
+            try:
+                obj = json.loads(stripped)
+            except (ValueError, TypeError):
+                obj = None
+            if isinstance(obj, dict):
+                msg = obj.get("systemMessage")
+                if isinstance(msg, str) and msg.strip():
+                    is_system_message = True
+        if is_system_message:
+            keep_lines.append(line)
+        else:
+            log_lines.append(line)
+    return "\n".join(keep_lines), "\n".join(log_lines)
 
 
 def _read_hook_input() -> dict:
@@ -138,21 +233,25 @@ def _quality_cache_is_missing(hook_input: dict) -> bool:
 
 
 def _run_safely(name: str, fn, *args, **kwargs) -> None:
-    """Run fn, swallow any failure to stderr, never propagate.
+    """Run fn, swallow any failure to the diagnostics log, never propagate.
 
     Catches ``Exception`` and ``SystemExit`` so one subcommand's bug or internal
     ``sys.exit()`` cannot abort the others. ``_HookTimeout`` (a ``BaseException``
     raised only by tests that inject it) is caught inside each subcommand
     function; in production the ``HookDeadline`` watchdog calls ``os._exit(0)``
     directly, which is uncatchable and correctly terminates the whole hook 0.
+
+    Failure notices and tracebacks go to the diagnostics log file, not stderr
+    (the host captures stderr into the model's session context).
     """
     try:
         fn(*args, **kwargs)
     except (Exception, SystemExit):
         try:
-            sys.stderr.write(f"[Token Optimizer] {name} failed, continuing\n")
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
+            buf = io.StringIO()
+            buf.write(f"[Token Optimizer] {name} failed, continuing\n")
+            traceback.print_exc(file=buf)
+            _write_diagnostics(buf.getvalue())
         except (OSError, ValueError):
             pass
 
@@ -222,7 +321,7 @@ def _sub_quality_cache_warn(hook_input: dict) -> None:
     """``quality-cache --warn --quiet`` (always runs). Mirrors __main__ L40696."""
     budget = _runner_budget(8)
     if budget < 0.1:
-        sys.stderr.write("[Token Optimizer] insufficient time budget; skipping quality-cache --warn\n")
+        _write_diagnostics("[Token Optimizer] insufficient time budget; skipping quality-cache --warn\n")
         return
     quiet = True
     warn = True
@@ -337,7 +436,7 @@ def _sub_ensure_health(hook_input: dict) -> None:
                 marker.unlink(missing_ok=True)
             except OSError:
                 pass
-        sys.stderr.write(
+        _write_diagnostics(
             "[Token Optimizer] CRITICAL: insufficient time budget for "
             "ensure-health bootstrap; will retry next prompt\n"
         )
@@ -358,7 +457,7 @@ def _sub_ensure_health(hook_input: dict) -> None:
                 marker.unlink(missing_ok=True)
             except OSError:
                 pass
-        sys.stderr.write(
+        _write_diagnostics(
             "[Token Optimizer] CRITICAL: ensure-health bootstrap failed; "
             "will retry next prompt.  Consent flags may not be written.\n"
         )
@@ -511,6 +610,17 @@ def _check_consent() -> bool:
         return True
 
 
+def _emit_stdout(bufs: list[str]) -> None:
+    """Emit buffered stdout units in dispatch order.
+
+    Each subcommand's output is a self-contained unit (hookSpecificOutput JSON,
+    systemMessage JSON, or raw text), emitted in the order the host expects
+    from the consolidated dispatcher.
+    """
+    for buf in bufs:
+        sys.stdout.write(buf)
+
+
 def main() -> int:
     hook_input = _read_hook_input()
 
@@ -534,7 +644,29 @@ def main() -> int:
     if not _check_consent():
         if _harness_only_context():
             _install_runner_deadline()
-            _run_safely("ensure-health", _sub_ensure_health, hook_input)
+            _bufs: list[str] = []
+
+            def _capture_consent(name: str, fn, *args, **kwargs) -> None:
+                buf = io.StringIO()
+                err_buf = io.StringIO()
+                with redirect_stdout(buf), redirect_stderr(err_buf):
+                    _run_safely(name, fn, *args, **kwargs)
+                captured = buf.getvalue()
+                err_captured = err_buf.getvalue()
+                keep, log_text = _split_system_messages(captured)
+                if keep:
+                    _bufs.append(keep)
+                log_parts = []
+                if log_text:
+                    log_parts.append(log_text)
+                if err_captured:
+                    log_parts.append(err_captured)
+                if log_parts:
+                    _write_diagnostics(f"--- {name} ---\n" + "\n".join(log_parts))
+
+            _capture_consent("ensure-health", _sub_ensure_health, hook_input)
+            for _b in _bufs:
+                sys.stdout.write(_b)
             _clear_runner_deadline()
         return 0
 
@@ -550,15 +682,46 @@ def main() -> int:
     # way.  Pre-consolidation each subcommand was its own hooks.json entry and
     # the host parsed their stdout independently; now all six share one stdout
     # stream, so we buffer to avoid mixed JSON/raw-text corruption.
+    #
+    # The host captures BOTH stdout and stderr into the model's session context,
+    # so all stderr and plain-text diagnostics go to the log file, never to
+    # either real stream. User-facing ``{"systemMessage": ...}`` JSON lines
+    # are tax-free (shown to the USER's terminal) and keep reaching the host on
+    # stdout. Legitimate additionalContext from prompt-continuity, verbosity-
+    # steer, and compact-restore also feeds the envelope (it is the feature,
+    # not the tax).
     _stdout_bufs: list[str] = []
 
-    def _capture(name: str, fn, *args, **kwargs) -> None:
+    def _capture(name: str, fn, *args, split_system_messages: bool = False,
+                 **kwargs) -> None:
         buf = io.StringIO()
-        with redirect_stdout(buf):
+        err_buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(err_buf):
             _run_safely(name, fn, *args, **kwargs)
         captured = buf.getvalue()
-        if captured:
-            _stdout_bufs.append(captured)
+        err_captured = err_buf.getvalue()
+        if split_system_messages:
+            # ensure-health / quality-cache: systemMessage JSON lines are
+            # user-facing (tax-free) and feed the envelope; plain-text
+            # diagnostics go to the log. All stderr goes to the log.
+            keep, log_text = _split_system_messages(captured)
+            if keep:
+                _stdout_bufs.append(keep)
+            log_parts = []
+            if log_text:
+                log_parts.append(log_text)
+            if err_captured:
+                log_parts.append(err_captured)
+            if log_parts:
+                _write_diagnostics(f"--- {name} ---\n" + "\n".join(log_parts))
+        else:
+            # prompt-continuity / verbosity-steer / compact-restore: their
+            # stdout is legitimate additionalContext (the feature, not the
+            # tax) and feeds the envelope. All stderr goes to the log.
+            if captured:
+                _stdout_bufs.append(captured)
+            if err_captured:
+                _write_diagnostics(f"--- {name} ---\n{err_captured}")
 
     # 1-3: always-on subcommands. Ordering: the cheap,
     # user-visible subcommands (prompt-continuity, verbosity-steer) run BEFORE
@@ -570,14 +733,17 @@ def main() -> int:
     _runner_budget(8, subcommand_count_hint=6)
     _capture("prompt-continuity", _sub_prompt_continuity, hook_input)
     _capture("verbosity-steer", _sub_verbosity_steer, hook_input)
-    _capture("quality-cache --warn", _sub_quality_cache_warn, hook_input)
+    _capture("quality-cache --warn", _sub_quality_cache_warn, hook_input,
+             split_system_messages=True)
 
     # 4-6: harness-only subcommands. The shell guard that used to prefix
     # hooks.json entries 4/5/6 is evaluated once here; when it fails, all three
     # are skipped exactly as the shell `exit 0` skipped each entry.
     if _harness_only_context():
-        _capture("ensure-health", _sub_ensure_health, hook_input)
-        _capture("quality-cache --force", _sub_quality_cache_force, hook_input)
+        _capture("ensure-health", _sub_ensure_health, hook_input,
+                 split_system_messages=True)
+        _capture("quality-cache --force", _sub_quality_cache_force, hook_input,
+                 split_system_messages=True)
         _capture("compact-restore", _sub_compact_restore, hook_input)
     elif _quality_cache_is_missing(hook_input):
         # RECOVERY. Non-harness sessions reach this ONLY when no cache exists.
@@ -590,14 +756,14 @@ def main() -> int:
         # back. Bounded: one stat() in the common case; the full computation
         # only when the file is genuinely absent, after which the normal
         # throttle governs and this branch is never taken again.
-        _capture("quality-cache --force (bootstrap)", _sub_quality_cache_force, hook_input)
+        _capture("quality-cache --force (bootstrap)", _sub_quality_cache_force,
+                 hook_input, split_system_messages=True)
 
     # Emit all buffered stdout in order (preserves per-shape contract:
     # hookSpecificOutput JSON objects, systemMessage JSON, raw text -- each
     # subcommand's output is a self-contained unit, emitted in the order the
     # host expects from the consolidated dispatcher).
-    for buf in _stdout_bufs:
-        sys.stdout.write(buf)
+    _emit_stdout(_stdout_bufs)
 
     _clear_runner_deadline()
     return 0

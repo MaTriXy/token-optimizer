@@ -252,6 +252,11 @@ def test_userpromptsubmit_runner_failure_isolation(monkeypatch, tmp_path, capsys
     _stub_budget(monkeypatch, runner)
     calls = _install_call_recorder(monkeypatch, runner)
 
+    # Route diagnostics to a tmp log file so we can assert the failure landed
+    # there (not on stderr, which the host captures into model context).
+    log_file = tmp_path / "diag.log"
+    monkeypatch.setattr(runner, "_diagnostics_log_path", lambda: log_file)
+
     # Make quality-cache --warn explode. The other five must still run.
     def _boom(**kw):
         if kw.get("warn") and not kw.get("force"):
@@ -275,8 +280,11 @@ def test_userpromptsubmit_runner_failure_isolation(monkeypatch, tmp_path, capsys
     assert len(calls["compact_restore"]) == 1
 
     err = capsys.readouterr().err
-    assert "quality-cache --warn failed, continuing" in err, (
-        "failure must be logged to stderr, not swallowed silently"
+    assert "quality-cache --warn failed, continuing" not in err, (
+        "the failure must not leak to stderr (the host captures it into context)"
+    )
+    assert "quality-cache --warn failed, continuing" in log_file.read_text(encoding="utf-8"), (
+        "the failure must be logged to the diagnostics log file, not swallowed silently"
     )
 
 
@@ -989,6 +997,11 @@ def test_fix2_ensure_health_marker_unlinked_on_failure_next_prompt_retries(
     qc_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(runner.measure, "QUALITY_CACHE_DIR", qc_dir)
 
+    # Route diagnostics to a tmp log file so we can assert the failure landed
+    # there (not on stderr, which the host captures into model context).
+    log_file = tmp_path / "diag.log"
+    monkeypatch.setattr(runner, "_diagnostics_log_path", lambda: log_file)
+
     # Use REAL _ran_once_this_session (no monkeypatch) so the marker is
     # actually written to tmp_path and can be verified.
     calls = {"ensure_health": []}
@@ -1019,8 +1032,11 @@ def test_fix2_ensure_health_marker_unlinked_on_failure_next_prompt_retries(
     assert len(calls["ensure_health"]) == 1
 
     err = capsys.readouterr().err
-    assert "CRITICAL: ensure-health bootstrap failed" in err, (
-        "stderr must escalate on bootstrap failure"
+    assert "CRITICAL: ensure-health bootstrap failed" not in err, (
+        "the failure must not leak to stderr (the host captures it into context)"
+    )
+    assert "CRITICAL: ensure-health bootstrap failed" in log_file.read_text(encoding="utf-8"), (
+        "the failure must be logged to the diagnostics log file"
     )
 
     # Verify the marker was unlinked (not on disk).
@@ -1166,3 +1182,116 @@ def test_fix4_explicit_path_import_decoy_run_py_cannot_shadow(monkeypatch, tmp_p
         "explicit-path import must resolve the real hooks/run.py, "
         "not the decoy on sys.path"
     )
+
+
+# --------------------------------------------------------------------------- #
+# (e) diagnostics routing: systemMessage survives, stderr and plain-text
+#     diagnostics go to the log file, not to the host's stdout/stderr
+# --------------------------------------------------------------------------- #
+
+
+def test_userpromptsubmit_diagnostics_routing_systemmessage_survives(
+    monkeypatch, tmp_path, capsys,
+):
+    """User-facing systemMessage JSON lines must reach stdout (tax-free).
+
+    Plain-text diagnostics from ensure-health/quality-cache and all subcommand
+    stderr must go to the diagnostics log file, never to the host's real
+    stdout/stderr (which the host captures into the model's session context).
+    """
+    runner = _load_runner(monkeypatch, tmp_path)
+    _stub_budget(monkeypatch, runner)
+    _install_call_recorder(monkeypatch, runner)
+
+    log_file = tmp_path / "diag.log"
+    monkeypatch.setattr(runner, "_diagnostics_log_path", lambda: log_file)
+    monkeypatch.setattr(runner, "_read_hook_input",
+                        lambda: {"session_id": "sess-diag-1", "prompt": "x"})
+    monkeypatch.setattr(runner, "_harness_only_context", lambda: True)
+
+    # ensure-health prints a systemMessage (user-facing) and a plain-text
+    # diagnostic line (context-bound).
+    def _eh_with_messages():
+        print('{"systemMessage": "Dashboard: http://localhost:24842"}')
+        print("ensure-health: daemon is reachable on port 24842")
+
+    monkeypatch.setattr(runner.measure, "run_ensure_health", _eh_with_messages)
+    monkeypatch.setattr(runner.measure, "_ensure_health_daemon_revive_first", lambda: None)
+    # quality-cache --warn prints a plain-text diagnostic to stderr
+    def _qc_warn_stderr(**kw):
+        import sys as _sys
+        _sys.stderr.write("quality-cache: computing score...\n")
+    monkeypatch.setattr(runner.measure, "quality_cache", _qc_warn_stderr)
+
+    rc = runner.main()
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    err = capsys.readouterr().err
+    log_text = log_file.read_text(encoding="utf-8") if log_file.exists() else ""
+
+    # systemMessage must reach stdout (user-facing, tax-free)
+    assert "Dashboard: http://localhost:24842" in out, (
+        "systemMessage must survive to stdout (it is user-facing and tax-free)"
+    )
+    # Plain-text diagnostic must NOT reach stdout
+    assert "daemon is reachable" not in out, (
+        "plain-text diagnostics must not leak to stdout"
+    )
+    # stderr must be empty (all routed to the log)
+    assert err == "", (
+        "stderr must be empty -- all subcommand stderr goes to the log file"
+    )
+    # Plain-text diagnostic must be in the log
+    assert "daemon is reachable" in log_text, (
+        "plain-text diagnostics must be in the diagnostics log file"
+    )
+    # stderr diagnostic must be in the log
+    assert "computing score" in log_text, (
+        "subcommand stderr must be in the diagnostics log file"
+    )
+
+
+def test_userpromptsubmit_diagnostics_routing_additionalcontext_survives(
+    monkeypatch, tmp_path, capsys,
+):
+    """Legitimate additionalContext from prompt-continuity and verbosity-steer
+    must still reach stdout (it is the feature, not the tax)."""
+    runner = _load_runner(monkeypatch, tmp_path)
+    _stub_budget(monkeypatch, runner)
+    _install_call_recorder(monkeypatch, runner)
+
+    log_file = tmp_path / "diag.log"
+    monkeypatch.setattr(runner, "_diagnostics_log_path", lambda: log_file)
+    monkeypatch.setattr(runner, "_read_hook_input",
+                        lambda: {"session_id": "sess-diag-2", "prompt": "x"})
+    monkeypatch.setattr(runner, "_harness_only_context", lambda: False)
+
+    # prompt-continuity emits legitimate additionalContext
+    def _pc_with_context(**kw):
+        print('{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", '
+              '"additionalContext": "Continuity hint: you were working on X"}}')
+    monkeypatch.setattr(runner.measure, "_continuity_prompt_hint", _pc_with_context)
+    # verbosity-steer emits legitimate additionalContext
+    def _vs_with_context(**kw):
+        return ('{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", '
+                '"additionalContext": "Steer: be concise"}}')
+    monkeypatch.setattr(runner.measure, "run_verbosity_steer", _vs_with_context)
+    monkeypatch.setattr(runner.measure, "quality_cache", lambda **kw: None)
+
+    rc = runner.main()
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    err = capsys.readouterr().err
+
+    # additionalContext from prompt-continuity must reach stdout
+    assert "Continuity hint" in out, (
+        "prompt-continuity additionalContext must survive to stdout"
+    )
+    # additionalContext from verbosity-steer must reach stdout
+    assert "be concise" in out, (
+        "verbosity-steer additionalContext must survive to stdout"
+    )
+    # stderr must be empty
+    assert err == "", "stderr must be empty"
