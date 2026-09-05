@@ -3429,7 +3429,7 @@ def quick_scan(as_json=False):
         if eager > 0:
             detail += f" ({eager} with eager-loaded tools)"
         offenders.append(("mcp", mcp_count, mcp.get("tokens", 0), detail))
-    # Per-file CLAUDE.md offenders. measure_components()
+    # Per-file CLAUDE.md offenders (PR #100, danikdanik). measure_components()
     # keys each ancestor CLAUDE.md separately (claude_md_global,
     # claude_md_home, claude_md_project_<dir>), mirroring how Claude Code loads
     # them up the directory tree. Blending them into one "CLAUDE.md" entry
@@ -3505,7 +3505,7 @@ def quick_scan(as_json=False):
                 "extend": f"Improves stable prompt-cache prefix and extends peak quality by ~{savings:,} tokens",
             }
     if not quick_win and _claude_md_files:
-        # Pick the LARGEST single CLAUDE.md rather than
+        # PR #100 (danikdanik): pick the LARGEST single CLAUDE.md rather than
         # blending every ancestor file, so the action names a file the user can
         # actually open. Savings math stays ours: Anthropic's documented
         # 200-line guidance, with tokens-per-line taken from that one file, and
@@ -7499,7 +7499,7 @@ def _spawn_detached_dashboard_selfheal(days=30, force=False):
 
     ``force`` appends ``--force`` so the child bypasses the 60s write throttle.
     Used by the version-bump self-heal: a stale file written seconds ago by a
-    just-killed regen must not throttle-skip the heal. The version guard
+    just-killed regen must not throttle-skip the heal. The PR #154 version guard
     still applies inside generate_standalone_dashboard (force governs the throttle,
     not version precedence), so a forced heal never clobbers a newer dashboard.
     """
@@ -7641,7 +7641,7 @@ def _dispatch_dashboard(args):
         quiet = "--quiet" in args or "-q" in args
         # --force bypasses the 60s write throttle. The detached version-bump
         # self-heal passes it so a stale file just written by a killed regen
-        # cannot throttle-skip the heal (the version guard still applies).
+        # cannot throttle-skip the heal (the PR #154 version guard still applies).
         force = "--force" in args
         for i, a in enumerate(args):
             if a == "--days" and i + 1 < len(args):
@@ -7665,7 +7665,7 @@ def _dispatch_dashboard(args):
         # the file catches up without ever blocking the session. forward
         # `force` -- a killed --force regen just wrote a stale file seconds ago, so
         # the detached retry must ALSO bypass the 60s write throttle or it
-        # throttle-skips and the file stays stale (the version guard still
+        # throttle-skips and the file stays stale (the PR #154 version guard still
         # applies, so a forced heal never clobbers a newer dashboard).
         if timed_out:
             _spawn_detached_dashboard_selfheal(days=days, force=force)
@@ -7959,7 +7959,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
         )
 
     # --- Rule 2: CLAUDE.md too large (PER FILE) ---
-    # measure_components() keys each ancestor CLAUDE.md as
+    # PR #100 (danikdanik). measure_components() keys each ancestor CLAUDE.md as
     # its own component (claude_md_global, claude_md_home,
     # claude_md_project_<dir>), mirroring how Claude Code loads CLAUDE.md files
     # up the directory tree. Summing N files into one "Slim CLAUDE.md" number
@@ -47660,7 +47660,7 @@ if __name__ == "__main__":
             # emitted hookEventName always matches the hook that actually fired
             # (Claude Code rejects "expected SessionStart but got
             # UserPromptSubmit"). Falls back to SessionStart if the field is absent
-            # (older harnesses).
+            # (older harnesses). Credit: @danikdanik (PR #142).
             _run_hook_emitting_json(
                 _run_compact_restore,
                 event=str(hook_input.get("hook_event_name") or "SessionStart"))

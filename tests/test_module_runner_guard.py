@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Defense-in-depth guard tests for hooks/module_runner.py.
+"""Defense-in-depth guard tests for hooks/module_runner.py (follow-up to PR #85).
 
-module_runner.py dispatches a hook target via runpy.run_module. The prior fix relied on
+module_runner.py dispatches a hook target via runpy.run_module. PR #85 relied on
 run.py already sanitizing the path; this pins module_runner's OWN guards so a
 future caller that skips run.py can't turn it into an arbitrary-module-execution
 primitive: a non-identifier module_name (path separators, dots, traversal) or a

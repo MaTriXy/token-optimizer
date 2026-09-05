@@ -96,7 +96,7 @@ def test_never_raises_without_session(hook, monkeypatch):
 # ---------------------------------------------------------------------------
 # C-1 / C-2 / C-4: credential redaction regression tests.
 #
-# The dedup STORE path was redacted but left three adjacent leaks in the
+# PR #164 redacted the dedup STORE path but left three adjacent leaks in the
 # same main() flow: the dedup `label` (embedded in the ref the model sees and
 # logged to trends.db as compressed_text), the `command_pattern` column in
 # trends.db's compression_events table, and zero tests pinning any of it. A

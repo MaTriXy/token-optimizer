@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for hook I/O and runtime resource hardening.
+"""Regression tests for PR #166 (hook I/O and runtime resource hardening).
 
 Each test reproduces a bug that was demonstrated live on main before the
 hardening landed (evidence in the PR description and sessions/2026-09-01-parallel-sprint/

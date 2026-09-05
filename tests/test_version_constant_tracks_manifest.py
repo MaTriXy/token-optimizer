@@ -1,6 +1,6 @@
 """TOKEN_OPTIMIZER_VERSION must equal the shipped manifest version.
 
-Reported externally by danikdanik: the constant was hand-maintained with
+Reported externally (PR #96, danikdanik): the constant was hand-maintained with
 a "keep in sync with plugin.json + marketplace.json" comment and had drifted
 four releases behind, so a fresh install rendered a stale version in the
 dashboard header. The reporter noted it had also drifted across at least two

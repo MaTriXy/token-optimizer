@@ -6,7 +6,7 @@ Claude Code generates a model reply after every /slash-command and !bash output
 
 This detector reads settings.json directly -- no session turn parsing required.
 Settings are cached per resolved path so batch runs do not re-read the file per
-session. Credit: detection idea + tests contributed by @danikdanik.
+session. Credit: detection idea + tests contributed by @danikdanik (PR #74).
 """
 
 import functools

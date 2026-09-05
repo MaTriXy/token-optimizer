@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the respond_to_bash_commands detector (ported to skills/).
+"""Tests for the respond_to_bash_commands detector (PR #74, ported to skills/).
 
 Covers the detection logic plus the two integration fixes:
   B1 — finding carries savings_tokens (display does f["savings_tokens"]).

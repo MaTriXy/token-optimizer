@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Follow-up hardening for the URL auth-param redactor.
+"""Follow-up hardening for the URL auth-param redactor (extends PR #84).
 
-The URL query-param credential class was added by nointerview1548. Review
+PR #84 (nointerview1548) added the URL query-param credential class. Review
 found three same-shape gaps + one cosmetic corruption; this pins the fixes:
 
   - OAuth implicit-flow FRAGMENT tokens (#access_token=...) — a classic leak

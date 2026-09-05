@@ -8,7 +8,7 @@ only safe to mark async if its entire job is a side effect nobody reads
 back, AND (for Stop/StopFailure specifically) losing the write to a process
 exiting right after the turn ends would be harmless.
 
-Original classification and test scaffold contributed by danikdanik.
+Original classification and test scaffold contributed by danikdanik (PR #86).
 This is the REDUCED-SCOPE landing: only the four hook groups whose output-free
 + race-free + exit-safe status was independently verified against source are
 async here. Seven of danikdanik's original eleven flips were reverted to sync
