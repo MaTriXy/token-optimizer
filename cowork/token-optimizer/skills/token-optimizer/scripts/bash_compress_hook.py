@@ -65,7 +65,7 @@ def main() -> None:
     # it into CLAUDE_SESSION_ID so the archive key, cross-turn dedup, and the
     # savings log (all of which read the env) attribute to the real session
     # instead of "". Empty session_id priced every event oneshot-only, dropping
-    # its reread annuity (GLM current-week-undercount finding).
+    # its reread annuity (current-week-undercount).
     _sid = str(payload.get("session_id", "") or "")
     if _sid and not os.environ.get("CLAUDE_SESSION_ID"):
         os.environ["CLAUDE_SESSION_ID"] = _sid
@@ -316,9 +316,9 @@ def _get_combined_error_re():
         from bash_compress import _ERROR_STDERR_PATTERNS
         # Join all patterns into a single alternation. N-2: each pattern's
         # case sensitivity is preserved by wrapping only the originally
-        # case-insensitive patterns in a scoped inline (?i:...) group. The
-        # first attempt compiled the combined regex with a global re.I, which
-        # silently upgraded the case-sensitive patterns (\bFAILED\b,
+        # case-insensitive patterns in a scoped inline (?i:...) group. A
+        # global re.I would silently upgrade the case-sensitive patterns
+        # (\bFAILED\b,
         # \bTraceback\b) and made benign output containing lowercase
         # "failed"/"traceback" trip the error-density gate.
         parts = []
