@@ -5,7 +5,7 @@ description: Plan a token-efficient Claude Code or Codex setup, or get a quick h
 
 # Token Coach: Plan Token-Efficient Before You Build
 
-> **Never recommend cutting our own tools (issue #111).** When you surface optimization or setup-overhead recommendations, NEVER suggest removing, archiving, trimming, disabling, or consolidating Token Optimizer's own skills — `token-optimizer`, `token-coach`, `token-dashboard`, `fleet-auditor`. They are the measurement layer; a tool that tells the user to delete itself to "save ~200 tokens" is self-defeating and embarrassing. Exclude them from every unused-skill / archive / consolidation suggestion, no matter how rarely they were invoked (an audit tool you don't explicitly call is not an "unused" skill).
+> **Never recommend cutting our own tools.** When you surface optimization or setup-overhead recommendations, NEVER suggest removing, archiving, trimming, disabling, or consolidating Token Optimizer's own skills — `token-optimizer`, `token-coach`, `token-dashboard`, `fleet-auditor`. They are the measurement layer; a tool that tells the user to delete itself to "save ~200 tokens" is self-defeating and embarrassing. Exclude them from every unused-skill / archive / consolidation suggestion, no matter how rarely they were invoked (an audit tool you don't explicitly call is not an "unused" skill).
 
 Interactive coaching for Claude Code or Codex architecture decisions. Analyzes your setup, identifies patterns (good and bad), and gives personalized advice with real numbers.
 
@@ -37,7 +37,7 @@ if [ -z "$RUNTIME" ]; then
 fi
 
 # Resolve measure.py to the NEWEST installed copy across channels so a stale
-# plugin-cache copy never shadows a fresh install (issue #57). find -L follows the
+# plugin-cache copy never shadows a fresh install. find -L follows the
 # install.sh symlink under ~/.claude/skills; cd -P resolves it before reading each
 # copy's plugin.json for its version. find (not bare globs) never errors under zsh.
 MEASURE_PY=""; _best_ver=""
@@ -127,7 +127,7 @@ elif [ -d "$HOME/.claude/skills/token-optimizer/../token-coach" ]; then
   COACH_DIR="$HOME/.claude/skills/token-optimizer/../token-coach"
 else
   # Newest cached token-coach copy, not first-match — mirrors the measure.py
-  # resolver so a stale plugin-cache copy never shadows a fresher one (issue #57).
+  # resolver so a stale plugin-cache copy never shadows a fresher one.
   COACH_DIR=""; _cbest=""
   while IFS= read -r _cd; do
     [ -d "$_cd" ] || continue

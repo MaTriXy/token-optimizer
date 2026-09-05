@@ -32,7 +32,7 @@ if [ -z "$RUNTIME" ]; then
 fi
 
 # Resolve measure.py to the NEWEST installed copy across channels so a stale
-# plugin-cache copy never shadows a fresh install (issue #57). find -L follows the
+# plugin-cache copy never shadows a fresh install. find -L follows the
 # install.sh symlink under ~/.claude/skills; cd -P resolves it before reading each
 # copy's plugin.json for its version. find (not bare globs) never errors under zsh.
 MEASURE_PY=""; _best_ver=""

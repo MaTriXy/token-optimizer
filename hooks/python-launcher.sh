@@ -11,7 +11,7 @@
 # console binary to avoid the per-hook console-window flash and orphaned
 # conhost.exe: python.exe/python3.exe swap to pythonw.exe, and py.exe (the
 # py-launcher) swaps to pyw.exe beside it, so py-launcher-only installs no
-# longer flash (#107). See _maybe_swap_to_pythonw for the constraints.
+# longer flash. See _maybe_swap_to_pythonw for the constraints.
 # Exits 127 with a diagnostic message if none found.
 
 set -eu
@@ -262,9 +262,10 @@ _setup_interpreter_cache() {
         { [ -n "$cache_dir" ] && _cache_dir_ready "$cache_dir"; } || return 0
     fi
 
-    # Cache key includes a PROBE-LOGIC EPOCH (#143). The key is otherwise
+    # Cache key includes a PROBE-LOGIC EPOCH. The key is otherwise
     # plugin-dir + PATH checksums, neither of which changes when the launcher's
-    # interpreter-liveness logic changes -- so a user already bitten by #143 has a
+    # interpreter-liveness logic changes -- so a user already bitten by a stale
+    # probe has a
     # cache record naming the DEAD WindowsApps stub, and the fixed probe never runs
     # on a cache HIT (only on a miss). Bumping this epoch renames the cache file, so
     # every stale record is ignored once on upgrade: discovery re-runs, the new
@@ -297,8 +298,8 @@ _setup_interpreter_cache() {
 #     pythonw inherits intact.
 #   * Non-Windows is a strict no-op: the MSYS guard short-circuits before any
 #     filesystem probe, so POSIX behaviour is byte-for-byte unchanged.
-#   * py.exe (the `py -3` launcher) swaps to pyw.exe in the same directory
-#     (#107): pyw.exe is the GUI-subsystem launcher twin and `pyw -3` execs
+#   * py.exe (the `py -3` launcher) swaps to pyw.exe in the same directory.
+#     pyw.exe is the GUI-subsystem launcher twin and `pyw -3` execs
 #     pythonw.exe. Every other guard (same-dir, safe prefix, WindowsApps
 #     skip, tty check, liveness probe) applies to pyw.exe unchanged.
 #
@@ -467,7 +468,7 @@ fi
 _setup_interpreter_cache
 _exec_cached_interpreter "$@" || :
 
-# F2 (#107): decide whether a WindowsApps candidate is a real Store install
+# Decide whether a WindowsApps candidate is a real Store install
 # or a dead AppExecutionAlias stub -- WITHOUT flashing a console window on
 # the common path. The old probe ran the console-subsystem `python.exe
 # --version` on every cache miss, which is exactly the flash this launcher
@@ -575,7 +576,7 @@ find_interpreter() {
     # .bat directly; a mis-exec is fail-safe here (falls through to the next
     # candidate, then to the exit-0 no-block guarantee), never a wedge. Gated to
     # Windows so a POSIX box never probes for a python3.bat. NOTE: the .bat exec
-    # path is only verifiable on a real Windows host (see #145) -- discovery is
+    # path is only verifiable on a real Windows host -- discovery is
     # what this adds; exec is MSYS-native and may flash a console window.
     _is_msys_platform 2>/dev/null && win_exts=".bat .cmd"
     for dir in $PATH; do
@@ -590,7 +591,7 @@ find_interpreter() {
             # C8: case-insensitive WindowsApps detection (any casing on
             # case-insensitive FS). WindowsApps may contain real Store-installed
             # Python OR non-functional AppExecutionAlias stubs (non-zero-byte,
-            # pass -s). F2 (#107): distinguish them flash-free via the GUI
+            # pass -s). Distinguish them flash-free via the GUI
             # twin's proof-of-life probe, with the console --version probe as
             # the fallback authority -- see _probe_windowsapps_candidate.
             if _path_contains_windowsapps "$binpath"; then

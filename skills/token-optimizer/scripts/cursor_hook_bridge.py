@@ -52,7 +52,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 _observed_warned = False
 
-# Windows console-flash guard (#107). Cursor's hook runners launch hooks
+# Windows console-flash guard. Cursor's hook runners launch hooks
 # directly, so any child we spawn would otherwise allocate a console window on
 # Windows. getattr -> 0 on POSIX (creationflags=0 is an accepted no-op).
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -75,7 +75,7 @@ except ImportError:  # pragma: no cover - broken install
     def spawn_detached(argv, **popen_kwargs):  # type: ignore[no-redef]
         # Degraded broken-install path: does NOT detach (see
         # spawn_utils.spawn_detached for the real OS-flag logic + breakaway
-        # retry). It DOES OR-in CREATE_NO_WINDOW (#107) so a broken install
+        # retry). It DOES OR-in CREATE_NO_WINDOW so a broken install
         # degrades to "child dies with the parent" rather than "console window
         # flashes on every stop/sessionEnd hook".
         import subprocess as _sp

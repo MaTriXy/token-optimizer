@@ -132,7 +132,7 @@ install_opencode() {
     local bundle="${oc_src}/dist-bundle/token-optimizer.js"
     [ -f "$bundle" ] || fail "Bundle not produced at ${bundle}"
 
-    # WSL-root wrong-home recovery + warning (issue #78, generalized): if
+    # WSL-root wrong-home recovery + warning (generalized): if
     # running as root under WSL without OPENCODE_CONFIG_DIR, the plugin lands in
     # /root/.config/opencode which the Windows OpenCode CLI never reads. First
     # try to recover OPENCODE_CONFIG_DIR from the Windows environment (PowerShell
@@ -182,7 +182,7 @@ uninstall_opencode() {
         esac
     done
 
-    # WSL-root wrong-home recovery (issue #78, generalized): mirror the
+    # WSL-root wrong-home recovery (generalized): mirror the
     # install path so a WSL-root uninstall targets the SAME /mnt config dir
     # the install wrote to, not /root/.config/opencode.
     _recover_home_from_windows_env OPENCODE_CONFIG_DIR ".config/opencode"
@@ -339,7 +339,7 @@ install_hermes() {
     local extra=()
     for a in "$@"; do [ "$a" = "--hermes" ] || extra+=("$a"); done
 
-    # WSL-root wrong-home warning (issue #78, generalized): if running as root
+    # WSL-root wrong-home warning (generalized): if running as root
     # under WSL without HERMES_HOME, the plugin lands in /root/.hermes which the
     # Windows Hermes CLI never reads.
     #
@@ -539,7 +539,7 @@ install_grok() {
         esac
     done
 
-    # WSL-root wrong-home recovery + warning (issue #78, generalized). GROK_HOME
+    # WSL-root wrong-home recovery + warning (generalized). GROK_HOME
     # is Grok Build's OWN variable — setting it to a WSL /mnt path breaks Grok's
     # own session persistence — so Token Optimizer uses its own
     # TOKEN_OPTIMIZER_GROK_HOME and never exports GROK_HOME. Recovery order:
@@ -583,7 +583,7 @@ install_grok() {
     exit 0
 }
 
-# ── WSL-root wrong-home warning (issue #78, generalized cross-platform) ─
+# ── WSL-root wrong-home warning (generalized cross-platform) ─
 # `bash install.sh` (or --opencode / --hermes / --copilot) on native Windows
 # runs WSL bash as root, so $HOME=/root and the install lands in /root/<subpath>
 # which the Windows-native CLI never reads (it reads %USERPROFILE%\<subpath> =
@@ -667,7 +667,7 @@ _wsl_root_wrong_home_warning() {
     warn "Or run from your WSL user (not root), or from a Windows-native shell."
 }
 
-# Back-compat wrapper (issue #78 original name). Tests source this for the
+# Back-compat wrapper (original Copilot-specific name). Tests source this for the
 # Copilot-specific warning; kept so the existing test_copilot_wsl_root.sh
 # still passes unchanged. Delegates to the generalized function with the
 # Copilot target parameters.
@@ -679,7 +679,7 @@ _copilot_wsl_root_warning() {
 # (/mnt/c/Users/You/.copilot). Accept an already-WSL /mnt/ path as-is. Returns 1
 # (and prints nothing) for UNC (\\server\share), relative, or exotic paths so the
 # caller can fall through to the next recovery method instead of exporting a
-# bogus home. Factored out of _recover_home_from_windows_env (issue #78 round 4)
+# bogus home. Factored out of _recover_home_from_windows_env
 # so both the PowerShell and cmd.exe recovery paths share one translator.
 #   $1 win_val : the raw Windows-side value (drive path, /mnt path, or other)
 #   stdout     : the translated /mnt/<drive>/... path (only on success, exit 0)
@@ -703,7 +703,7 @@ _translate_windows_path_to_wsl() {
 }
 
 # Recover a home override the user set in the WINDOWS environment but which WSL
-# bash never inherited (issue #78). WSL does not import Windows env vars unless
+# bash never inherited. WSL does not import Windows env vars unless
 # they are listed in WSLENV, so a user who sets COPILOT_HOME in PowerShell / the
 # System env and then runs `bash install.sh --copilot` sees it UNSET inside the
 # script — the install falls back to /root/.copilot and the Windows Copilot CLI
@@ -733,7 +733,7 @@ _translate_windows_path_to_wsl() {
 #   $3 export_as      : optional var name to EXPORT the recovered value under,
 #                       defaulting to $home_env_var. Lets Copilot read Windows'
 #                       legacy COPILOT_HOME but export it as the collision-free
-#                       TOKEN_OPTIMIZER_COPILOT_HOME (issue #78) so we never set
+#                       TOKEN_OPTIMIZER_COPILOT_HOME so we never set
 #                       Copilot's own COPILOT_HOME (which would break its logging).
 _recover_home_from_windows_env() {
     local home_env_var="$1" target_subpath="${2:-}" export_as="${3:-$1}"
@@ -748,7 +748,7 @@ _recover_home_from_windows_env() {
         { [ -r "$proc_version_file" ] && grep -qiE 'microsoft|wsl' "$proc_version_file" 2>/dev/null; } || return 0
     fi
 
-    # Gate to the ROOT-under-WSL case only — the exact wrong-home scenario (#78):
+    # Gate to the ROOT-under-WSL case only — the exact wrong-home scenario:
     # `bash install.sh` launched from a Windows shell runs WSL as root, so
     # $HOME=/root and the install lands where the Windows CLI can't read it. A
     # NON-root WSL user has a legitimate $HOME, so ~/.copilot is correct and we
@@ -830,7 +830,7 @@ _recover_home_from_windows_env() {
         # or the warning path rather than exporting a bogus home.
     fi
 
-    # ── Last resort: single-profile autodetect (issue #78) ──────────────
+    # ── Last resort: single-profile autodetect ──────────────
     # If no env value was recovered AND exactly ONE non-system Windows profile
     # exists under /mnt/c/Users/, it is defensible to auto-target it — but LOUDLY,
     # stating exactly where files are going and how to override, so a wrong guess
@@ -895,7 +895,7 @@ install_copilot() {
         esac
     done
 
-    # WSL-root wrong-home recovery + warning (issue #78). COPILOT_HOME is GitHub
+    # WSL-root wrong-home recovery + warning. COPILOT_HOME is GitHub
     # Copilot CLI's OWN variable — setting it to a WSL /mnt path breaks Copilot's
     # own logging — so Token Optimizer uses its own TOKEN_OPTIMIZER_COPILOT_HOME
     # and never exports COPILOT_HOME. Recovery order:
@@ -913,7 +913,7 @@ install_copilot() {
     # Resolve the Copilot home via measure.py so the banner shows the TRUE
     # hook destination. measure.py copilot-home resolves TOKEN_OPTIMIZER_COPILOT_HOME
     # (exported just above), then auto-detects the WSL-root Windows profile under
-    # /mnt/c/Users/<you>/.copilot (issue #78): under WSL root $HOME=/root, so the
+    # /mnt/c/Users/<you>/.copilot: under WSL root $HOME=/root, so the
     # strict runtime_env._is_safe_home_dir guard rejects a /mnt/... path — the
     # WSL-aware resolver accepts it as a deliberate cross-filesystem opt-in. We
     # forward the resolved path to copilot-install via --home so the install and
@@ -1121,7 +1121,7 @@ if ! command -v curl &>/dev/null; then
     fail "curl not found. Install curl first."
 fi
 
-# WSL-root wrong-home warning (issue #78, generalized): if running as root
+# WSL-root wrong-home warning (generalized): if running as root
 # under WSL without CLAUDE_CONFIG_DIR, the skill tree + settings land in
 # /root/.claude which the Windows Claude Code CLI never reads (it reads
 # %USERPROFILE%\.claude = /mnt/c/Users/<you>/.claude). Warn BEFORE creating
@@ -1133,7 +1133,7 @@ _wsl_root_wrong_home_warning "Claude Code" ".claude" "CLAUDE_CONFIG_DIR" ""
 # it's absent — create it so the shared skill tree has somewhere to live.
 # OpenCode users without Claude Code, or anyone following opencode/README's
 # "run the standard installer to refresh the skill tree" instruction, would
-# otherwise hit a fatal here (issue #57).
+# otherwise hit a fatal here.
 if [ ! -d "$CLAUDE_HOME" ]; then
     mkdir -p "$CLAUDE_HOME" || fail "Could not create ${CLAUDE_HOME}."
     warn "Created ${CLAUDE_HOME} (skill-tree home). Claude Code also creates this on first run."
@@ -1215,7 +1215,7 @@ fail_verified_install() {
     fail "$1"
 }
 
-# Dirty-tree-specific failure for update_repo (issue #57). The verified
+# Dirty-tree-specific failure for update_repo. The verified
 # checkout aborts with "local changes would be overwritten" when tracked
 # files are locally modified (e.g. a prior chmod flipped measure.py's mode).
 # Give the user an actionable message instead of the generic "check network".
@@ -1224,7 +1224,7 @@ fail_dirty_tree_update() {
     fail "Could not update to verified release ${RELEASE_TAG}: the working tree at ${INSTALL_DIR} has local changes that would be overwritten. Inspect with: git -C ${INSTALL_DIR} status — then either commit/stash your edits or re-clone from: https://github.com/${GITHUB_REPO}"
 }
 
-# ── Skill payload completeness check (U1, issue #57) ──────────
+# ── Skill payload completeness check ──────────
 # A partial sparse-checkout can leave skills/ present but the files inside it
 # missing, so SKILL.md emits "[file not found]" refs and the runtime loads
 # stale behavior. The existing `[ -d skills ]` guards only check directory
@@ -1401,7 +1401,7 @@ update_repo() {
         git -C "$INSTALL_DIR" fetch --force --depth 1 origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}" || return 1
         fetched_head=$(git -C "$INSTALL_DIR" rev-parse "${RELEASE_TAG}^{commit}" 2>/dev/null || echo "")
         [ -n "$fetched_head" ] && [ "$fetched_head" = "$VERIFIED_RELEASE_HEAD" ] || return 1
-        # Dirty-tree preflight (issue #57): a previous install's chmod of
+        # Dirty-tree preflight: a previous install's chmod of
         # measure.py flips the git-tracked 100644 file to 100755; with
         # core.fileMode=true git then sees it as locally modified and the
         # detached checkout below aborts with "local changes would be
@@ -1415,7 +1415,7 @@ update_repo() {
         fi
         if ! git -C "$INSTALL_DIR" checkout --detach -q "$VERIFIED_RELEASE_HEAD" 2>"${TMP_DIR}/checkout.err"; then
             # Checkout failed — distinguish a dirty-tree failure from a
-            # network issue so the user gets an actionable message (#57).
+            # network issue so the user gets an actionable message.
             if ! git -C "$INSTALL_DIR" diff --quiet 2>/dev/null \
                || ! git -C "$INSTALL_DIR" diff --cached --quiet 2>/dev/null; then
                 fail_dirty_tree_update
@@ -1487,7 +1487,7 @@ if [ -d "${INSTALL_DIR}/.git" ]; then
 
     # Verify skill payload completeness even when skills/ exists — a partial
     # sparse-checkout can leave the directory present but referenced files
-    # missing (issue #57). This is the primary guard for the bug.
+    # missing. This is the primary guard for the bug.
     repair_and_verify_skill_payload
 elif [ -d "$INSTALL_DIR" ]; then
     BACKUP="${INSTALL_DIR}.backup.$(date +%Y%m%d_%H%M%S)"
@@ -1560,7 +1560,7 @@ else
     info "Linked /token-optimizer skill"
 fi
 
-# ── Reconcile dev-symlink / plugin-cache skill shadow (issue #57) ─
+# ── Reconcile dev-symlink / plugin-cache skill shadow ─
 # A stale plugin-cache skill copy can shadow the fresh symlinked payload. The
 # reconcile pass is backup-first, foreign-runtime-guarded, idempotent, and a
 # no-op when there is nothing to reconcile. Tolerate any failure: a missing or
@@ -1575,7 +1575,7 @@ fi
 # `python3 measure.py`, so chmod is unnecessary and harmful: it flips the
 # git-tracked 100644 file to 100755, and with core.fileMode=true the next
 # verified-update checkout aborts with "local changes would be
-# overwritten" (issue #57). Leave chmod ONLY on files actually run as
+# overwritten". Leave chmod ONLY on files actually run as
 # ./file (none currently).
 
 # ── Setup Quality Bar (auto-install cache hook + status line) ─
@@ -1598,7 +1598,7 @@ info "Installing all Token Optimizer hooks..."
 # in a plain assignment would hard-exit before HOOK_EXIT is captured, so a
 # fresh empty $CLAUDE_HOME (e.g. an OpenCode user without Claude Code, whose
 # settings.json doesn't exist yet) would abort the install instead of
-# degrading to the warn branch below (issue #57).
+# degrading to the warn branch below.
 set +e
 HOOK_OUTPUT=$(python3 "${INSTALL_DIR}/skills/token-optimizer/scripts/measure.py" setup-all-hooks 2>&1)
 HOOK_EXIT=$?

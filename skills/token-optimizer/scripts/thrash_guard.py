@@ -7,8 +7,8 @@ A per-command wrapper (e.g. JFrog Boost) is exec'd once per command and keeps
 no cross-turn state, so it structurally cannot see an agent quietly re-running
 the same command — the failure mode Boost's own blog describes ("an agent
 quietly running `ls` six times to re-establish where it is ... So we needed the
-agent itself to tell us. In band.") and their issue #35 (an agent looping
-"until the user interrupts", caused by Boost and undetected). Token Optimizer
+agent itself to tell us. In band.") and a Boost blog post describing an agent
+looping "until the user interrupts", caused by Boost and undetected). Token Optimizer
 is a session-stateful hook, so it can see the streak and say something.
 
 Design (nudge-only):

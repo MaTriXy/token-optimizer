@@ -9,7 +9,7 @@
 #
 # Works by REGENERATING the mirror with sync-codex-marketplace-plugin.sh and
 # diffing the result against the committed tree. Because the generator owns
-# the intentional divergences (hooks.json async-strip for Codex #83,
+# the intentional divergences (hooks.json async-strip for Codex,
 # benchmark.py exclusion), a clean diff means "no drift" with no
 # hand-maintained exception list.
 #

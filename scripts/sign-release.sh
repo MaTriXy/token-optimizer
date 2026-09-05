@@ -37,7 +37,7 @@ CHECKSUM_FILE="${REPO_ROOT}/CHECKSUMS.sha256"
 # Preflight: the Codex marketplace plugin (plugins/token-optimizer/) is a mirror of
 # root skills/ + hooks/ + .codex-plugin/. Re-sync and fail the release if the committed
 # mirror drifted from canonical root — a stale mirror ships outdated skills to Codex
-# users. See scripts/sync-codex-marketplace-plugin.sh and issue #51.
+# users. See scripts/sync-codex-marketplace-plugin.sh.
 echo "Verifying Codex marketplace plugin parity..."
 if ! bash "${REPO_ROOT}/scripts/check-mirror-sync.sh"; then
     echo "Error: mirror drift detected. Commit the regenerated mirror, re-tag, then retry."

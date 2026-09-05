@@ -138,7 +138,7 @@ FIRST_READ_ACTIVE_COHORTS = frozenset({
     ("typescript", "16-64KB"),
     ("typescript", "64-256KB"),  # interpolated (ts 16-64KB passed, 0% edits)
 })
-# NOTE (#79): markdown cohorts were demoted to shadow (measure-only) on
+# NOTE: markdown cohorts were demoted to shadow (measure-only) on
 # 2026-06-30. A code skeleton (signatures/imports) is structure-preserving, but
 # the markdown skeleton is headings-only — prose docs read for understanding
 # lose load-bearing content, and the edit-rate promotion gate does not capture
@@ -1808,7 +1808,7 @@ def handle_read(hook_input: dict[str, Any], mode: str, quiet: bool) -> None:
 
 
 def handle_clear_compacted(hook_input: dict[str, Any], quiet: bool) -> None:
-    """Clear ONLY the current session's file_reads after a compaction (#101).
+    """Clear ONLY the current session's file_reads after a compaction.
 
     Wired to SessionStart (matcher ``compact``) via the ``--clear-compacted``
     flag, which reads ``session_id`` from the stdin hook input. Post-compaction

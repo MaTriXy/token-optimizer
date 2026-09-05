@@ -6,7 +6,7 @@ this Claude Code skill even though the user is not in Claude Code.
 
 **Do not run the Claude Code audit/fix phases.** They scan and modify `~/.claude`
 (skills, plugins, settings, MEMORY.md). When the user is working in OpenCode,
-mutating `~/.claude` is the wrong target and is what issue #57 reported.
+mutating `~/.claude` is the wrong target.
 
 ## What to tell the user
 

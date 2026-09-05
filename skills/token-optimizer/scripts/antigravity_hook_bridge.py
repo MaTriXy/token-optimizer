@@ -16,7 +16,7 @@ missing dependency. Consent-gated (R20): without the install record in
 Hot-path imports stay stdlib + the copied payload modules (runtime_env,
 bash_hook, spawn_utils). ``measure.py`` is never imported here — the Stop hook
 locates it through the ``measure-path`` locator written by the installer (KTD5,
-the Hermes #58 precedent).
+the Hermes installer precedent).
 """
 
 from __future__ import annotations

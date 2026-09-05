@@ -86,12 +86,12 @@ Verified status (research date 2026-06-10, CLI v1.0.60):
 
 | Hook power | Status | Upstream reference | TO feature gated on it |
 |---|---|---|---|
-| `permissionDecision: deny/allow` | 🟢 works (allow ≥1.0.18) | #2643 | rewrite approval suppression |
-| `updatedInput` (preToolUse) | 🟢 works ≥1.0.24 | #2013, v1.0.24 notes | bash output compression |
-| `additionalContext` (sessionStart) | 🟢 works | #2142 | continuity restore |
+| `permissionDecision: deny/allow` | 🟢 works (allow ≥1.0.18) | upstream Copilot CLI | rewrite approval suppression |
+| `updatedInput` (preToolUse) | 🟢 works ≥1.0.24 | v1.0.24 notes | bash output compression |
+| `additionalContext` (sessionStart) | 🟢 works | upstream Copilot CLI | continuity restore |
 | `additionalContext` (postToolUse) | 🟢 works ≥1.0.49 | v1.0.49/51 notes | context-growth nudges |
-| `additionalContext` (preToolUse) | 🔴 broken upstream | #2585 (open) | read-interception (delta/structure-map) — deferred; needs this field |
-| `additionalContext` (userPromptSubmitted) | 🔴 regressed in v1.0.60 | #3727 (open) | per-prompt quality steering |
+| `additionalContext` (preToolUse) | 🔴 broken upstream | upstream Copilot CLI (open) | read-interception (delta/structure-map) — deferred; needs this field |
+| `additionalContext` (userPromptSubmitted) | 🔴 regressed in v1.0.60 | upstream Copilot CLI (open) | per-prompt quality steering |
 | `systemMessage` | ⚪ unconfirmed on CLI | docs omit it | not used |
 
 Escape hatch when upstream fixes outpace our matrix:
@@ -101,7 +101,7 @@ Escape hatch when upstream fixes outpace our matrix:
 
 | Gap | Why | Tracking |
 |---|---|---|
-| Per-request CLI token counts | usage events are `ephemeral: true`, never written to disk; only `session.shutdown` aggregates persist | github/copilot-cli#3686 |
+| Per-request CLI token counts | usage events are `ephemeral: true`, never written to disk; only `session.shutdown` aggregates persist | upstream Copilot CLI limitation |
 | Compaction steering | compaction is server-side; no PreCompact injection point | — |
 | Tool-output substitution | no `updatedOutput` on postToolUse | — |
 | Live fill ring (VS Code) | in-memory only, never persisted | — |
@@ -120,7 +120,7 @@ Consequences and mitigations:
   start; postToolUse nudges need tool activity to fire.
 - **Read-interception savers (Delta Mode / Structure Map) are not yet shipped
   on Copilot.** They require `preToolUse additionalContext`, which is broken
-  upstream (#2585). They will be added once that field works; until then bash
+  upstream in the Copilot CLI. They will be added once that field works; until then bash
   output compression is the active CLI saver.
 - **The two VS Code debug-log settings are enabled manually**, not by the
   installer. Writing VS Code's `settings.json` from the CLI is fragile across

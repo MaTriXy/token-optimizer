@@ -61,7 +61,7 @@ Run them with `TOKEN_OPTIMIZER_RUNTIME=copilot` set (the installer and hooks set
 
 ## Honest beta limits
 
-GitHub Copilot CLI ships weekly and its hook fields break and regress between releases, so the adapter gates every engine feature on a per-version capability map. Two savers that need a currently-broken upstream field (Delta Mode / Structure Map, blocked by [github/copilot-cli#2585](https://github.com/github/copilot-cli/issues/2585)) are deferred until it works. The full feature-by-feature status — including what Copilot does not expose to a companion (per-request CLI token data, compaction steering) — lives in [`docs/copilot.md`](../docs/copilot.md).
+GitHub Copilot CLI ships weekly and its hook fields break and regress between releases, so the adapter gates every engine feature on a per-version capability map. Two savers that need a currently-broken upstream field (Delta Mode / Structure Map, blocked by an upstream Copilot CLI bug) are deferred until it works. The full feature-by-feature status — including what Copilot does not expose to a companion (per-request CLI token data, compaction steering) — lives in [`docs/copilot.md`](../docs/copilot.md).
 
 ## License
 

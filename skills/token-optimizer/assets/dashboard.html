@@ -4520,7 +4520,7 @@ var DB = (function() {
       // the same as — or slightly more than — the frozen baseline would have). We show NO
       // counterfactual headline (a saving we didn't make), just an honest neutral note plus
       // the arms; the directly-metered floor card below still reports realized savings. This
-      // is the net<=0 branch of the issue #87 fix — parity with OpenClaw/OpenCode.
+      // is the net<=0 branch — parity with OpenClaw/OpenCode.
       html += '<div class="card wide" style="padding:var(--s-5) var(--s-4);margin-bottom:var(--s-3);">' +
         '<div class="label" style="margin-bottom:var(--s-2);">At or above your baseline this period</div>' +
         '<div class="lede">Your recent sessions cost about what your frozen baseline would have — est. <strong>' + money(ba.actual_monthly_usd) + '/mo</strong> now vs <strong>' + money(ba.counterfactual_monthly_usd) + '/mo</strong> the old way. There is no net saving to headline this period, so we are not showing one. The figure below is what Token Optimizer counted directly, action by action.</div>' +
@@ -5676,7 +5676,7 @@ var DB = (function() {
         else if (f.risk_level === 'moderate') { riskBg = 'var(--c-badge-amber)'; riskLabel = 'MODERATE RISK'; }
 
         // A feature the user set via env var is theirs to control -- never stamp
-        // RECOMMENDED on it (that would contradict the "cannot toggle" note). Issue #77.
+        // RECOMMENDED on it (that would contradict the "cannot toggle" note).
         var envManaged = f.source === 'env';
         var recBadge = managedByHooks
           ? '<span style="background:var(--c-badge-info);color:#000;font-size:12px;padding:3px 10px;border-radius:4px;margin-left:10px;font-weight:700;vertical-align:middle;">HOOK-MANAGED</span>'
@@ -5939,7 +5939,7 @@ var DB = (function() {
       input.addEventListener('change', function(e) {
         // Env-managed / hook-managed / unavailable rows render the checkbox as
         // disabled. Native clicks are blocked, but a programmatic change must not
-        // POST a config write the env var would silently shadow. Issue #77.
+        // POST a config write the env var would silently shadow.
         if (e.target.disabled) { return; }
         var fname = e.target.dataset.v5Name;
         var newState = e.target.checked;

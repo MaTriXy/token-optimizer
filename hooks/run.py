@@ -124,11 +124,11 @@ def _check_consent(plugin_root: Path | None = None) -> bool:
                 return True  # Path outside home = skip (fail-open)
             # In-home CLAUDE_PLUGIN_DATA must still be a declared identity of
             # THIS plugin, not a foreign plugin's leaked value sharing the same
-            # shared plugins/data root (issue #140 sibling site). Reuse the
+            # shared plugins/data root. Reuse the
             # SAME identity-checked resolver plugin_env.py uses for every other
             # hook script instead of trusting pd raw. If the resolver truly
             # can't be imported (unusual/non-standard plugin layout), fall back
-            # to trusting pd -- matching pre-#140 behavior -- so a missing
+            # to trusting pd -- matching prior behavior -- so a missing
             # import never blocks the consent check. If it CAN be imported but
             # rejects pd as foreign, fall through to the identical legacy chain
             # a session with no CLAUDE_PLUGIN_DATA at all would use below --

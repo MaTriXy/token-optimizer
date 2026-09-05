@@ -125,7 +125,7 @@ def main():
         return
 
     # Re-quote each token to handle paths with spaces safely (ARCH-F3).
-    # Use the #80 bash-resolver form so the rewritten command survives a
+    # Use the bash-resolver form so the rewritten command survives a
     # stripped/empty PATH (Claude runs updatedInput under `/bin/sh -c`).
     #
     # CRITICAL: this rewrites the USER's real Bash tool command, not an internal

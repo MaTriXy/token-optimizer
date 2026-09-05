@@ -70,7 +70,7 @@ find "${STAGE}" \( -name '__pycache__' -o -name '.DS_Store' -o -name '*.pyc' -o 
 #     the root hooks/hooks.json keeps its Claude-tuned values (the parity test
 #     normalizes both the same way):
 #
-#     (issue #83) Codex warns and SKIPS any hook with "async": true ("async hooks
+#     Codex warns and SKIPS any hook with "async": true ("async hooks
 #       are not supported yet"), so those hooks never run for Codex marketplace
 #       users. Strip the async flag so Codex runs them synchronously. Claude keeps
 #       "async": true for its non-blocking path.

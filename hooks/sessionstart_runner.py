@@ -224,9 +224,9 @@ def _clear_runner_deadline():
 # The SessionStart stdout envelope.
 #
 # Every subcommand's stdout is buffered and emitted as ONE JSON object in the
-# documented {"hookSpecificOutput": {...}} shape (issue #81 /
-# docs-grounding.md §1), with the event name taken from the firing hook's stdin
-# payload (PR #142) so a SessionStart hook can never emit a UserPromptSubmit
+# documented {"hookSpecificOutput": {...}} shape
+# (docs-grounding.md §1), with the event name taken from the firing hook's stdin
+# payload so a SessionStart hook can never emit a UserPromptSubmit
 # envelope (Claude Code rejects the mismatch).
 #
 # This is UNCONDITIONAL -- it is not gated on detect_runtime(). The old gate

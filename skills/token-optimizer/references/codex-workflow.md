@@ -12,7 +12,7 @@ If this skill is running in Codex, use this section instead of the Claude Code p
 
 ```bash
 # Resolve measure.py to the NEWEST installed copy across channels so a stale
-# plugin-cache copy never shadows a fresh install (issue #57). find -L follows the
+# plugin-cache copy never shadows a fresh install. find -L follows the
 # install.sh symlink; cd -P resolves it before reading each copy's plugin.json for
 # its version. find (not bare globs) never errors under zsh. measure.py's own
 # behavior is scoped by $TOKEN_OPTIMIZER_RUNTIME, not by which path loaded it.

@@ -14,7 +14,7 @@ RUNTIME="${TOKEN_OPTIMIZER_RUNTIME:-}"
 if [ -z "$RUNTIME" ]; then
   # Env signals are authoritative and checked before directory heuristics: a host
   # with BOTH ~/.codex and ~/.config/opencode (running OpenCode) must resolve to
-  # opencode, not codex, so the tool never reaches into ~/.claude (issue #57).
+  # opencode, not codex, so the tool never reaches into ~/.claude.
   if [ -n "$CLAUDE_PLUGIN_ROOT" ] || [ -n "$CLAUDE_PLUGIN_DATA" ]; then
     RUNTIME="claude"
   elif [ -n "$OPENCODE" ] || [ -n "$OPENCODE_BIN" ] || [ -n "$OPENCODE_CONFIG_DIR" ] || [ -n "$OPENCODE_CONFIG" ]; then
@@ -32,7 +32,7 @@ if [ -z "$RUNTIME" ]; then
   fi
 fi
 # Resolve measure.py to the NEWEST installed copy across channels so a stale
-# plugin-cache copy never shadows a fresh install (issue #57). find -L follows the
+# plugin-cache copy never shadows a fresh install. find -L follows the
 # install.sh symlink under ~/.claude/skills; cd -P resolves it before reading each
 # copy's plugin.json for its version. find (not bare globs) never errors under zsh.
 MEASURE_PY=""; TO_LAUNCHER=""; _best_ver=""
@@ -49,7 +49,7 @@ $(find -L "$HOME/.claude/skills" "$HOME/.claude/plugins/cache" "$HOME/.claude/to
 EOF
 if [ -z "$MEASURE_PY" ]; then echo "[Error] measure.py not found. Is Token Optimizer installed?"; exit 1; fi
 # python-launcher.sh sits at the plugin root beside skills/. Routing EVERY
-# runtime through it keeps Windows invocations flash-free (#107): bare
+# runtime through it keeps Windows invocations flash-free: bare
 # `python3` is a console-subsystem spawn on a Codex/OpenCode Windows host,
 # while the launcher swaps to the GUI-subsystem pythonw.exe. On POSIX the
 # launcher resolves the same python3 it always did.
