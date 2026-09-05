@@ -34,19 +34,22 @@ phones home additionally needs its domain on Cowork's **domain allowlist**.
 ## The hook set
 
 The packaged `hooks/hooks.json` is the Claude Code one **trimmed to the
-events reported to fire in Cowork** (SessionStart, UserPromptSubmit,
-PreToolUse, Stop), with keepwarm dropped (its keep-a-local-CLI-warm
-premise doesn't transfer). Commands are byte-identical to the Claude Code
-plugin — same `${CLAUDE_PLUGIN_ROOT}` bash-resolver pattern, same
-`measure.py` entrypoints — and every hook is additive and fail-open, so a
-non-firing event degrades nothing. If the probe shows more events firing,
-widen `COWORK_EVENTS` in `cowork_install.py` and repackage.
+events verified to fire in Cowork** (UserPromptSubmit, PreToolUse,
+PostToolUse, Stop), with keepwarm dropped (its keep-a-local-CLI-warm
+premise doesn't transfer). Cowork does **not** fire SessionStart, so the
+run-once work that SessionStart handles on Claude Code (ensure-health
+bootstrap, quality-cache --force, compact-restore) rides UserPromptSubmit
+instead, gated by the same per-session markers. Commands are byte-identical
+to the Claude Code plugin — same `${CLAUDE_PLUGIN_ROOT}` bash-resolver
+pattern, same `measure.py` entrypoints — and every hook is additive and
+fail-open, so a non-firing event degrades nothing. If the probe shows more
+events firing, widen `COWORK_EVENTS` in `cowork_install.py` and repackage.
 
 What rides in per event:
 
-- **SessionStart** — `ensure-health`, `quality-cache --force`, `compact-restore` (continuity)
-- **UserPromptSubmit** — `quality-cache --warn`, `prompt-continuity`, `verbosity-steer`
+- **UserPromptSubmit** — `quality-cache --warn`, `prompt-continuity`, `verbosity-steer`, plus the run-once bootstrap (`ensure-health`, `quality-cache --force`, `compact-restore`) gated by per-session markers
 - **PreToolUse** — `read_cache` (Read), `bash_hook` (Bash), `checkpoint-trigger` (Agent|Task), `refetch_guard` (mcp__.*)
+- **PostToolUse** — `posttooluse_runner` (consolidated: bash_compress, archive_result, context_intel, read_cache --invalidate, quality-cache --throttle-only)
 - **Stop** — `compact-capture`, `session-end-flush`
 
 ## Rollout (org admin)
