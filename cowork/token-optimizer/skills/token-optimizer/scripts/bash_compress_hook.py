@@ -201,8 +201,8 @@ def main() -> None:
             _enforce_baseline_invariant,
         )
 
-        # --- check stderr for failure patterns ---
-        if _looks_like_failure(0, stderr):
+        # --- check for failure (exit code or stderr patterns) ---
+        if _looks_like_failure(exit_code, stderr):
             if _nudge:
                 _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
             return  # Don't compress failure output
@@ -220,7 +220,7 @@ def main() -> None:
             return  # Error on stdout: pass through raw
 
         # Run the standard compression pipeline
-        compressed = compress(command, cleaned_stdout, returncode=0, stderr=stderr)
+        compressed = compress(command, cleaned_stdout, returncode=exit_code, stderr=stderr)
 
         # Best single-output representation: the compressed preview when it
         # actually shrank the output by >=10%, else the raw output.
