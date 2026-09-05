@@ -832,3 +832,105 @@ class TestRegressionF8CaseInsensitiveErrors:
         assert "FATAL: cannot continue" in result, (
             "Case-variant 'FATAL:' was dropped (F8)"
         )
+
+
+class TestDockerBuildKitErrorSurvives:
+    """Docker BuildKit error lines are prefixed with progress noise
+    (``#<id> <time>``), so the progress-noise filter used to drop them
+    BEFORE the error-line collector ran. The fix collects error lines
+    first, so a progress-prefixed error survives in ``distinct_errors``
+    and is re-injected into the compressed output."""
+
+    def test_buildkit_error_line_survives_compression(self):
+        lines = [f"#10 0.{i:03d} ..." for i in range(50)]
+        lines += [
+            "#10 0.317 ERROR: failed to solve: "
+            "process \"/bin/sh -c npm install\" did not complete successfully",
+        ]
+        lines += [f"#10 0.{i + 100:03d} ..." for i in range(50)]
+        lines.append("------")
+        output = "\n".join(lines)
+        result = compress("docker build -t app .", output)
+        # The error line must appear in the result (or in the original if
+        # compression bailed out — either way it must not be lost).
+        carrier = result if result is not None else output
+        assert "ERROR: failed to solve" in carrier, (
+            "Docker BuildKit error line was dropped by progress-noise filter"
+        )
+
+    def test_buildkit_error_line_collected_in_distinct_errors(self):
+        """Unit-level: the error line must be in _find_distinct_error_lines
+        even though it matches the progress-noise pattern."""
+        error_line = (
+            "#10 0.317 ERROR: failed to solve: "
+            "process \"/bin/sh -c npm install\" did not complete successfully"
+        )
+        assert _is_error_line(error_line), (
+            "BuildKit error line does not match the error regex"
+        )
+        assert _is_progress_noise(error_line), (
+            "BuildKit error line should also match progress noise (the bug)"
+        )
+        # The fix ensures compress() collects it before the noise drop.
+        lines = [f"#10 0.{i:03d} ..." for i in range(30)]
+        lines.append(error_line)
+        lines += [f"#10 0.{i + 100:03d} ..." for i in range(30)]
+        output = "\n".join(lines)
+        result = compress("docker build -t app .", output)
+        carrier = result if result is not None else output
+        assert error_line in carrier, (
+            "BuildKit error line was not preserved in the output"
+        )
+
+
+class TestBailoutReinjection:
+    """The bail-out path (not enough repetition to compress) re-injects
+    preserved/error/summary lines that collapse passes may have dropped.
+    Two invariants: (a) a line already in ``collapsed`` is not re-injected
+    twice (dedup), and (b) the result is never larger than the original
+    input."""
+
+    def test_bailout_dedup_not_reinjected_twice(self):
+        """A line that survived into ``collapsed`` must not be appended again
+        by the re-injection loop (would duplicate it in the output)."""
+        # Build output that triggers the bail-out path (>= 85% of lines
+        # survive, < 10% noise dropped) but has an error line that is also
+        # in collapsed (it was kept, not dropped).
+        lines = [f"Compiling src/file_{i:03d}.c..." for i in range(30)]
+        error_line = "src/main.c:15:5: error: undeclared identifier"
+        lines.append(error_line)
+        lines += [f"Compiling src/file_{i:03d}.c..." for i in range(30, 60)]
+        output = "\n".join(lines)
+        result = compress("gcc -c main.c", output)
+        # If compression happened, the error line must appear at most once
+        # in the result. If it bailed out (None), the original is used
+        # verbatim, which also has it once.
+        carrier = result if result is not None else output
+        assert carrier.count(error_line) == 1, (
+            f"error line appeared {carrier.count(error_line)} times in "
+            f"the output; dedup failed"
+        )
+
+    def test_bailout_never_returns_larger_than_original(self):
+        """If re-injection would make the result longer than the original,
+        the bail-out path must return None (prefer the original)."""
+        # Build output where the bail-out path fires (not enough repetition)
+        # but re-injection of error/summary lines could inflate the result.
+        # Use many unique lines (no repetition to collapse) plus a few error
+        # lines that are NOT in collapsed (they were dropped as noise or by
+        # a collapse pass), so re-injection tries to add them back.
+        lines = []
+        for i in range(200):
+            lines.append(f"#10 0.{i:03d} step {i} unique content line {i}")
+        # A few progress-prefixed error lines (dropped by noise filter but
+        # collected in distinct_errors by the MUST-FIX 3 fix)
+        for i in range(5):
+            lines.append(f"#10 0.{i + 200:03d} ERROR: build step {i} failed")
+        output = "\n".join(lines)
+        result = compress("docker build -t app .", output)
+        # The result must be None or strictly shorter than the original.
+        if result is not None:
+            assert len(result) < len(output), (
+                f"bail-out returned result ({len(result)} chars) larger "
+                f"than or equal to original ({len(output)} chars)"
+            )

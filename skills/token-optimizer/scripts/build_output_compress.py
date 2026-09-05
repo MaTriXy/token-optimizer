@@ -675,19 +675,22 @@ def compress(command: str, output: str) -> str | None:
                         is_credential = True
                         break
 
+            # Error line: collect BEFORE the progress-noise drop so that a
+            # progress-prefixed error line (e.g. Docker BuildKit
+            # "#10 0.317 ERROR: failed to solve") survives in
+            # distinct_errors even when the progress filter would drop it
+            # from kept_lines. It is re-injected later either way.
+            if _COMBINED_ERROR_RE.search(line):
+                if line not in _error_seen:
+                    _error_seen.add(line)
+                    distinct_errors.append(line)
+
             # Progress noise: drop immediately (cheapest check, most common).
             # But never drop a credential-bearing line (F1).
             if not is_credential and _COMBINED_PROGRESS_RE.search(line):
                 noise_dropped += 1
                 continue
             kept_lines.append(line)
-
-            # Error line: keep distinct. F3: no cap — every distinct error
-            # line must survive. Duplicates are collapsed later.
-            if _COMBINED_ERROR_RE.search(line):
-                if line not in _error_seen:
-                    _error_seen.add(line)
-                    distinct_errors.append(line)
 
             # Summary line: keep distinct
             if _COMBINED_SUMMARY_RE.search(line):
@@ -706,6 +709,8 @@ def compress(command: str, output: str) -> str | None:
             # Still re-inject preserved, error, and summary lines in case a
             # collapse pass dropped them (traceback-frame collapse removes
             # middle frames, which can carry error-matching source lines).
+            # Dedup: a line already in collapsed is not re-injected, and a
+            # line already appended is not appended again.
             result = "\n".join(collapsed)
             collapsed_set = set(collapsed)
             appended: list[str] = []
@@ -714,7 +719,11 @@ def compress(command: str, output: str) -> str | None:
                     appended.append(line)
             if appended:
                 result = result + "\n" + "\n".join(appended)
-            if result != output:
+            # Never return output larger than (or equal to) the original:
+            # re-injection can add lines that make the result longer than
+            # the input, which defeats the purpose of compression. Prefer
+            # the original (return None) in that case.
+            if result != output and len(result) < len(output):
                 return result
             return None
 
