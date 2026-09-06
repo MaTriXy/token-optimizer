@@ -174,7 +174,7 @@ def test_codex_nudge_reaches_model_via_additional_context():
     )
 
 
-def test_codex_runtime_still_records_thrash_guard():
+def test_codex_runtime_still_records_thrash_guard(monkeypatch):
     """With TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT=1, thrash_guard must
     still record the Bash run. The flag only suppresses emission, not
     recording."""
@@ -204,7 +204,7 @@ def test_codex_runtime_still_records_thrash_guard():
     )
     assert proc.returncode == 0, f"hook failed: {proc.stderr}"
 
-    os.environ["TOKEN_OPTIMIZER_SNAPSHOT_DIR"] = tmp
+    monkeypatch.setenv("TOKEN_OPTIMIZER_SNAPSHOT_DIR", tmp)
     sys.path.insert(0, str(SCRIPTS))
     for m in ("session_store", "delta_diff", "thrash_guard"):
         sys.modules.pop(m, None)
