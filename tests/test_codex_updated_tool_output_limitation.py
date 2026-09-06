@@ -53,11 +53,27 @@ def test_codex_install_passes_no_updated_tool_output_env():
 
 def test_codex_runtime_suppresses_updated_tool_output():
     """With TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT=1, bash_compress_hook
-    must not emit updatedToolOutput on a real Bash PostToolUse payload."""
+    must not emit updatedToolOutput on a real Bash PostToolUse payload whose
+    output WOULD compress without the flag.
+
+    This test has teeth: the payload is 500 repetitive ``drwxr-xr-x ... dir_N``
+    lines from an ``ls -la`` (read-only) command, which the compression
+    pipeline collapses well past the 10% threshold. Without the gate the
+    compression path would call ``_emit_updated_tool_output`` and emit
+    ``updatedToolOutput``; this assertion would then fail. The previous
+    fixture (200 ``file_N.py`` lines) never compressed, so
+    ``_emit_updated_tool_output`` was never reached and the test passed even
+    with the gate deleted.
+    """
     sid = "test-codex-runtime-" + uuid.uuid4().hex[:8]
     cmd = "ls -la"
     tmp = tempfile.mkdtemp(prefix="to-codex-runtime-")
-    stdout = "\n".join(f"file_{i}.py" for i in range(200))
+    # 500 repetitive directory-listing lines: the compression pipeline keeps
+    # head/tail and summarizes the middle, achieving well over 10% reduction.
+    # Without the gate this payload WILL trigger _emit_updated_tool_output.
+    stdout = "\n".join(
+        f"drwxr-xr-x  2 user staff  64 Sep  6 12:00 dir_{i}" for i in range(500)
+    )
     payload = json.dumps({
         "session_id": sid,
         "transcript_path": "/tmp/transcript.jsonl",
@@ -86,16 +102,76 @@ def test_codex_runtime_suppresses_updated_tool_output():
         encoding="utf-8", errors="replace", timeout=30, env=env,
     )
     assert proc.returncode == 0, f"hook failed: {proc.stderr}"
+    # The gate must suppress updatedToolOutput. If the gate were deleted,
+    # the compressible payload would cause _emit_updated_tool_output to fire
+    # and emit updatedToolOutput -- this assertion would then fail.
     if proc.stdout.strip():
-        try:
-            envelope = json.loads(proc.stdout)
-            hso = envelope.get("hookSpecificOutput", {})
-            assert "updatedToolOutput" not in hso, (
-                "TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT=1 must suppress "
-                "updatedToolOutput emission at runtime."
-            )
-        except json.JSONDecodeError:
-            pass
+        envelope = json.loads(proc.stdout)
+        hso = envelope.get("hookSpecificOutput", {})
+        assert "updatedToolOutput" not in hso, (
+            "TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT=1 must suppress "
+            "updatedToolOutput emission at runtime, even when the output "
+            "would compress without the gate."
+        )
+
+
+def test_codex_nudge_reaches_model_via_additional_context():
+    """With TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT=1, a burn nudge must still
+    reach the model via additionalContext (which every host honors), not via
+    updatedToolOutput (which Codex ignores).
+
+    This is the Codex host-shape confirmation for the nudge parity fix: the
+    nudge is delivered through additionalContext on Claude Code AND Codex AND
+    Cowork. On Codex-via-install the compression compute is skipped entirely
+    (perf optimization), but the nudge still goes out.
+    """
+    sid = "test-codex-nudge-" + uuid.uuid4().hex[:8]
+    cmd = "make check"
+    tmp = tempfile.mkdtemp(prefix="to-codex-nudge-")
+    env = {
+        **os.environ,
+        "TOKEN_OPTIMIZER_SNAPSHOT_DIR": tmp,
+        "CLAUDE_SESSION_ID": sid,
+        "TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT": "1",
+    }
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
+    # Fire the same failing command 3 times to trigger the burn nudge
+    # (streak >= BURN_NUDGE_THRESHOLD, different output each time so the
+    # identical-output nudge does not preempt the burn nudge).
+    for n in range(3):
+        payload = json.dumps({
+            "session_id": sid,
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/Users/test/project",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": cmd},
+            "tool_response": f"Exit code 1\nattempt {n} failed\n",
+        })
+        proc = subprocess.run(
+            [sys.executable, str(BASH_COMPRESS_HOOK)],
+            input=payload, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, env=env,
+        )
+        assert proc.returncode == 0, f"hook failed on run {n}: {proc.stderr}"
+    # The third run should emit the burn nudge via additionalContext.
+    assert proc.stdout.strip(), (
+        "The burn nudge must be emitted via additionalContext even with "
+        "TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT=1 (Codex shape). Got empty stdout."
+    )
+    envelope = json.loads(proc.stdout)
+    hso = envelope.get("hookSpecificOutput", {})
+    assert "additionalContext" in hso, (
+        f"The nudge must travel as additionalContext on Codex. Got: {envelope!r}"
+    )
+    assert "updatedToolOutput" not in hso, (
+        "updatedToolOutput must not be emitted on Codex-via-install "
+        "(TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT=1)."
+    )
+    nudge = hso["additionalContext"]
+    assert isinstance(nudge, str) and nudge.strip(), (
+        f"additionalContext must be a non-empty nudge string. Got: {nudge!r}"
+    )
 
 
 def test_codex_runtime_still_records_thrash_guard():
