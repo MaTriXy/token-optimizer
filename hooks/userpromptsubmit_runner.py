@@ -152,38 +152,6 @@ def _write_diagnostics(text: str) -> None:
         pass
 
 
-def _split_system_messages(captured_stdout: str):
-    """Split captured stdout into user-facing systemMessage lines and the rest.
-
-    A ``{"systemMessage": "..."}`` JSON line is shown to the USER's terminal by
-    Claude Code and is NOT injected into the model's context (tax-free), so it
-    must keep reaching the host on stdout. Every other line (plain-text
-    diagnostics, additionalContext) is model-context-bound and must go to the
-    diagnostics log instead.
-    """
-    keep_lines: list[str] = []
-    log_lines: list[str] = []
-    for line in (captured_stdout or "").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        is_system_message = False
-        if stripped[0] in "{[":
-            try:
-                obj = json.loads(stripped)
-            except (ValueError, TypeError):
-                obj = None
-            if isinstance(obj, dict):
-                msg = obj.get("systemMessage")
-                if isinstance(msg, str) and msg.strip():
-                    is_system_message = True
-        if is_system_message:
-            keep_lines.append(line)
-        else:
-            log_lines.append(line)
-    return "\n".join(keep_lines), "\n".join(log_lines)
-
-
 def _emit_stdout_envelope(bufs: list[str]) -> None:
     """Collapse all subcommand stdout into ONE host-valid JSON envelope.
 

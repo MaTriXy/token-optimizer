@@ -167,43 +167,6 @@ def _write_diagnostics(text: str) -> None:
         pass
 
 
-def _split_system_messages(captured_stdout: str):
-    """Split captured stdout into user-facing systemMessage lines and the rest.
-
-    A ``{"systemMessage": "..."}`` JSON line is shown to the USER's terminal by
-    Claude Code and is NOT injected into the model's context (tax-free), so it
-    must keep reaching the host on stdout. Every other line (plain-text
-    diagnostics, additionalContext) is model-context-bound and must go to the
-    diagnostics log instead.
-
-    Returns ``(keep_lines, log_text)``: ``keep_lines`` is the verbatim
-    systemMessage-bearing lines (joined with newlines), ``log_text`` is every
-    other non-empty line. A line that JSON-parses to a dict with a non-empty
-    string ``systemMessage`` value is kept; everything else is logged.
-    """
-    keep_lines: list[str] = []
-    log_lines: list[str] = []
-    for line in (captured_stdout or "").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        is_system_message = False
-        if stripped[0] in "{[":
-            try:
-                obj = json.loads(stripped)
-            except (ValueError, TypeError):
-                obj = None
-            if isinstance(obj, dict):
-                msg = obj.get("systemMessage")
-                if isinstance(msg, str) and msg.strip():
-                    is_system_message = True
-        if is_system_message:
-            keep_lines.append(line)
-        else:
-            log_lines.append(line)
-    return "\n".join(keep_lines), "\n".join(log_lines)
-
-
 def _read_hook_input() -> dict:
     """Read the hook stdin JSON once, non-blocking, shared across subcommands.
 
