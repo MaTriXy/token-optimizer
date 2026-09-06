@@ -215,6 +215,16 @@ def _updated_stdout(proc):
         return None
 
 
+def _additional_context(proc):
+    """Extract the additionalContext nudge from the hook output, or None."""
+    if not proc.stdout.strip():
+        return None
+    try:
+        return json.loads(proc.stdout)["hookSpecificOutput"].get("additionalContext")
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
 def test_hook_appends_nudge_and_never_denies():
     sid = "test-thrash-int-" + uuid.uuid4().hex[:8]
     out = "Error: connection refused\n" * 3
@@ -227,8 +237,12 @@ def test_hook_appends_nudge_and_never_denies():
     updated = _updated_stdout(proc)
     assert updated is not None, "nudge run must emit updatedToolOutput"
     assert updated.startswith(out), "original output must be preserved verbatim"
-    assert "byte-identical output" in updated
-    assert "state what you expect to differ" in updated
+    # The nudge now travels as additionalContext (parity: every host honors it),
+    # NOT appended to updatedToolOutput.stdout, so Claude Code sees it once.
+    nudge = _additional_context(proc)
+    assert nudge is not None, "nudge must be delivered via additionalContext"
+    assert "byte-identical output" in nudge
+    assert "state what you expect to differ" in nudge
 
 
 def test_hook_stays_silent_below_threshold():
@@ -941,7 +955,10 @@ def test_hook_string_exit_code_response_feeds_failure_detection():
     updated = _updated_stdout(proc)
     assert updated is not None
     assert updated.startswith("fine again\n")
-    assert "failed 3 times" in updated
+    # The burn nudge now travels as additionalContext, not appended to stdout.
+    nudge = _additional_context(proc)
+    assert nudge is not None, "burn nudge must be delivered via additionalContext"
+    assert "failed 3 times" in nudge
 
 
 def test_hook_string_exit_zero_response_is_not_a_failure():
@@ -970,12 +987,14 @@ def test_hook_burn_nudge_appended_with_stderr():
     for i, out in enumerate(outputs):
         proc = _run_hook(_payload_with_stderr(cmd, out, "", sid))
         assert proc.returncode == 0
-    # The 3rd run should have the burn nudge appended
+    # The 3rd run should have the burn nudge in additionalContext
     updated = _updated_stdout(proc)
     assert updated is not None, "burn nudge run must emit updatedToolOutput"
     assert updated.startswith(outputs[-1]), "original output must be preserved"
-    assert "failed 3 times" in updated
-    assert "different output" in updated
+    nudge = _additional_context(proc)
+    assert nudge is not None, "burn nudge must be delivered via additionalContext"
+    assert "failed 3 times" in nudge
+    assert "different output" in nudge
 
 
 def test_hook_inline_script_nudge_appended():
@@ -987,14 +1006,16 @@ def test_hook_inline_script_nudge_appended():
     for i in range(7):
         proc = _run_hook(_payload_with_stderr(cmd, f"output {i}\n", "", sid))
         assert proc.returncode == 0
-    # 8th run should have the inline-script nudge appended
+    # 8th run should have the inline-script nudge in additionalContext
     proc = _run_hook(_payload_with_stderr(cmd, "output 7\n", "", sid))
     assert proc.returncode == 0
     updated = _updated_stdout(proc)
     assert updated is not None, "inline-script nudge run must emit updatedToolOutput"
-    assert "inline script" in updated
-    assert "run 8 times" in updated
-    assert "save the script to a file" in updated
+    nudge = _additional_context(proc)
+    assert nudge is not None, "inline-script nudge must be delivered via additionalContext"
+    assert "inline script" in nudge
+    assert "run 8 times" in nudge
+    assert "save the script to a file" in nudge
 
 
 def test_burn_streak_resets_on_identical_output_failure(guard):
