@@ -145,16 +145,29 @@ def main() -> None:
     except Exception:
         pass  # Fail open: the raw output stands
 
+    # Codex-via-install perf optimization: TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT
+    # skips the compression compute entirely. updatedToolOutput is ignored by
+    # Codex anyway (collapse there is via archival), so skipping the compute
+    # loses nothing. The nudge still reaches the model via additionalContext,
+    # which every host honors (Claude Code, Codex, Cowork). One nudge, once.
+    if os.environ.get("TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT", "").strip():
+        if _nudge:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": _nudge,
+            }}))
+        return
+
     # Too small to compress
     if not stdout or len(stdout) < 100:
         if _nudge:
-            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
+            _emit_updated_tool_output(stdout, stderr, nudge=_nudge)
         return
 
     # Detect if the output was ALREADY compressed by PreToolUse bash_hook.
     if "[Full result archived" in stdout or "[bash_compress]" in stdout:
         if _nudge:
-            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
+            _emit_updated_tool_output(stdout, stderr, nudge=_nudge)
         return
 
     # Check pipeline read-only eligibility
@@ -190,18 +203,17 @@ def main() -> None:
                         _compressed_build = _try_build_output_compress(
                             command, stdout)
                         if _compressed_build is not None:
-                            if _nudge:
-                                _compressed_build = _compressed_build + "\n" + _nudge
-                            _emit_updated_tool_output(_compressed_build, stderr)
+                            _emit_updated_tool_output(
+                                _compressed_build, stderr, nudge=_nudge)
                             return
                 except Exception:
                     pass  # Fail open: raw output stands
             if _nudge:
-                _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
+                _emit_updated_tool_output(stdout, stderr, nudge=_nudge)
             return  # Not eligible, pass through raw
     except Exception:
         if _nudge:
-            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
+            _emit_updated_tool_output(stdout, stderr, nudge=_nudge)
         return  # Fail open
 
     # Compression
@@ -222,7 +234,7 @@ def main() -> None:
         # --- check for failure (exit code or stderr patterns) ---
         if _looks_like_failure(exit_code, stderr):
             if _nudge:
-                _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
+                _emit_updated_tool_output(stdout, stderr, nudge=_nudge)
             return  # Don't compress failure output
 
         # Clean ANSI escape codes before compression
@@ -234,7 +246,7 @@ def main() -> None:
         # patterns, pass through raw so the model sees the errors.
         if _stdout_has_error_patterns(cleaned_stdout):
             if _nudge:
-                _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
+                _emit_updated_tool_output(stdout, stderr, nudge=_nudge)
             return  # Error on stdout: pass through raw
 
         # Run the standard compression pipeline
@@ -260,7 +272,7 @@ def main() -> None:
 
         if not comp_helped:
             if _nudge:
-                _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
+                _emit_updated_tool_output(stdout, stderr, nudge=_nudge)
             return  # nothing shrank the output -> pass through raw
         compressed = best
 
@@ -304,15 +316,15 @@ def main() -> None:
         # Log compression event to trends.db
         _log_event(command, cleaned_stdout, compressed, feature=_log_feature)
 
-        # Emit updatedToolOutput to replace what Claude sees, with the
-        # thrash nudge appended if present (compression + nudge, not either/or).
-        if _nudge:
-            compressed = compressed + "\n" + _nudge
-        _emit_updated_tool_output(compressed, stderr)
+        # Emit updatedToolOutput to replace what Claude sees. The thrash nudge,
+        # if present, goes out as additionalContext in the same envelope (every
+        # host honors it), NOT appended to the compressed stdout, so Claude Code
+        # users see the nudge exactly once and Codex/Cowork users see it too.
+        _emit_updated_tool_output(compressed, stderr, nudge=_nudge)
 
     except Exception:
         if _nudge:
-            _emit_updated_tool_output(stdout + "\n" + _nudge, stderr)
+            _emit_updated_tool_output(stdout, stderr, nudge=_nudge)
         return  # Fail open: any error → pass through raw
 
 
@@ -597,22 +609,27 @@ def _try_build_output_compress(command: str, stdout: str) -> str | None:
         return None
 
 
-def _emit_updated_tool_output(stdout: str, stderr: str) -> None:
-    """Emit the PostToolUse updatedToolOutput envelope.
+def _emit_updated_tool_output(stdout: str, stderr: str,
+                              nudge: str | None = None) -> None:
+    """Emit the PostToolUse updatedToolOutput envelope, with an optional nudge
+    carried as additionalContext.
 
-    Both the thrash nudge and the compression path replace what the agent sees
-    through the same envelope, so the hook event name and the four output-shape
-    fields (stdout, stderr, interrupted, isImage) live in exactly one place.
+    The compression/replacement goes in ``updatedToolOutput`` (honored by Claude
+    Code; ignored as an unrecognized field by Codex/Cowork, where long-output
+    collapse is via ``archive_result`` archival instead). The nudge goes in
+    ``additionalContext``, which every host honors, so burn/inline nudges reach
+    the model on Claude Code AND Codex AND Cowork. The nudge is NOT duplicated
+    inside ``updatedToolOutput``, so Claude Code users see it exactly once.
 
-    Gated OFF on hosts that do not honor ``updatedToolOutput`` (Codex). The
-    install-time env flag ``TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT`` is set
-    only in the Codex hook command, so runtime host-detection (unreliable
-    inside a hook subprocess) is never consulted. thrash_guard recording and
-    archive_result still run on every host -- only the emission is skipped.
+    ``TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT`` is checked in ``main()`` before
+    any compression compute, so this function is only reached on hosts that
+    honor ``updatedToolOutput`` (Claude Code) or on Codex-via-marketplace (which
+    shares the byte-identical hooks.json and ignores the field harmlessly). The
+    codex-install profile sets the env flag to skip the compression compute as a
+    perf optimization; the nudge still goes out via ``additionalContext`` from
+    the early-return path in ``main()``.
     """
-    if os.environ.get("TOKEN_OPTIMIZER_NO_UPDATED_TOOL_OUTPUT", "").strip():
-        return
-    print(json.dumps({
+    envelope: dict = {
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "updatedToolOutput": {
@@ -621,8 +638,11 @@ def _emit_updated_tool_output(stdout: str, stderr: str) -> None:
                 "interrupted": False,
                 "isImage": False,
             },
-        },
-    }))
+        }
+    }
+    if nudge:
+        envelope["hookSpecificOutput"]["additionalContext"] = nudge
+    print(json.dumps(envelope))
 
 
 if __name__ == "__main__":
